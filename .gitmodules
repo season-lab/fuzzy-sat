@@ -1,0 +1,3 @@
+[submodule "fuzzolic-z3"]
+	path = fuzzolic-z3
+	url = https://github.com/season-lab/z3.git
