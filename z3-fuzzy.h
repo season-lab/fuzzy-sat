@@ -61,9 +61,11 @@ int           z3fuzz_query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
                                        unsigned char const** proof,
                                        unsigned long*        proof_size);
 unsigned long z3fuzz_maximize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_maximize,
-                              unsigned char const** out_values);
+                              unsigned char const** out_values,
+                              unsigned long*        out_len);
 unsigned long z3fuzz_minimize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_minimize,
-                              unsigned char const** out_values);
+                              unsigned char const** out_values,
+                              unsigned long*        out_len);
 void          z3fuzz_notify_constraint(fuzzy_ctx_t* ctx, Z3_ast constraint);
 void          z3fuzz_dump_proof(fuzzy_ctx_t* ctx, const char* filename,
                                 unsigned char const* proof, unsigned long proof_size);

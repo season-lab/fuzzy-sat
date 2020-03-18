@@ -109,11 +109,12 @@ int main(int argc, char* argv[])
 
     gettimeofday(&start, NULL);
     unsigned char const* inputs;
-    unsigned long max_val = z3fuzz_maximize(&fctx, pi, bv, &inputs);
-    z3fuzz_dump_proof(&fctx, "tests/max_val.bin", inputs, fctx.n_symbols);
+    unsigned long n_inputs;
+    unsigned long max_val = z3fuzz_maximize(&fctx, pi, bv, &inputs, &n_inputs);
+    z3fuzz_dump_proof(&fctx, "tests/max_val.bin", inputs, n_inputs);
 
-    unsigned long min_val = z3fuzz_minimize(&fctx, pi, bv, &inputs);
-    z3fuzz_dump_proof(&fctx, "tests/min_val.bin", inputs, fctx.n_symbols);
+    unsigned long min_val = z3fuzz_minimize(&fctx, pi, bv, &inputs, &n_inputs);
+    z3fuzz_dump_proof(&fctx, "tests/min_val.bin", inputs, n_inputs);
     gettimeofday(&stop, NULL);
     elapsed_time_fast = compute_time_usec(&start, &stop);
 

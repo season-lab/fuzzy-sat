@@ -1718,16 +1718,20 @@ __minimize_maximize_inner(fuzzy_ctx_t* ctx, Z3_ast pi,
 }
 
 unsigned long z3fuzz_maximize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_maximize,
-                              unsigned char const** out_values)
+                              unsigned char const** out_values,
+                              unsigned long*        out_len)
 {
     // greedy - maximize one byte at a time
+    *out_len = ctx->testcases.data[0].len;
     return __minimize_maximize_inner(ctx, pi, to_maximize, out_values, 1);
 }
 
 unsigned long z3fuzz_minimize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_minimize,
-                              unsigned char const** out_values)
+                              unsigned char const** out_values,
+                              unsigned long*        out_len)
 {
     // greedy - minimize one byte at a time
+    *out_len = ctx->testcases.data[0].len;
     return __minimize_maximize_inner(ctx, pi, to_minimize, out_values, 0);
 }
 
@@ -1759,7 +1763,8 @@ void z3fuzz_dump_proof(fuzzy_ctx_t* ctx, const char* filename,
 unsigned long z3fuzz_evaluate_expression(fuzzy_ctx_t* ctx, Z3_ast value,
                                          unsigned char* values)
 {
-    return Z3_custom_eval(ctx->z3_ctx, value, values, ctx->testcases.data[0].len);
+    return Z3_custom_eval(ctx->z3_ctx, value, values,
+                          ctx->testcases.data[0].len);
 }
 
 #if Z3_VERSION <= 451
