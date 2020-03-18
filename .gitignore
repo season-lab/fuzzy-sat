@@ -6,4 +6,4 @@ eval-driver
 fuzzy-solver
 maxmin-driver
 solver
-z3-fuzzy-lib.a
+libZ3Fuzzy.a

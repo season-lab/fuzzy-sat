@@ -152,7 +152,7 @@ void z3fuzz_init(fuzzy_ctx_t* fctx, Z3_context ctx, char* seed_filename,
     __symbol_init(fctx, fctx->testcases.data[0].len);
 
     testcase_t* current_testcase = &fctx->testcases.data[0];
-    tmp_input = malloc(sizeof(unsigned char) * current_testcase->len);
+    tmp_input = (unsigned char*)malloc(sizeof(unsigned char) * current_testcase->len);
 
     fctx->univocally_defined_inputs = (void*)malloc(sizeof(set__ulong));
     set_init__ulong((set__ulong*)fctx->univocally_defined_inputs, &index_hash,
