@@ -2,6 +2,7 @@
 #include <fcntl.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include "utility/md5.h"
 #include "z3-fuzzy.h"
 
 #ifndef likely
@@ -17,8 +18,9 @@
 // #define PRINT_SAT
 // #define PRINT_NUM_EVALUATE
 // #define LOG_QUERY_STATS
-
 // #define DEBUG_CHECK_LIGHT
+
+#define CHECK_UNNECESSARY_EVALS
 // #define SKIP_NOTIFY
 // #define SKIP_DETERMINISTIC
 #define SKIP_HAVOC
@@ -41,9 +43,10 @@ typedef struct ast_data_t {
     unsigned long input_to_state_const;
     unsigned long query_size;
 
-    index_groups_t index_groups;
-    indexes_t      indexes;
-    values_t       values;
+    processed_set_t processed_set;
+    index_groups_t  index_groups;
+    indexes_t       indexes;
+    values_t        values;
 } ast_data_t;
 
 static unsigned char* tmp_input = NULL;
@@ -152,12 +155,15 @@ void z3fuzz_init(fuzzy_ctx_t* fctx, Z3_context ctx, char* seed_filename,
     __symbol_init(fctx, fctx->testcases.data[0].len);
 
     testcase_t* current_testcase = &fctx->testcases.data[0];
-    tmp_input = (unsigned char*)malloc(sizeof(unsigned char) * current_testcase->len);
+    tmp_input =
+        (unsigned char*)malloc(sizeof(unsigned char) * current_testcase->len);
 
     fctx->univocally_defined_inputs = (void*)malloc(sizeof(set__ulong));
     set_init__ulong((set__ulong*)fctx->univocally_defined_inputs, &index_hash,
                     &index_equals);
 
+    set_init__md5_digest_t(&ast_data.processed_set, &md5_64bit_hash,
+                           &md5_digest_equals);
     set_init__index_group_t(&ast_data.index_groups, &index_group_hash,
                             &index_group_equals);
     set_init__ulong(&ast_data.indexes, &index_hash, &index_equals);
@@ -182,6 +188,7 @@ void z3fuzz_free(fuzzy_ctx_t* ctx)
     ctx->symbols   = NULL;
     ctx->n_symbols = 0;
 
+    set_free__md5_digest_t(&ast_data.processed_set);
     set_free__index_group_t(&ast_data.index_groups);
     set_free__ulong(&ast_data.indexes);
     da_free__ulong(&ast_data.values, NULL);
@@ -205,8 +212,16 @@ static inline int __evaluate_branch_query(fuzzy_ctx_t* ctx, Z3_ast query,
                                           unsigned long  n_values)
 {
     ctx->stats.num_evaluate++;
-    int res = (int)Z3_custom_eval(ctx->z3_ctx, query, values, n_values);
-    return res;
+
+#ifdef CHECK_UNNECESSARY_EVALS
+    md5_digest_t d;
+    md5(values, n_values, d.digest);
+
+    if (set_check__md5_digest_t(&ast_data.processed_set, d))
+        return 0;
+    set_add__md5_digest_t(&ast_data.processed_set, d);
+#endif
+    return (int)Z3_custom_eval(ctx->z3_ctx, query, values, n_values);
 }
 
 // *************************************************
@@ -683,6 +698,7 @@ static inline int __check_univocally_defined(fuzzy_ctx_t* ctx, Z3_ast expr,
 
 static inline void __reset_ast_data()
 {
+    set_remove_all__md5_digest_t(&ast_data.processed_set);
     set_remove_all__index_group_t(&ast_data.index_groups);
     set_remove_all__ulong(&ast_data.indexes);
     da_remove_all__ulong(&ast_data.values);
@@ -1654,8 +1670,12 @@ int z3fuzz_query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
                              unsigned char const** proof,
                              unsigned long*        proof_size)
 {
+    Z3_inc_ref(ctx->z3_ctx, query);
+    Z3_inc_ref(ctx->z3_ctx, branch_condition);
     int res =
         __query_check_light(ctx, query, branch_condition, proof, proof_size);
+    Z3_dec_ref(ctx->z3_ctx, query);
+    Z3_dec_ref(ctx->z3_ctx, branch_condition);
     return res;
 }
 

@@ -45,3 +45,26 @@ typedef set__ulong indexes_t;
 // ************* values array ************
 typedef da__ulong values_t;
 // *********** end values array **********
+
+// *********** evaluate set **************
+typedef struct md5_digest_t {
+    unsigned char digest[16];
+} md5_digest_t;
+unsigned long md5_64bit_hash(md5_digest_t* el)
+{
+    return *((unsigned long*)&el->digest);
+}
+unsigned int md5_digest_equals(md5_digest_t* el1, md5_digest_t* el2)
+{
+    unsigned i;
+    for (i = 0; i < 16; ++i)
+        if (el1->digest[i] != el2->digest[i])
+            return 0;
+    return 1;
+}
+
+#define SET_DATA_T md5_digest_t
+#include <set.h>
+
+typedef set__md5_digest_t processed_set_t;
+// ********* end evaluate set ************
