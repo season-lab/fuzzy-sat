@@ -205,9 +205,8 @@ static inline int __evaluate_branch_query(fuzzy_ctx_t* ctx, Z3_ast query,
                                           unsigned long  n_values)
 {
     ctx->stats.num_evaluate++;
-    if (Z3_custom_eval(ctx->z3_ctx, branch_condition, values, n_values))
-        return Z3_custom_eval(ctx->z3_ctx, query, values, n_values);
-    return 0;
+    int res = (int)Z3_custom_eval(ctx->z3_ctx, query, values, n_values);
+    return res;
 }
 
 // *************************************************
