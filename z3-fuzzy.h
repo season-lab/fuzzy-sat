@@ -47,8 +47,9 @@ typedef struct fuzzy_ctx_t {
     void* univocally_defined_inputs;
 } fuzzy_ctx_t;
 
-void z3fuzz_init(fuzzy_ctx_t* res, Z3_context ctx, char* seed_filename,
-                 char* testcase_path);
+void z3fuzz_init(fuzzy_ctx_t* fctx, Z3_context ctx, char* seed_filename,
+                 char* testcase_path,
+                 uint64_t (*model_eval)(Z3_ast, uint64_t*, uint8_t*, size_t));
 void z3fuzz_free(fuzzy_ctx_t* ctx);
 void z3fuzz_print_expr(fuzzy_ctx_t* ctx, Z3_ast e);
 
@@ -66,8 +67,10 @@ unsigned long z3fuzz_maximize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_maximize,
 unsigned long z3fuzz_minimize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_minimize,
                               unsigned char const** out_values,
                               unsigned long*        out_len);
-void          z3fuzz_notify_constraint(fuzzy_ctx_t* ctx, Z3_ast constraint);
-void          z3fuzz_dump_proof(fuzzy_ctx_t* ctx, const char* filename,
-                                unsigned char const* proof, unsigned long proof_size);
+int z3fuzz_add_assignment(fuzzy_ctx_t* ctx, int idx, Z3_ast assignment_value);
+
+void z3fuzz_notify_constraint(fuzzy_ctx_t* ctx, Z3_ast constraint);
+void z3fuzz_dump_proof(fuzzy_ctx_t* ctx, const char* filename,
+                       unsigned char const* proof, unsigned long proof_size);
 
 #endif

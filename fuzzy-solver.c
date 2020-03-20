@@ -8,6 +8,7 @@ static_assert(Z3_VERSION == 487, "This executable requires z3 4.8.7+");
 #define SOLVER_TIMEOUT "10000" // 10 sec // 0
 
 #define PRINT_STATUS
+#define PRINT_SAT_IDX
 // #define PRINT_STATS_ON_FILE
 // #define DUMP_SAT_QUERIES
 // #define DUMP_Z3_SAT_ONLY
@@ -182,7 +183,7 @@ int main(int argc, char* argv[])
     FILE* sat_queries_file = fopen(sat_queries_filename, "w");
     setvbuf(sat_queries_file, NULL, _IONBF, 0);
 #endif
-    z3fuzz_init(&fctx, ctx, seed_filename, tests_dir);
+    z3fuzz_init(&fctx, ctx, seed_filename, tests_dir, NULL);
 
 #ifdef PRINT_STATUS
     pp_init();
@@ -201,6 +202,10 @@ int main(int argc, char* argv[])
         Z3_parse_smtlib2_file(ctx, query_filename, 0, 0, 0, 0, 0, 0);
     Z3_ast_vector_inc_ref(ctx, queries);
 
+#ifdef PRINT_SAT_IDX
+    FILE* log_idx_sat = fopen("/tmp/idx_sat.csv", "w");
+#endif
+
     num_queries = Z3_ast_vector_size(ctx, queries);
     for (i = 0; i < num_queries; ++i) {
         Z3_ast query = Z3_ast_vector_get(ctx, queries, i);
@@ -217,6 +222,10 @@ int main(int argc, char* argv[])
             sat_queries += 1;
             gettimeofday(&stop, NULL);
             elapsed_time_fast_sat += compute_time_msec(&start, &stop);
+
+#ifdef PRINT_SAT_IDX
+            fprintf(log_idx_sat, "%u ; SAT\n", i);
+#endif
 #ifdef DUMP_SAT_QUERIES
             fprintf(sat_queries_file, "(assert\n%s\n)\n",
                     Z3_ast_to_string(ctx, query));
@@ -226,9 +235,11 @@ int main(int argc, char* argv[])
             assert(n > 0 && n < sizeof(var_name) && "test case name too long");
             z3fuzz_dump_proof(&fctx, var_name, proof, proof_size);
 #endif
-        }
+        } else {
+#ifdef PRINT_SAT_IDX
+            fprintf(log_idx_sat, "%u ; UNSAT\n", i);
+#endif
 #ifdef Z3_FALLTHROUGH
-        else {
             Z3_solver solver = Z3_mk_solver(ctx);
             Z3_solver_inc_ref(ctx, solver);
 
@@ -283,6 +294,7 @@ int main(int argc, char* argv[])
             Z3_solver_dec_ref(ctx, solver);
         }
 #else
+        }
         gettimeofday(&stop, NULL);
 #endif
 
@@ -301,6 +313,9 @@ int main(int argc, char* argv[])
         (double)elapsed_time_fast_sat / 1000,
         (double)elapsed_time_slow_sat / 1000, (double)elapsed_time_unsat / 1000,
         (double)elapsed_time_unknown / 1000);
+#endif
+#ifdef PRINT_SAT_IDX
+    fclose(log_idx_sat);
 #endif
     printf("\n"
            "num queries:\t%lu\n"

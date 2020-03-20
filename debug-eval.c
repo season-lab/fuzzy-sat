@@ -160,7 +160,7 @@ int main(int argc, char** argv)
     bv        = Z3_substitute(ctx, bv, num_inputs, str_symbols, int_symbols);
     puts("[+] BV loaded");
 
-    z3fuzz_init(&fctx, ctx, seed_filename, NULL);
+    z3fuzz_init(&fctx, ctx, seed_filename, NULL, NULL);
     puts("[+] FCTX initialized");
 
     pp_init();

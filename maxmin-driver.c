@@ -68,7 +68,7 @@ int main(int argc, char* argv[])
     unsigned int   i;
     int            n;
 
-    z3fuzz_init(&fctx, ctx, seed_filename, NULL);
+    z3fuzz_init(&fctx, ctx, seed_filename, NULL, NULL);
 
     str_symbols = (Z3_ast*)malloc(sizeof(Z3_ast) * fctx.n_symbols);
     for (i = 0; i < fctx.n_symbols; ++i) {

@@ -28,7 +28,7 @@
 // generate parametric data structures
 #include "z3-fuzzy-datastructures-gen.h"
 
-uint64_t Z3_API Z3_custom_eval(Z3_context c, Z3_ast e, uint8_t* data,
+uint64_t Z3_API Z3_custom_eval(Z3_context c, Z3_ast e, uint64_t* data,
                                size_t data_size);
 
 typedef struct ast_data_t {
@@ -127,7 +127,8 @@ static inline void __symbol_init(fuzzy_ctx_t* ctx, unsigned long n_values)
 }
 
 void z3fuzz_init(fuzzy_ctx_t* fctx, Z3_context ctx, char* seed_filename,
-                 char* testcase_path)
+                 char* testcase_path,
+                 uint64_t (*model_eval)(Z3_ast, uint64_t*, uint8_t*, size_t))
 {
     Z3_set_ast_print_mode(ctx, Z3_PRINT_SMTLIB2_COMPLIANT);
 
@@ -206,6 +207,25 @@ void z3fuzz_print_expr(fuzzy_ctx_t* ctx, Z3_ast e)
     Z3FUZZ_LOG("expr:\n%s\n", Z3_ast_to_string(ctx->z3_ctx, e));
 }
 
+static inline void __vals_char_to_long(unsigned char* in_vals,
+                                       unsigned long* out_vals,
+                                       unsigned long  n_vals)
+{
+    unsigned long i;
+    for (i = 0; i < n_vals; ++i) {
+        out_vals[i] = (unsigned long)(in_vals[i]);
+    }
+}
+
+static inline void __vals_long_to_char(unsigned long* in_vals,
+                                       unsigned char* out_vals,
+                                       unsigned long  n_vals)
+{
+    unsigned long i;
+    for (i = 0; i < n_vals; ++i)
+        out_vals[i] = (unsigned char)in_vals[i];
+}
+
 static inline int __evaluate_branch_query(fuzzy_ctx_t* ctx, Z3_ast query,
                                           Z3_ast         branch_condition,
                                           unsigned char* values,
@@ -221,7 +241,13 @@ static inline int __evaluate_branch_query(fuzzy_ctx_t* ctx, Z3_ast query,
         return 0;
     set_add__md5_digest_t(&ast_data.processed_set, d);
 #endif
-    return (int)Z3_custom_eval(ctx->z3_ctx, query, values, n_values);
+
+    unsigned long* long_vals =
+        (unsigned long*)malloc(sizeof(unsigned long) * n_values);
+    __vals_char_to_long(values, long_vals, n_values);
+    int res = (int)Z3_custom_eval(ctx->z3_ctx, query, long_vals, n_values);
+    free(long_vals);
+    return res;
 }
 
 // *************************************************
@@ -1692,10 +1718,14 @@ __minimize_maximize_inner(fuzzy_ctx_t* ctx, Z3_ast pi,
     __reset_ast_data();
     __detect_involved_inputs(ctx, to_maximize_minimize, &ast_data);
 
-    testcase_t*   current_testcase = &ctx->testcases.data[0];
+    testcase_t*    current_testcase = &ctx->testcases.data[0];
+    unsigned long* tmp_long_input =
+        (unsigned long*)malloc(sizeof(unsigned long) * current_testcase->len);
+    __vals_char_to_long(current_testcase->bytes, tmp_long_input,
+                        current_testcase->len);
     unsigned long max_min =
-        Z3_custom_eval(ctx->z3_ctx, to_maximize_minimize,
-                       current_testcase->bytes, current_testcase->len);
+        Z3_custom_eval(ctx->z3_ctx, to_maximize_minimize, tmp_long_input,
+                       current_testcase->len);
     unsigned long tmp;
     unsigned      original_byte, max_min_byte, i, j;
     ulong*        p;
@@ -1717,21 +1747,23 @@ __minimize_maximize_inner(fuzzy_ctx_t* ctx, Z3_ast pi,
             if (i == original_byte)
                 continue;
 
-            tmp_input[*p] = i;
-            if (!Z3_custom_eval(ctx->z3_ctx, pi, tmp_input,
+            tmp_long_input[*p] = (unsigned long)i;
+            if (!Z3_custom_eval(ctx->z3_ctx, pi, tmp_long_input,
                                 current_testcase->len))
                 continue;
 
-            tmp = Z3_custom_eval(ctx->z3_ctx, to_maximize_minimize, tmp_input,
-                                 current_testcase->len);
+            tmp = Z3_custom_eval(ctx->z3_ctx, to_maximize_minimize,
+                                 tmp_long_input, current_testcase->len);
             if ((is_max && tmp > max_min) || (!is_max && tmp < max_min)) {
                 max_min_byte = i;
                 max_min      = tmp;
             }
         }
-        tmp_input[*p] = max_min_byte;
+        tmp_long_input[*p] = (unsigned long)max_min_byte;
     }
 
+    __vals_long_to_char(tmp_long_input, tmp_input, current_testcase->len);
+    free(tmp_long_input);
     *out_values = tmp_input;
     return max_min;
 }
@@ -1782,8 +1814,15 @@ void z3fuzz_dump_proof(fuzzy_ctx_t* ctx, const char* filename,
 unsigned long z3fuzz_evaluate_expression(fuzzy_ctx_t* ctx, Z3_ast value,
                                          unsigned char* values)
 {
-    return Z3_custom_eval(ctx->z3_ctx, value, values,
-                          ctx->testcases.data[0].len);
+    unsigned long* tmp_long_input = (unsigned long*)malloc(
+        sizeof(unsigned long) * ctx->testcases.data[0].len);
+    __vals_char_to_long(values, tmp_long_input, ctx->testcases.data[0].len);
+
+    unsigned long res = Z3_custom_eval(ctx->z3_ctx, value, tmp_long_input,
+                                       ctx->testcases.data[0].len);
+
+    free(tmp_long_input);
+    return res;
 }
 
 #if Z3_VERSION <= 451
