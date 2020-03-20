@@ -11,12 +11,14 @@ void free_testcase_list(Z3_context ctx, testcase_list_t* t)
 {
     unsigned int i, j;
     for (i = 0; i < t->size; ++i) {
-        free(t->data[i].bytes);
-        t->data[i].bytes = NULL;
-        for (j = 0; j < t->data[i].len; ++j)
-            Z3_dec_ref(ctx, t->data[i].z3_bytes[j]);
-        free(t->data[i].z3_bytes);
-        t->data[i].z3_bytes = NULL;
+        free(t->data[i].values);
+        t->data[i].values = NULL;
+        for (j = 0; j < t->data[i].values_len; ++j)
+            Z3_dec_ref(ctx, t->data[i].z3_values[j]);
+        free(t->data[i].z3_values);
+        t->data[i].z3_values = NULL;
+        free(t->data[i].value_sizes);
+        t->data[i].value_sizes = NULL;
     }
     t->size = 0;
     da_free__testcase_t(t, NULL);
@@ -36,20 +38,23 @@ void load_testcase(testcase_list_t* t, char const* filename, Z3_context ctx)
     assert(fp != NULL && "fopen() failed");
 
     fseek(fp, 0L, SEEK_END);
-    tc.len = ftell(fp);
+    tc.testcase_len = ftell(fp);
+    tc.values_len   = tc.testcase_len;
     fseek(fp, 0L, SEEK_SET);
 
-    tc.bytes        = (unsigned char*)malloc(sizeof(unsigned char) * tc.len);
-    tc.z3_bytes     = (Z3_ast*)malloc(sizeof(Z3_ast) * tc.len);
-    Z3_sort bv_sort = Z3_mk_bv_sort(ctx, 8);
+    tc.values = (unsigned long*)malloc(sizeof(unsigned long) * tc.values_len);
+    tc.z3_values   = (Z3_ast*)malloc(sizeof(Z3_ast) * tc.values_len);
+    tc.value_sizes = (unsigned char*)malloc(sizeof(unsigned char) * tc.values_len);
 
+    Z3_sort bv_sort = Z3_mk_bv_sort(ctx, 8);
     while (1) {
         res = fread(&c, sizeof(char), 1, fp);
         if (res != 1)
             break;
-        tc.bytes[i]    = c;
-        tc.z3_bytes[i] = Z3_mk_unsigned_int(ctx, c, bv_sort);
-        Z3_inc_ref(ctx, tc.z3_bytes[i]);
+        tc.values[i]      = (unsigned long)c;
+        tc.value_sizes[i] = 8;
+        tc.z3_values[i]   = Z3_mk_unsigned_int(ctx, c, bv_sort);
+        Z3_inc_ref(ctx, tc.z3_values[i]);
         i++;
     }
     da_add_item__testcase_t(t, tc);

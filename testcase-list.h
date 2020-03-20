@@ -4,9 +4,11 @@
 #include <z3.h>
 
 typedef struct testcase_t {
-    unsigned char* bytes;
-    Z3_ast*        z3_bytes;
-    unsigned long  len;
+    unsigned long* values;
+    Z3_ast*        z3_values;
+    unsigned char* value_sizes;
+    unsigned       values_len;
+    unsigned       testcase_len;
 } testcase_t;
 
 #define DA_DATA_T testcase_t

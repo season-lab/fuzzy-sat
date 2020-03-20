@@ -33,11 +33,11 @@ void debug_eval(Z3_context ctx, Z3_ast expr)
 
             // z3
             unsigned long res_z3 = z3fuzz_evaluate_expression_z3(
-                &fctx, expr, fctx.testcases.data[0].z3_bytes);
+                &fctx, expr, fctx.testcases.data[0].z3_values);
 
             // fuzzy
             unsigned long res_fuzzy = z3fuzz_evaluate_expression(
-                &fctx, expr, fctx.testcases.data[0].bytes);
+                &fctx, expr, inputs);
 
             if (res_fuzzy != res_z3) {
                 printf("different evaluate\n"

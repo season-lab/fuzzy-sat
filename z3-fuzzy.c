@@ -20,7 +20,7 @@
 // #define LOG_QUERY_STATS
 // #define DEBUG_CHECK_LIGHT
 
-#define CHECK_UNNECESSARY_EVALS
+// #define CHECK_UNNECESSARY_EVALS
 // #define SKIP_NOTIFY
 // #define SKIP_DETERMINISTIC
 #define SKIP_HAVOC
@@ -29,7 +29,7 @@
 #include "z3-fuzzy-datastructures-gen.h"
 
 uint64_t Z3_API Z3_custom_eval(Z3_context c, Z3_ast e, uint64_t* data,
-                               size_t data_size);
+                               uint8_t* data_sizes, size_t data_size);
 
 typedef struct ast_data_t {
     // structure used to pass information during a single fuzzy sat execution
@@ -49,7 +49,8 @@ typedef struct ast_data_t {
     values_t        values;
 } ast_data_t;
 
-static unsigned char* tmp_input = NULL;
+static unsigned long* tmp_input = NULL;
+static unsigned char* tmp_proof = NULL;
 static ast_data_t     ast_data  = {0};
 
 #ifdef LOG_QUERY_STATS
@@ -128,7 +129,8 @@ static inline void __symbol_init(fuzzy_ctx_t* ctx, unsigned long n_values)
 
 void z3fuzz_init(fuzzy_ctx_t* fctx, Z3_context ctx, char* seed_filename,
                  char* testcase_path,
-                 uint64_t (*model_eval)(Z3_ast, uint64_t*, uint8_t*, size_t))
+                 uint64_t (*model_eval)(Z3_context, Z3_ast, uint64_t*, uint8_t*,
+                                        size_t))
 {
     Z3_set_ast_print_mode(ctx, Z3_PRINT_SMTLIB2_COMPLIANT);
 
@@ -143,6 +145,7 @@ void z3fuzz_init(fuzzy_ctx_t* fctx, Z3_context ctx, char* seed_filename,
             "arith ops;non linear arith ops");
 #endif
 
+    fctx->model_eval    = model_eval != NULL ? model_eval : Z3_custom_eval;
     fctx->z3_ctx        = ctx;
     fctx->testcase_path = testcase_path;
     init_testcase_list(&fctx->testcases);
@@ -151,13 +154,18 @@ void z3fuzz_init(fuzzy_ctx_t* fctx, Z3_context ctx, char* seed_filename,
         load_testcase_folder(&fctx->testcases, testcase_path, ctx);
     assert(fctx->testcases.size > 0 && "no testcase");
 
+    fctx->assignments      = (Z3_ast*)calloc(10, sizeof(Z3_ast));
+    fctx->size_assignments = 10;
+
     fctx->n_symbols = 0;
     fctx->symbols   = NULL;
-    __symbol_init(fctx, fctx->testcases.data[0].len);
+    __symbol_init(fctx, fctx->testcases.data[0].values_len);
 
     testcase_t* current_testcase = &fctx->testcases.data[0];
-    tmp_input =
-        (unsigned char*)malloc(sizeof(unsigned char) * current_testcase->len);
+    tmp_input = (unsigned long*)malloc(sizeof(unsigned long) *
+                                       current_testcase->values_len);
+    tmp_proof = (unsigned char*)malloc(sizeof(unsigned char) *
+                                       current_testcase->testcase_len);
 
     fctx->univocally_defined_inputs = (void*)malloc(sizeof(set__ulong));
     set_init__ulong((set__ulong*)fctx->univocally_defined_inputs, &index_hash,
@@ -181,6 +189,8 @@ void z3fuzz_free(fuzzy_ctx_t* ctx)
     free_testcase_list(ctx->z3_ctx, &ctx->testcases);
     free(tmp_input);
     tmp_input = NULL;
+    free(tmp_proof);
+    tmp_proof = NULL;
 
     unsigned int i;
     for (i = 0; i < ctx->n_symbols; ++i)
@@ -188,6 +198,12 @@ void z3fuzz_free(fuzzy_ctx_t* ctx)
     free(ctx->symbols);
     ctx->symbols   = NULL;
     ctx->n_symbols = 0;
+    for (i = 0; i < ctx->size_assignments; ++i)
+        if (ctx->assignments[i] != NULL)
+            Z3_dec_ref(ctx->z3_ctx, ctx->assignments[i]);
+    free(ctx->assignments);
+    ctx->assignments      = NULL;
+    ctx->size_assignments = 0;
 
     set_free__md5_digest_t(&ast_data.processed_set);
     set_free__index_group_t(&ast_data.index_groups);
@@ -227,26 +243,24 @@ static inline void __vals_long_to_char(unsigned long* in_vals,
 }
 
 static inline int __evaluate_branch_query(fuzzy_ctx_t* ctx, Z3_ast query,
-                                          Z3_ast         branch_condition,
-                                          unsigned char* values,
+                                          unsigned long* values,
+                                          unsigned char* value_sizes,
                                           unsigned long  n_values)
 {
     ctx->stats.num_evaluate++;
 
 #ifdef CHECK_UNNECESSARY_EVALS
     md5_digest_t d;
-    md5(values, n_values, d.digest);
+    md5((unsigned char*)values, ctx->n_symbols * sizeof(unsigned long),
+        d.digest);
 
     if (set_check__md5_digest_t(&ast_data.processed_set, d))
         return 0;
     set_add__md5_digest_t(&ast_data.processed_set, d);
 #endif
 
-    unsigned long* long_vals =
-        (unsigned long*)malloc(sizeof(unsigned long) * n_values);
-    __vals_char_to_long(values, long_vals, n_values);
-    int res = (int)Z3_custom_eval(ctx->z3_ctx, query, long_vals, n_values);
-    free(long_vals);
+    int res =
+        (int)ctx->model_eval(ctx->z3_ctx, query, values, value_sizes, n_values);
     return res;
 }
 
@@ -748,8 +762,8 @@ static inline void __init_global_data(fuzzy_ctx_t* ctx, Z3_ast query,
     __detect_early_constants(ctx, branch_condition, &ast_data);
 
     testcase_t* current_testcase = &ctx->testcases.data[0];
-    memcpy(tmp_input, current_testcase->bytes,
-           current_testcase->len * sizeof(unsigned char));
+    memcpy(tmp_input, current_testcase->values,
+           current_testcase->values_len * sizeof(unsigned long));
 }
 
 static inline unsigned char __extract_from_long(long value, unsigned int i)
@@ -815,14 +829,17 @@ static int __query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
     for (i = 1; i < ctx->testcases.size; ++i) {
         testcase = &ctx->testcases.data[i];
 
-        if (__evaluate_branch_query(ctx, query, branch_condition,
-                                    testcase->bytes, testcase->len)) {
+        if (__evaluate_branch_query(ctx, query, testcase->values,
+                                    testcase->value_sizes,
+                                    testcase->values_len)) {
 #ifdef PRINT_SAT
             Z3FUZZ_LOG("[check light L0] Query is SAT\n");
 #endif
+            __vals_long_to_char(testcase->values, tmp_proof,
+                                testcase->testcase_len);
             ctx->stats.L0++;
-            *proof      = testcase->bytes;
-            *proof_size = testcase->len;
+            *proof      = tmp_proof;
+            *proof_size = testcase->testcase_len;
             return 1;
         }
     }
@@ -839,8 +856,9 @@ L1:
             ast_data.nonlinear_arithmetic_operations);
 #endif
     if (ast_data.indexes.size == 0) { // constant branch condition!
-        return __evaluate_branch_query(ctx, query, branch_condition, tmp_input,
-                                       current_testcase->len);
+        return __evaluate_branch_query(ctx, query, tmp_input,
+                                       current_testcase->value_sizes,
+                                       current_testcase->values_len);
     }
     // ********************************************************************
 
@@ -861,7 +879,7 @@ L1:
         index = group->indexes[group->n - k - 1];
         b     = __extract_from_long(ast_data.input_to_state_const, k);
 
-        if (current_testcase->bytes[index] == b)
+        if (current_testcase->values[index] == (unsigned long)b)
             continue;
 
 #ifdef DEBUG_CHECK_LIGHT
@@ -869,21 +887,24 @@ L1:
 #endif
         tmp_input[index] = b;
     }
-    if (__evaluate_branch_query(ctx, query, branch_condition, tmp_input,
-                                current_testcase->len)) {
+    if (__evaluate_branch_query(ctx, query, tmp_input,
+                                current_testcase->value_sizes,
+                                current_testcase->values_len)) {
 #ifdef PRINT_SAT
         Z3FUZZ_LOG("[check light L1] Query is SAT\n");
 #endif
         ctx->stats.L1++;
         ctx->stats.num_sat++;
-        *proof      = tmp_input;
-        *proof_size = current_testcase->len;
+        __vals_long_to_char(tmp_input, tmp_proof,
+                            current_testcase->testcase_len);
+        *proof      = tmp_proof;
+        *proof_size = current_testcase->testcase_len;
         return 1;
     }
     // restore tmp_input
     for (k = 0; k < group->n; ++k) {
         index            = group->indexes[group->n - k - 1];
-        tmp_input[index] = current_testcase->bytes[index];
+        tmp_input[index] = (unsigned long)current_testcase->values[index];
     }
 
     // L2 -- INPUT TO STATE EXTENDED
@@ -905,26 +926,29 @@ L2:
 #ifdef DEBUG_CHECK_LIGHT
                 Z3FUZZ_LOG("L2 - inj byte: 0x%x @ %d\n", b, index);
 #endif
-                if (current_testcase->bytes[index] == b)
+                if (current_testcase->values[index] == (unsigned long)b)
                     continue;
 
                 tmp_input[index] = b;
             }
-            if (__evaluate_branch_query(ctx, query, branch_condition, tmp_input,
-                                        current_testcase->len)) {
+            if (__evaluate_branch_query(ctx, query, tmp_input,
+                                        current_testcase->value_sizes,
+                                        current_testcase->values_len)) {
 #ifdef PRINT_SAT
                 Z3FUZZ_LOG("[check light L2] Query is SAT\n");
 #endif
                 ctx->stats.L2++;
                 ctx->stats.num_sat++;
-                *proof      = tmp_input;
-                *proof_size = current_testcase->len;
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                *proof      = tmp_proof;
+                *proof_size = current_testcase->values_len;
                 return 1;
             }
             // restore tmp_input
             for (k = 0; k < group->n; ++k) {
                 index            = group->indexes[group->n - k - 1];
-                tmp_input[index] = current_testcase->bytes[index];
+                tmp_input[index] = current_testcase->values[index];
             }
         }
     }
@@ -946,12 +970,15 @@ L3:
 
     for (i = 0; i < 256; ++i) {
         tmp_input[*uniq_index] = i;
-        if (__evaluate_branch_query(ctx, query, branch_condition, tmp_input,
-                                    current_testcase->len)) {
+        if (__evaluate_branch_query(ctx, query, tmp_input,
+                                    current_testcase->value_sizes,
+                                    current_testcase->values_len)) {
             ctx->stats.L3++;
             ctx->stats.num_sat++;
-            *proof      = tmp_input;
-            *proof_size = current_testcase->len;
+            __vals_long_to_char(tmp_input, tmp_proof,
+                                current_testcase->testcase_len);
+            *proof      = tmp_proof;
+            *proof_size = current_testcase->testcase_len;
             return 1;
         }
     }
@@ -984,23 +1011,26 @@ L4:
         // ****************
         // ***** byte *****
         // ****************
-        input_byte_0 = current_testcase->bytes[input_index_0];
+        input_byte_0 = (unsigned char)current_testcase->values[input_index_0];
         unsigned char tmp_byte;
 
         // single walking bit
         for (i = 0; i < 8; ++i) {
             tmp_byte                 = FLIP_BIT(input_byte_0, i);
-            tmp_input[input_index_0] = tmp_byte;
-            if (__evaluate_branch_query(ctx, query, branch_condition, tmp_input,
-                                        current_testcase->len)) {
+            tmp_input[input_index_0] = (unsigned long)tmp_byte;
+            if (__evaluate_branch_query(ctx, query, tmp_input,
+                                        current_testcase->value_sizes,
+                                        current_testcase->values_len)) {
 #ifdef PRINT_SAT
                 Z3FUZZ_LOG("[check light L4 - flip1] "
                            "Query is SAT\n");
 #endif
                 ctx->stats.L4_flip1++;
                 ctx->stats.num_sat++;
-                *proof      = tmp_input;
-                *proof_size = current_testcase->len;
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                *proof      = tmp_proof;
+                *proof_size = current_testcase->testcase_len;
                 return 1;
             }
         }
@@ -1009,17 +1039,20 @@ L4:
         for (i = 0; i < 7; ++i) {
             tmp_byte                 = FLIP_BIT(input_byte_0, i);
             tmp_byte                 = FLIP_BIT(tmp_byte, i + 1);
-            tmp_input[input_index_0] = tmp_byte;
-            if (__evaluate_branch_query(ctx, query, branch_condition, tmp_input,
-                                        current_testcase->len)) {
+            tmp_input[input_index_0] = (unsigned long)tmp_byte;
+            if (__evaluate_branch_query(ctx, query, tmp_input,
+                                        current_testcase->value_sizes,
+                                        current_testcase->testcase_len)) {
 #ifdef PRINT_SAT
                 Z3FUZZ_LOG("[check light L4 - flip2] "
                            "Query is SAT\n");
 #endif
                 ctx->stats.L4_flip2++;
                 ctx->stats.num_sat++;
-                *proof      = tmp_input;
-                *proof_size = current_testcase->len;
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                *proof      = tmp_proof;
+                *proof_size = current_testcase->testcase_len;
                 return 1;
             }
         }
@@ -1030,62 +1063,74 @@ L4:
             tmp_byte                 = FLIP_BIT(tmp_byte, i + 1);
             tmp_byte                 = FLIP_BIT(tmp_byte, i + 2);
             tmp_byte                 = FLIP_BIT(tmp_byte, i + 3);
-            tmp_input[input_index_0] = tmp_byte;
-            if (__evaluate_branch_query(ctx, query, branch_condition, tmp_input,
-                                        current_testcase->len)) {
+            tmp_input[input_index_0] = (unsigned long)tmp_byte;
+            if (__evaluate_branch_query(ctx, query, tmp_input,
+                                        current_testcase->value_sizes,
+                                        current_testcase->testcase_len)) {
 #ifdef PRINT_SAT
                 Z3FUZZ_LOG("[check light L4 - flip4] "
                            "Query is SAT\n");
 #endif
                 ctx->stats.L4_flip4++;
                 ctx->stats.num_sat++;
-                *proof      = tmp_input;
-                *proof_size = current_testcase->len;
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                *proof      = tmp_proof;
+                *proof_size = current_testcase->testcase_len;
                 return 1;
             }
         }
 
         // byte flip
-        tmp_input[input_index_0] = input_byte_0 ^ 0xffU;
-        if (__evaluate_branch_query(ctx, query, branch_condition, tmp_input,
-                                    current_testcase->len)) {
+        tmp_input[input_index_0] = (unsigned long)input_byte_0 ^ 0xffUL;
+        if (__evaluate_branch_query(ctx, query, tmp_input,
+                                    current_testcase->value_sizes,
+                                    current_testcase->values_len)) {
 #ifdef PRINT_SAT
             Z3FUZZ_LOG("[check light L4 - flip8] "
                        "Query is SAT\n");
 #endif
             ctx->stats.L4_flip8++;
             ctx->stats.num_sat++;
-            *proof      = tmp_input;
-            *proof_size = current_testcase->len;
+            __vals_long_to_char(tmp_input, tmp_proof,
+                                current_testcase->testcase_len);
+            *proof      = tmp_proof;
+            *proof_size = current_testcase->testcase_len;
             return 1;
         }
 
         // 8-bit arithmetics
         for (i = 1; i < 35; ++i) {
             tmp_input[input_index_0] = (unsigned char)(input_byte_0 + i);
-            if (__evaluate_branch_query(ctx, query, branch_condition, tmp_input,
-                                        current_testcase->len)) {
+            if (__evaluate_branch_query(ctx, query, tmp_input,
+                                        current_testcase->value_sizes,
+                                        current_testcase->values_len)) {
 #ifdef PRINT_SAT
                 Z3FUZZ_LOG("[check light L4 - arith8-sum] "
                            "Query is SAT\n");
 #endif
                 ctx->stats.L4_arith8_sum++;
                 ctx->stats.num_sat++;
-                *proof      = tmp_input;
-                *proof_size = current_testcase->len;
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                *proof      = tmp_proof;
+                *proof_size = current_testcase->testcase_len;
                 return 1;
             }
             tmp_input[input_index_0] = (unsigned char)(input_byte_0 - i);
-            if (__evaluate_branch_query(ctx, query, branch_condition, tmp_input,
-                                        current_testcase->len)) {
+            if (__evaluate_branch_query(ctx, query, tmp_input,
+                                        current_testcase->value_sizes,
+                                        current_testcase->values_len)) {
 #ifdef PRINT_SAT
                 Z3FUZZ_LOG("[check light L4 - arith8-sub] "
                            "Query is SAT\n");
 #endif
                 ctx->stats.L4_arith8_sub++;
                 ctx->stats.num_sat++;
-                *proof      = tmp_input;
-                *proof_size = current_testcase->len;
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                *proof      = tmp_proof;
+                *proof_size = current_testcase->testcase_len;
                 return 1;
             }
         }
@@ -1093,21 +1138,25 @@ L4:
         // interesting 8
         for (i = 0; i < sizeof(interesting8); ++i) {
             tmp_input[input_index_0] = (unsigned char)(interesting8[i]);
-            if (__evaluate_branch_query(ctx, query, branch_condition, tmp_input,
-                                        current_testcase->len)) {
+            if (__evaluate_branch_query(ctx, query, tmp_input,
+                                        current_testcase->value_sizes,
+                                        current_testcase->values_len)) {
 #ifdef PRINT_SAT
                 Z3FUZZ_LOG("[check light L4 - int8] "
                            "Query is SAT\n");
 #endif
                 ctx->stats.L4_int8++;
                 ctx->stats.num_sat++;
-                *proof      = tmp_input;
-                *proof_size = current_testcase->len;
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                *proof      = tmp_proof;
+                *proof_size = current_testcase->testcase_len;
                 return 1;
             }
         }
 
-        tmp_input[input_index_0] = current_testcase->bytes[input_index_0];
+        tmp_input[input_index_0] =
+            (unsigned long)current_testcase->values[input_index_0];
 
         if (!set_check__ulong(&ast_data.indexes, input_index_0 + 1))
             continue; // only one byte. Skip
@@ -1116,110 +1165,138 @@ L4:
         // ***** word *****
         // ****************
         input_index_1 = input_index_0 + 1;
-        input_byte_1  = current_testcase->bytes[input_index_1];
+        input_byte_1  = (unsigned char)current_testcase->values[input_index_1];
         input_word_LE = (input_byte_1 << 8) | input_byte_0;
         input_word_BE = (input_byte_0 << 8) | input_byte_1;
 
         // flip short
-        tmp_input[input_index_0] = input_byte_0 ^ 0xffU;
-        tmp_input[input_index_1] = input_byte_1 ^ 0xffU;
-        if (__evaluate_branch_query(ctx, query, branch_condition, tmp_input,
-                                    current_testcase->len)) {
+        tmp_input[input_index_0] = (unsigned long)input_byte_0 ^ 0xffUL;
+        tmp_input[input_index_1] = (unsigned long)input_byte_1 ^ 0xffUL;
+        if (__evaluate_branch_query(ctx, query, tmp_input,
+                                    current_testcase->value_sizes,
+                                    current_testcase->values_len)) {
 #ifdef PRINT_SAT
             Z3FUZZ_LOG("[check light L4 - flip16] "
                        "Query is SAT\n");
 #endif
             ctx->stats.L4_flip16++;
             ctx->stats.num_sat++;
-            *proof      = tmp_input;
-            *proof_size = current_testcase->len;
+            __vals_long_to_char(tmp_input, tmp_proof,
+                                current_testcase->testcase_len);
+            *proof      = tmp_proof;
+            *proof_size = current_testcase->testcase_len;
             return 1;
         }
 
         // 16-bit arithmetics
         for (i = 1; i < 35; ++i) {
-            tmp_input[input_index_0] = (input_word_LE + i) & 0xffU;
-            tmp_input[input_index_1] = ((input_word_LE + i) >> 8) & 0xff;
+            tmp_input[input_index_0] =
+                (unsigned long)(input_word_LE + i) & 0xffUL;
+            tmp_input[input_index_1] =
+                (unsigned long)((input_word_LE + i) >> 8) & 0xffUL;
 
-            if (__evaluate_branch_query(ctx, query, branch_condition, tmp_input,
-                                        current_testcase->len)) {
+            if (__evaluate_branch_query(ctx, query, tmp_input,
+                                        current_testcase->value_sizes,
+                                        current_testcase->values_len)) {
 #ifdef PRINT_SAT
                 Z3FUZZ_LOG("[check light L4 - arith16-sum-LE] "
                            "Query is SAT\n");
 #endif
                 ctx->stats.L4_arith16_sum_LE++;
                 ctx->stats.num_sat++;
-                *proof      = tmp_input;
-                *proof_size = current_testcase->len;
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                *proof      = tmp_proof;
+                *proof_size = current_testcase->testcase_len;
                 return 1;
             }
-            tmp_input[input_index_0] = (input_word_LE - i) & 0xffU;
-            tmp_input[input_index_1] = ((input_word_LE - i) >> 8) & 0xff;
+            tmp_input[input_index_0] =
+                (unsigned long)(input_word_LE - i) & 0xffUL;
+            tmp_input[input_index_1] =
+                (unsigned long)((input_word_LE - i) >> 8) & 0xffUL;
 
-            if (__evaluate_branch_query(ctx, query, branch_condition, tmp_input,
-                                        current_testcase->len)) {
+            if (__evaluate_branch_query(ctx, query, tmp_input,
+                                        current_testcase->value_sizes,
+                                        current_testcase->values_len)) {
 #ifdef PRINT_SAT
                 Z3FUZZ_LOG("[check light L4 - arith16-sub-LE] "
                            "Query is SAT\n");
 #endif
                 ctx->stats.L4_arith16_sub_LE++;
                 ctx->stats.num_sat++;
-                *proof      = tmp_input;
-                *proof_size = current_testcase->len;
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                *proof      = tmp_proof;
+                *proof_size = current_testcase->testcase_len;
                 return 1;
             }
-            tmp_input[input_index_0] = (input_word_BE + i) & 0xffU;
-            tmp_input[input_index_1] = ((input_word_BE + i) >> 8) & 0xff;
+            tmp_input[input_index_0] =
+                (unsigned long)(input_word_BE + i) & 0xffUL;
+            tmp_input[input_index_1] =
+                (unsigned long)((input_word_BE + i) >> 8) & 0xffUL;
 
-            if (__evaluate_branch_query(ctx, query, branch_condition, tmp_input,
-                                        current_testcase->len)) {
+            if (__evaluate_branch_query(ctx, query, tmp_input,
+                                        current_testcase->value_sizes,
+                                        current_testcase->values_len)) {
 #ifdef PRINT_SAT
                 Z3FUZZ_LOG("[check light L4 - arith16-sum-BE] "
                            "Query is SAT\n");
 #endif
                 ctx->stats.L4_arith16_sum_BE++;
                 ctx->stats.num_sat++;
-                *proof      = tmp_input;
-                *proof_size = current_testcase->len;
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                *proof      = tmp_proof;
+                *proof_size = current_testcase->testcase_len;
                 return 1;
             }
-            tmp_input[input_index_0] = (input_word_BE - i) & 0xffU;
-            tmp_input[input_index_1] = ((input_word_BE - i) >> 8) & 0xffU;
+            tmp_input[input_index_0] =
+                (unsigned long)(input_word_BE - i) & 0xffUL;
+            tmp_input[input_index_1] =
+                (unsigned long)((input_word_BE - i) >> 8) & 0xffUL;
 
-            if (__evaluate_branch_query(ctx, query, branch_condition, tmp_input,
-                                        current_testcase->len)) {
+            if (__evaluate_branch_query(ctx, query, tmp_input,
+                                        current_testcase->value_sizes,
+                                        current_testcase->values_len)) {
 #ifdef PRINT_SAT
                 Z3FUZZ_LOG("[check light L4 - arith16-sub-BE] "
                            "Query is SAT\n");
 #endif
                 ctx->stats.L4_arith32_sub_BE++;
                 ctx->stats.num_sat++;
-                *proof      = tmp_input;
-                *proof_size = current_testcase->len;
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                *proof      = tmp_proof;
+                *proof_size = current_testcase->testcase_len;
                 return 1;
             }
         }
 
         // interesting 16
         for (i = 0; i < sizeof(interesting16) / sizeof(short); ++i) {
-            tmp_input[input_index_0] = (interesting16[i]) & 0xffU;
-            tmp_input[input_index_1] = (interesting16[i] >> 8) & 0xffU;
+            tmp_input[input_index_0] =
+                (unsigned long)(interesting16[i]) & 0xffUL;
+            tmp_input[input_index_1] =
+                (unsigned long)(interesting16[i] >> 8) & 0xffUL;
 
-            if (__evaluate_branch_query(ctx, query, branch_condition, tmp_input,
-                                        current_testcase->len)) {
+            if (__evaluate_branch_query(ctx, query, tmp_input,
+                                        current_testcase->value_sizes,
+                                        current_testcase->testcase_len)) {
 #ifdef PRINT_SAT
                 Z3FUZZ_LOG("[check light L4 - int16] "
                            "Query is SAT\n");
 #endif
                 ctx->stats.L4_int16++;
                 ctx->stats.num_sat++;
-                *proof      = tmp_input;
-                *proof_size = current_testcase->len;
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                *proof      = tmp_proof;
+                *proof_size = current_testcase->testcase_len;
                 return 1;
             }
         }
-        tmp_input[input_index_0] = current_testcase->bytes[input_index_0];
-        tmp_input[input_index_1] = current_testcase->bytes[input_index_1];
+        tmp_input[input_index_0] = current_testcase->values[input_index_0];
+        tmp_input[input_index_1] = current_testcase->values[input_index_1];
 
         if (!set_check__ulong(&ast_data.indexes, input_index_0 + 2) ||
             !set_check__ulong(&ast_data.indexes, input_index_0 + 3))
@@ -1230,129 +1307,167 @@ L4:
         // ***************
         input_index_2 = input_index_0 + 2;
         input_index_3 = input_index_0 + 3;
-        input_byte_2  = current_testcase->bytes[input_index_2];
-        input_byte_3  = current_testcase->bytes[input_index_3];
+        input_byte_2  = (unsigned char)current_testcase->values[input_index_2];
+        input_byte_3  = (unsigned char)current_testcase->values[input_index_3];
         input_dword_LE =
             (((input_byte_3 << 8) | input_byte_2) << 16) | input_word_LE;
         input_dword_BE =
             (input_word_BE << 16) | (input_byte_2 << 8) | input_byte_3;
 
         // flip int
-        tmp_input[input_index_0] = input_byte_0 ^ 0xffU;
-        tmp_input[input_index_1] = input_byte_1 ^ 0xffU;
-        tmp_input[input_index_2] = input_byte_2 ^ 0xffU;
-        tmp_input[input_index_3] = input_byte_3 ^ 0xffU;
+        tmp_input[input_index_0] = (unsigned long)input_byte_0 ^ 0xffUL;
+        tmp_input[input_index_1] = (unsigned long)input_byte_1 ^ 0xffUL;
+        tmp_input[input_index_2] = (unsigned long)input_byte_2 ^ 0xffUL;
+        tmp_input[input_index_3] = (unsigned long)input_byte_3 ^ 0xffUL;
 
-        if (__evaluate_branch_query(ctx, query, branch_condition, tmp_input,
-                                    current_testcase->len)) {
+        if (__evaluate_branch_query(ctx, query, tmp_input,
+                                    current_testcase->value_sizes,
+                                    current_testcase->values_len)) {
 #ifdef PRINT_SAT
             Z3FUZZ_LOG("[check light L4 - flip32] "
                        "Query is SAT\n");
 #endif
             ctx->stats.L4_flip32++;
             ctx->stats.num_sat++;
-            *proof      = tmp_input;
-            *proof_size = current_testcase->len;
+            __vals_long_to_char(tmp_input, tmp_proof,
+                                current_testcase->testcase_len);
+            *proof      = tmp_proof;
+            *proof_size = current_testcase->testcase_len;
             return 1;
         }
 
         // 32-bit arithmetics
         for (i = 1; i < 35; ++i) {
-            tmp_input[input_index_0] = (input_dword_LE + i) & 0xffU;
-            tmp_input[input_index_1] = ((input_dword_LE + i) >> 8) & 0xffU;
-            tmp_input[input_index_2] = ((input_dword_LE + i) >> 16) & 0xffU;
-            tmp_input[input_index_3] = ((input_dword_LE + i) >> 24) & 0xffU;
+            tmp_input[input_index_0] =
+                (unsigned long)(input_dword_LE + i) & 0xffUL;
+            tmp_input[input_index_1] =
+                (unsigned long)((input_dword_LE + i) >> 8) & 0xffUL;
+            tmp_input[input_index_2] =
+                (unsigned long)((input_dword_LE + i) >> 16) & 0xffUL;
+            tmp_input[input_index_3] =
+                (unsigned long)((input_dword_LE + i) >> 24) & 0xffUL;
 
-            if (__evaluate_branch_query(ctx, query, branch_condition, tmp_input,
-                                        current_testcase->len)) {
+            if (__evaluate_branch_query(ctx, query, tmp_input,
+                                        current_testcase->value_sizes,
+                                        current_testcase->values_len)) {
 #ifdef PRINT_SAT
                 Z3FUZZ_LOG("[check light L4 - arith32-sum-LE] "
                            "Query is SAT\n");
 #endif
                 ctx->stats.L4_arith32_sum_LE++;
                 ctx->stats.num_sat++;
-                *proof      = tmp_input;
-                *proof_size = current_testcase->len;
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                *proof      = tmp_proof;
+                *proof_size = current_testcase->testcase_len;
                 return 1;
             }
-            tmp_input[input_index_0] = (input_dword_LE - i) & 0xffU;
-            tmp_input[input_index_1] = ((input_dword_LE - i) >> 8) & 0xffU;
-            tmp_input[input_index_2] = ((input_dword_LE - i) >> 16) & 0xffU;
-            tmp_input[input_index_3] = ((input_dword_LE - i) >> 24) & 0xffU;
+            tmp_input[input_index_0] =
+                (unsigned long)(input_dword_LE - i) & 0xffUL;
+            tmp_input[input_index_1] =
+                (unsigned long)((input_dword_LE - i) >> 8) & 0xffUL;
+            tmp_input[input_index_2] =
+                (unsigned long)((input_dword_LE - i) >> 16) & 0xffUL;
+            tmp_input[input_index_3] =
+                (unsigned long)((input_dword_LE - i) >> 24) & 0xffUL;
 
-            if (__evaluate_branch_query(ctx, query, branch_condition, tmp_input,
-                                        current_testcase->len)) {
+            if (__evaluate_branch_query(ctx, query, tmp_input,
+                                        current_testcase->value_sizes,
+                                        current_testcase->values_len)) {
 #ifdef PRINT_SAT
                 Z3FUZZ_LOG("[check light L4 - arith32-sub-LE] "
                            "Query is SAT\n");
 #endif
                 ctx->stats.L4_arith32_sub_LE++;
                 ctx->stats.num_sat++;
-                *proof      = tmp_input;
-                *proof_size = current_testcase->len;
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                *proof      = tmp_proof;
+                *proof_size = current_testcase->testcase_len;
                 return 1;
             }
-            tmp_input[input_index_0] = (input_dword_BE + i) & 0xffU;
-            tmp_input[input_index_1] = ((input_dword_BE + i) >> 8) & 0xffU;
-            tmp_input[input_index_2] = ((input_dword_BE + i) >> 16) & 0xffU;
-            tmp_input[input_index_3] = ((input_dword_BE + i) >> 24) & 0xffU;
+            tmp_input[input_index_0] =
+                (unsigned long)(input_dword_BE + i) & 0xffUL;
+            tmp_input[input_index_1] =
+                (unsigned long)((input_dword_BE + i) >> 8) & 0xffUL;
+            tmp_input[input_index_2] =
+                (unsigned long)((input_dword_BE + i) >> 16) & 0xffUL;
+            tmp_input[input_index_3] =
+                (unsigned long)((input_dword_BE + i) >> 24) & 0xffUL;
 
-            if (__evaluate_branch_query(ctx, query, branch_condition, tmp_input,
-                                        current_testcase->len)) {
+            if (__evaluate_branch_query(ctx, query, tmp_input,
+                                        current_testcase->value_sizes,
+                                        current_testcase->testcase_len)) {
 #ifdef PRINT_SAT
                 Z3FUZZ_LOG("[check light L4 - arith32-sum-BE] "
                            "Query is SAT\n");
 #endif
                 ctx->stats.L4_arith16_sum_BE++;
                 ctx->stats.num_sat++;
-                *proof      = tmp_input;
-                *proof_size = current_testcase->len;
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                *proof      = tmp_proof;
+                *proof_size = current_testcase->testcase_len;
                 return 1;
             }
-            tmp_input[input_index_0] = (input_dword_BE - i) & 0xffU;
-            tmp_input[input_index_1] = ((input_dword_BE - i) >> 8) & 0xffU;
-            tmp_input[input_index_2] = ((input_dword_BE - i) >> 16) & 0xffU;
-            tmp_input[input_index_3] = ((input_dword_BE - i) >> 24) & 0xffU;
+            tmp_input[input_index_0] =
+                (unsigned long)(input_dword_BE - i) & 0xffU;
+            tmp_input[input_index_1] =
+                (unsigned long)((input_dword_BE - i) >> 8) & 0xffU;
+            tmp_input[input_index_2] =
+                (unsigned long)((input_dword_BE - i) >> 16) & 0xffU;
+            tmp_input[input_index_3] =
+                (unsigned long)((input_dword_BE - i) >> 24) & 0xffU;
 
-            if (__evaluate_branch_query(ctx, query, branch_condition, tmp_input,
-                                        current_testcase->len)) {
+            if (__evaluate_branch_query(ctx, query, tmp_input,
+                                        current_testcase->value_sizes,
+                                        current_testcase->testcase_len)) {
 #ifdef PRINT_SAT
                 Z3FUZZ_LOG("[check light L4 - arith32-sub-BE] "
                            "Query is SAT\n");
 #endif
                 ctx->stats.L4_arith32_sub_BE++;
                 ctx->stats.num_sat++;
-                *proof      = tmp_input;
-                *proof_size = current_testcase->len;
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                *proof      = tmp_proof;
+                *proof_size = current_testcase->testcase_len;
                 return 1;
             }
         }
 
         // interesting 32
         for (i = 0; i < sizeof(interesting32) / sizeof(int); ++i) {
-            tmp_input[input_index_0] = (interesting32[i]) & 0xffU;
-            tmp_input[input_index_1] = (interesting32[i] >> 8) & 0xffU;
-            tmp_input[input_index_2] = (interesting32[i] >> 16) & 0xffU;
-            tmp_input[input_index_3] = (interesting32[i] >> 24) & 0xffU;
+            tmp_input[input_index_0] =
+                (unsigned long)(interesting32[i]) & 0xffU;
+            tmp_input[input_index_1] =
+                (unsigned long)(interesting32[i] >> 8) & 0xffU;
+            tmp_input[input_index_2] =
+                (unsigned long)(interesting32[i] >> 16) & 0xffU;
+            tmp_input[input_index_3] =
+                (unsigned long)(interesting32[i] >> 24) & 0xffU;
 
-            if (__evaluate_branch_query(ctx, query, branch_condition, tmp_input,
-                                        current_testcase->len)) {
+            if (__evaluate_branch_query(ctx, query, tmp_input,
+                                        current_testcase->value_sizes,
+                                        current_testcase->testcase_len)) {
 #ifdef PRINT_SAT
                 Z3FUZZ_LOG("[check light L4 - int32] "
                            "Query is SAT\n");
 #endif
                 ctx->stats.L4_int32++;
                 ctx->stats.num_sat++;
-                *proof      = tmp_input;
-                *proof_size = current_testcase->len;
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                *proof      = tmp_proof;
+                *proof_size = current_testcase->testcase_len;
                 return 1;
             }
         }
 
-        tmp_input[input_index_0] = current_testcase->bytes[input_index_0];
-        tmp_input[input_index_1] = current_testcase->bytes[input_index_1];
-        tmp_input[input_index_2] = current_testcase->bytes[input_index_2];
-        tmp_input[input_index_3] = current_testcase->bytes[input_index_3];
+        tmp_input[input_index_0] = current_testcase->values[input_index_0];
+        tmp_input[input_index_1] = current_testcase->values[input_index_1];
+        tmp_input[input_index_2] = current_testcase->values[input_index_2];
+        tmp_input[input_index_3] = current_testcase->values[input_index_3];
     }
 
     // L5 -- HAVOC
@@ -1410,32 +1525,32 @@ L4:
                 // flip bit
                 random_index = indexes[UR(indexes_size)];
                 tmp_input[random_index] =
-                    FLIP_BIT(tmp_input[random_index], UR(8));
+                    (unsigned long)FLIP_BIT(tmp_input[random_index], UR(8));
                 break;
             }
             case 1: {
                 // set interesting byte
-                random_index = indexes[UR(indexes_size)];
-                tmp_input[random_index] =
+                random_index            = indexes[UR(indexes_size)];
+                tmp_input[random_index] = (unsigned long)
                     interesting8[UR(sizeof(interesting8) / sizeof(char))];
                 break;
             }
             case 2: {
                 // random subtract byte
                 random_index = indexes[UR(indexes_size)];
-                tmp_input[random_index] -= UR(35) + 1;
+                tmp_input[random_index] -= (unsigned char)(UR(35) + 1);
                 break;
             }
             case 3: {
                 // random add byte
                 random_index = indexes[UR(indexes_size)];
-                tmp_input[random_index] += UR(35) + 1;
+                tmp_input[random_index] += (unsigned char)(UR(35) + 1);
                 break;
             }
             case 4: {
                 // random, byte set
                 random_index = indexes[UR(indexes_size)];
-                tmp_input[random_index] ^= UR(255) + 1;
+                tmp_input[random_index] ^= (unsigned char)(UR(255) + 1);
                 break;
             }
             case 5: {
@@ -1663,16 +1778,19 @@ L4:
             }
         }
         // do evaluate
-        if (__evaluate_branch_query(ctx, query, branch_condition, tmp_input,
-                                    current_testcase->len)) {
+        if (__evaluate_branch_query(ctx, query, tmp_input,
+                                    current_testcase->value_sizes,
+                                    current_testcase->testcase_len)) {
 #ifdef PRINT_SAT
             Z3FUZZ_LOG("[havoc L5] "
                        "Query is SAT\n");
 #endif
             ctx->stats.L5_havoc++;
             ctx->stats.num_sat++;
-            *proof      = tmp_input;
-            *proof_size = current_testcase->len;
+            __vals_long_to_char(tmp_input, tmp_proof,
+                                current_testcase->testcase_len);
+            *proof      = tmp_proof;
+            *proof_size = current_testcase->testcase_len;
             havoc_res   = 1;
         }
     }
@@ -1705,6 +1823,57 @@ int z3fuzz_query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
     return res;
 }
 
+void z3fuzz_add_assignment(fuzzy_ctx_t* ctx, int idx, Z3_ast assignment_value)
+{
+    if (idx >= ctx->size_assignments) {
+        unsigned old_size     = ctx->size_assignments;
+        ctx->size_assignments = (idx + 1) * 3 / 2;
+        ctx->assignments      = (Z3_ast*)realloc(
+            ctx->assignments, sizeof(Z3_ast) * ctx->size_assignments);
+        assert(ctx->assignments != NULL &&
+               "z3fuzz_add_assignment() failed realloc");
+
+        // set to zero the new memory
+        memset(ctx->assignments + old_size, 0,
+               ctx->size_assignments - old_size);
+    }
+    Z3_inc_ref(ctx->z3_ctx, assignment_value);
+    ctx->assignments[idx] = assignment_value;
+
+    // im assuming that assignment_value is a BV
+    unsigned char assignment_size = Z3_get_bv_sort_size(
+        ctx->z3_ctx, Z3_get_sort(ctx->z3_ctx, assignment_value));
+
+    testcase_t* testcase;
+    unsigned    i;
+    for (i = 0; i < ctx->testcases.size; ++i) {
+        testcase = &ctx->testcases.data[i];
+
+        unsigned long assignment_value_concrete =
+            ctx->model_eval(ctx->z3_ctx, assignment_value, testcase->values,
+                            testcase->value_sizes, testcase->values_len);
+
+        if (testcase->values_len <= idx) {
+            testcase->values_len = (idx + 1) * 3 / 2;
+            testcase->values     = (unsigned long*)realloc(
+                testcase->values, sizeof(unsigned long) * testcase->values_len);
+            testcase->value_sizes = (unsigned char*)realloc(
+                testcase->values, sizeof(unsigned char) * testcase->values_len);
+            testcase->z3_values = (Z3_ast*)realloc(
+                testcase->values, sizeof(Z3_ast) * testcase->values_len);
+        }
+
+        testcase->value_sizes[idx] = assignment_size;
+        testcase->values[idx]      = assignment_value_concrete;
+        testcase->z3_values[idx] =
+            Z3_mk_unsigned_int(ctx->z3_ctx, assignment_value_concrete,
+                               Z3_mk_bv_sort(ctx->z3_ctx, assignment_size));
+
+        testcase->values_len =
+            (testcase->values_len > idx + 1) ? testcase->values_len : idx + 1;
+    }
+}
+
 static int compare_ulong(const void* v1, const void* v2)
 {
     return *(unsigned long*)v1 - *(unsigned long*)v2;
@@ -1718,16 +1887,12 @@ __minimize_maximize_inner(fuzzy_ctx_t* ctx, Z3_ast pi,
     __reset_ast_data();
     __detect_involved_inputs(ctx, to_maximize_minimize, &ast_data);
 
-    testcase_t*    current_testcase = &ctx->testcases.data[0];
-    unsigned long* tmp_long_input =
-        (unsigned long*)malloc(sizeof(unsigned long) * current_testcase->len);
-    __vals_char_to_long(current_testcase->bytes, tmp_long_input,
-                        current_testcase->len);
-    unsigned long max_min =
-        Z3_custom_eval(ctx->z3_ctx, to_maximize_minimize, tmp_long_input,
-                       current_testcase->len);
+    testcase_t*   current_testcase = &ctx->testcases.data[0];
+    unsigned long max_min          = ctx->model_eval(
+        ctx->z3_ctx, to_maximize_minimize, tmp_input,
+        current_testcase->value_sizes, current_testcase->values_len);
     unsigned long tmp;
-    unsigned      original_byte, max_min_byte, i, j;
+    unsigned long original_byte, max_min_byte, i, j;
     ulong*        p;
     unsigned long num_indexes = ast_data.indexes.size;
     unsigned long indexes_array[num_indexes];
@@ -1740,31 +1905,32 @@ __minimize_maximize_inner(fuzzy_ctx_t* ctx, Z3_ast pi,
 
     for (j = 0; j < num_indexes; ++j) {
         p             = &indexes_array[j];
-        original_byte = current_testcase->bytes[*p];
-        max_min_byte  = current_testcase->bytes[*p];
+        original_byte = current_testcase->values[*p];
+        max_min_byte  = current_testcase->values[*p];
 
         for (i = 0; i < 256; ++i) {
             if (i == original_byte)
                 continue;
 
-            tmp_long_input[*p] = (unsigned long)i;
-            if (!Z3_custom_eval(ctx->z3_ctx, pi, tmp_long_input,
-                                current_testcase->len))
+            tmp_input[*p] = (unsigned long)i;
+            if (!ctx->model_eval(ctx->z3_ctx, pi, tmp_input,
+                                 current_testcase->value_sizes,
+                                 current_testcase->values_len))
                 continue;
 
-            tmp = Z3_custom_eval(ctx->z3_ctx, to_maximize_minimize,
-                                 tmp_long_input, current_testcase->len);
+            tmp = ctx->model_eval(ctx->z3_ctx, to_maximize_minimize, tmp_input,
+                                  current_testcase->value_sizes,
+                                  current_testcase->values_len);
             if ((is_max && tmp > max_min) || (!is_max && tmp < max_min)) {
                 max_min_byte = i;
                 max_min      = tmp;
             }
         }
-        tmp_long_input[*p] = (unsigned long)max_min_byte;
+        tmp_input[*p] = (unsigned long)max_min_byte;
     }
 
-    __vals_long_to_char(tmp_long_input, tmp_input, current_testcase->len);
-    free(tmp_long_input);
-    *out_values = tmp_input;
+    __vals_long_to_char(tmp_input, tmp_proof, current_testcase->testcase_len);
+    *out_values = tmp_proof;
     return max_min;
 }
 
@@ -1773,7 +1939,7 @@ unsigned long z3fuzz_maximize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_maximize,
                               unsigned long*        out_len)
 {
     // greedy - maximize one byte at a time
-    *out_len = ctx->testcases.data[0].len;
+    *out_len = ctx->testcases.data[0].testcase_len;
     return __minimize_maximize_inner(ctx, pi, to_maximize, out_values, 1);
 }
 
@@ -1782,7 +1948,7 @@ unsigned long z3fuzz_minimize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_minimize,
                               unsigned long*        out_len)
 {
     // greedy - minimize one byte at a time
-    *out_len = ctx->testcases.data[0].len;
+    *out_len = ctx->testcases.data[0].testcase_len;
     return __minimize_maximize_inner(ctx, pi, to_minimize, out_values, 0);
 }
 
@@ -1814,14 +1980,11 @@ void z3fuzz_dump_proof(fuzzy_ctx_t* ctx, const char* filename,
 unsigned long z3fuzz_evaluate_expression(fuzzy_ctx_t* ctx, Z3_ast value,
                                          unsigned char* values)
 {
-    unsigned long* tmp_long_input = (unsigned long*)malloc(
-        sizeof(unsigned long) * ctx->testcases.data[0].len);
-    __vals_char_to_long(values, tmp_long_input, ctx->testcases.data[0].len);
+    __vals_char_to_long(values, tmp_input, ctx->testcases.data[0].values_len);
 
-    unsigned long res = Z3_custom_eval(ctx->z3_ctx, value, tmp_long_input,
-                                       ctx->testcases.data[0].len);
-
-    free(tmp_long_input);
+    unsigned long res = ctx->model_eval(ctx->z3_ctx, value, tmp_input,
+                                        ctx->testcases.data[0].value_sizes,
+                                        ctx->testcases.data[0].values_len);
     return res;
 }
 
@@ -1852,13 +2015,15 @@ unsigned long z3fuzz_evaluate_expression_z3(fuzzy_ctx_t* ctx, Z3_ast query,
 
     // build a model and assign an interpretation for the input symbols
     unsigned long res;
-    Z3_sort sort = Z3_mk_bv_sort(ctx->z3_ctx, 8);
     Z3_model z3_m = Z3_mk_model(ctx->z3_ctx);
     Z3_model_inc_ref(ctx->z3_ctx, z3_m);
+    testcase_t* current_testcase = &ctx->testcases.data[0];
 
     unsigned i;
-    for (i = 0; i < ctx->testcases.data[0].len; ++i) {
+    for (i = 0; i < current_testcase->values_len; ++i) {
         unsigned int index = i;
+        Z3_sort sort =
+            Z3_mk_bv_sort(ctx->z3_ctx, current_testcase->value_sizes[i]);
         Z3_symbol s = Z3_mk_int_symbol(ctx->z3_ctx, index);
         Z3_func_decl decl = Z3_mk_func_decl(ctx->z3_ctx, s, 0, NULL, sort);
         Z3_add_const_interp(ctx->z3_ctx, z3_m, decl, values[index]);

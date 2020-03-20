@@ -7,7 +7,15 @@ static_assert(Z3_VERSION == 487, "This executable requires z3 4.8.7+");
 
 #define NUM_ITERATIONS 1000
 
-fuzzy_ctx_t fctx;
+static unsigned char* inputs;
+fuzzy_ctx_t           fctx;
+
+void long_to_char_array(unsigned long* in, unsigned char* out, unsigned size)
+{
+    unsigned i;
+    for (i = 0; i < size; ++i)
+        out[i] = (unsigned char)in[i];
+}
 
 static inline unsigned long compute_time_usec(struct timeval* start,
                                               struct timeval* end)
@@ -62,7 +70,10 @@ int main(int argc, char* argv[])
     assert(num_queries == 1 && "only one query is allowed");
 
     testcase_t* testcase = &fctx.testcases.data[0];
-    query                = Z3_ast_vector_get(ctx, queries, 0);
+    inputs =
+        (unsigned char*)malloc(sizeof(unsigned char) * testcase->values_len);
+    long_to_char_array(testcase->values, inputs, testcase->values_len);
+    query = Z3_ast_vector_get(ctx, queries, 0);
     query =
         Z3_substitute(ctx, query, fctx.n_symbols, str_symbols, fctx.symbols);
     Z3_ast_vector_dec_ref(ctx, queries);
@@ -71,12 +82,12 @@ int main(int argc, char* argv[])
         pp_printf(0, 1, "iteration %d/%d", i, NUM_ITERATIONS);
 
         gettimeofday(&start, NULL);
-        res1 = z3fuzz_evaluate_expression(&fctx, query, testcase->bytes);
+        res1 = z3fuzz_evaluate_expression(&fctx, query, inputs);
         gettimeofday(&stop, NULL);
         elapsed_time_fast += compute_time_usec(&start, &stop);
 
         gettimeofday(&start, NULL);
-        res2 = z3fuzz_evaluate_expression_z3(&fctx, query, testcase->z3_bytes);
+        res2 = z3fuzz_evaluate_expression_z3(&fctx, query, testcase->z3_values);
         gettimeofday(&stop, NULL);
         elapsed_time_z3 += compute_time_usec(&start, &stop);
 
@@ -92,5 +103,6 @@ int main(int argc, char* argv[])
     printf("Elapsed time fast:\t%ld usec\n", elapsed_time_fast / 1000);
     printf("Elapsed time z3:\t%ld usec\n", elapsed_time_z3 / 1000);
 
+    free(inputs);
     return 0;
 }
