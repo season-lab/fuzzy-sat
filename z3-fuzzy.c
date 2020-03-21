@@ -1871,9 +1871,9 @@ void z3fuzz_add_assignment(fuzzy_ctx_t* ctx, int idx, Z3_ast assignment_value)
             testcase->values     = (unsigned long*)realloc(
                 testcase->values, sizeof(unsigned long) * testcase->values_len);
             testcase->value_sizes = (unsigned char*)realloc(
-                testcase->values, sizeof(unsigned char) * testcase->values_len);
+                testcase->value_sizes, sizeof(unsigned char) * testcase->values_len);
             testcase->z3_values = (Z3_ast*)realloc(
-                testcase->values, sizeof(Z3_ast) * testcase->values_len);
+                testcase->z3_values, sizeof(Z3_ast) * testcase->values_len);
         }
 
         testcase->value_sizes[idx] = assignment_size;
