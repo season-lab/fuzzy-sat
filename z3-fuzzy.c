@@ -299,6 +299,10 @@ static int __detect_input_group(fuzzy_ctx_t* ctx, Z3_ast node,
                     unsigned  symbol_index =
                         (unsigned)Z3_get_symbol_int(ctx->z3_ctx, s);
 
+                    if (symbol_index >= ctx->testcases.data[0].testcase_len)
+                        // it is an assignment
+                        return 0;
+
                     assert(ig->n < MAX_GROUP_SIZE &&
                            "__detect_input_group() unexpected "
                            "number of element in group");
@@ -513,6 +517,15 @@ static void __detect_involved_inputs(fuzzy_ctx_t* ctx, Z3_ast v,
                     index_group_t group = {0};
                     Z3_symbol     s     = Z3_get_decl_name(ctx->z3_ctx, decl);
                     int symbol_index    = Z3_get_symbol_int(ctx->z3_ctx, s);
+
+                    if (symbol_index >= ctx->testcases.data[0].testcase_len) {
+                        // the symbol is indeed an assignment. Resolve the
+                        // assignment
+
+                        __detect_involved_inputs(
+                            ctx, ctx->assignments[symbol_index], data);
+                        break;
+                    }
 
                     group.indexes[group.n++] = symbol_index;
 
