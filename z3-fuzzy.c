@@ -1871,7 +1871,8 @@ void z3fuzz_add_assignment(fuzzy_ctx_t* ctx, int idx, Z3_ast assignment_value)
             testcase->values     = (unsigned long*)realloc(
                 testcase->values, sizeof(unsigned long) * testcase->values_len);
             testcase->value_sizes = (unsigned char*)realloc(
-                testcase->value_sizes, sizeof(unsigned char) * testcase->values_len);
+                testcase->value_sizes,
+                sizeof(unsigned char) * testcase->values_len);
             testcase->z3_values = (Z3_ast*)realloc(
                 testcase->z3_values, sizeof(Z3_ast) * testcase->values_len);
         }
@@ -1885,6 +1886,10 @@ void z3fuzz_add_assignment(fuzzy_ctx_t* ctx, int idx, Z3_ast assignment_value)
         testcase->values_len =
             (testcase->values_len > idx + 1) ? testcase->values_len : idx + 1;
     }
+
+    tmp_input = (unsigned long*)realloc(
+        tmp_input, sizeof(unsigned long) * ctx->testcases.data[0].values_len);
+    assert(tmp_input != 0 && "z3fuzz_add_assignment - failed realloc");
 }
 
 static int compare_ulong(const void* v1, const void* v2)
