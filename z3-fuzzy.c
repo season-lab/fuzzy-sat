@@ -1857,6 +1857,8 @@ void z3fuzz_add_assignment(fuzzy_ctx_t* ctx, int idx, Z3_ast assignment_value)
     unsigned char assignment_size = Z3_get_bv_sort_size(
         ctx->z3_ctx, Z3_get_sort(ctx->z3_ctx, assignment_value));
 
+    unsigned old_len = ctx->testcases.data[0].values_len;
+
     testcase_t* testcase;
     unsigned    i;
     for (i = 0; i < ctx->testcases.size; ++i) {
@@ -1887,9 +1889,11 @@ void z3fuzz_add_assignment(fuzzy_ctx_t* ctx, int idx, Z3_ast assignment_value)
             (testcase->values_len > idx + 1) ? testcase->values_len : idx + 1;
     }
 
-    tmp_input = (unsigned long*)realloc(
-        tmp_input, sizeof(unsigned long) * ctx->testcases.data[0].values_len);
-    assert(tmp_input != 0 && "z3fuzz_add_assignment - failed realloc");
+    if (old_len < ctx->testcases.data[0].values_len) {
+        tmp_input = (unsigned long*)realloc(
+            tmp_input, sizeof(unsigned long) * ctx->testcases.data[0].values_len);
+        assert(tmp_input != 0 && "z3fuzz_add_assignment - failed realloc");
+    }
 }
 
 static int compare_ulong(const void* v1, const void* v2)
