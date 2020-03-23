@@ -48,6 +48,7 @@ typedef struct fuzzy_ctx_t {
 
     // opaque fields
     void* univocally_defined_inputs;
+    void* assignment_inputs_cache;
 } fuzzy_ctx_t;
 
 void z3fuzz_init(fuzzy_ctx_t* fctx, Z3_context ctx, char* seed_filename,

@@ -53,6 +53,10 @@ static unsigned long* tmp_input = NULL;
 static unsigned char* tmp_proof = NULL;
 static ast_data_t     ast_data  = {0};
 
+typedef ast_data_t* ast_data_ptr;
+#define DICT_DATA_T ast_data_ptr
+#include <dict.h>
+
 #ifdef LOG_QUERY_STATS
 static char* query_log_filename = "/tmp/fuzzy-log-info.csv";
 FILE*        query_log;
@@ -81,6 +85,30 @@ static inline unsigned UR(unsigned limit)
         rand_cnt = (RESEED_RNG / 2) + (seed[1] % RESEED_RNG);
     }
     return random() % limit;
+}
+
+static void __init_ast_data(ast_data_t* ast_data)
+{
+    set_init__md5_digest_t(&ast_data->processed_set, &md5_64bit_hash,
+                           &md5_digest_equals);
+    set_init__index_group_t(&ast_data->index_groups, &index_group_hash,
+                            &index_group_equals);
+    set_init__ulong(&ast_data->indexes, &index_hash, &index_equals);
+    da_init__ulong(&ast_data->values);
+}
+
+static void __free_ast_data(ast_data_t* ast_data)
+{
+    set_free__md5_digest_t(&ast_data->processed_set);
+    set_free__index_group_t(&ast_data->index_groups);
+    set_free__ulong(&ast_data->indexes);
+    da_free__ulong(&ast_data->values, NULL);
+}
+
+static void __free_ast_data_ptr(ast_data_ptr* ast_data)
+{
+    __free_ast_data(*ast_data);
+    free(*ast_data);
 }
 
 static inline void print_index_and_value_queue(ast_data_t* data)
@@ -171,12 +199,12 @@ void z3fuzz_init(fuzzy_ctx_t* fctx, Z3_context ctx, char* seed_filename,
     set_init__ulong((set__ulong*)fctx->univocally_defined_inputs, &index_hash,
                     &index_equals);
 
-    set_init__md5_digest_t(&ast_data.processed_set, &md5_64bit_hash,
-                           &md5_digest_equals);
-    set_init__index_group_t(&ast_data.index_groups, &index_group_hash,
-                            &index_group_equals);
-    set_init__ulong(&ast_data.indexes, &index_hash, &index_equals);
-    da_init__ulong(&ast_data.values);
+    __init_ast_data(&ast_data);
+
+    fctx->assignment_inputs_cache = malloc(sizeof(dict__ast_data_ptr));
+    dict__ast_data_ptr* assignment_inputs_cache =
+        (dict__ast_data_ptr*)fctx->assignment_inputs_cache;
+    dict_init__ast_data_ptr(assignment_inputs_cache);
 }
 
 void z3fuzz_free(fuzzy_ctx_t* ctx)
@@ -205,10 +233,12 @@ void z3fuzz_free(fuzzy_ctx_t* ctx)
     ctx->assignments      = NULL;
     ctx->size_assignments = 0;
 
-    set_free__md5_digest_t(&ast_data.processed_set);
-    set_free__index_group_t(&ast_data.index_groups);
-    set_free__ulong(&ast_data.indexes);
-    da_free__ulong(&ast_data.values, NULL);
+    __free_ast_data(&ast_data);
+
+    dict__ast_data_ptr* assignment_inputs_cache =
+        (dict__ast_data_ptr*)ctx->assignment_inputs_cache;
+    dict_free__ast_data_ptr(assignment_inputs_cache, __free_ast_data_ptr);
+    free(ctx->assignment_inputs_cache);
 
     set_free__ulong((set__ulong*)ctx->univocally_defined_inputs);
     free(ctx->univocally_defined_inputs);
@@ -464,6 +494,45 @@ static void __detect_input_to_state_query(fuzzy_ctx_t* ctx, Z3_ast node,
     return;
 }
 
+static void __union_indexes(ast_data_t* dst, ast_data_t* src)
+{
+    index_group_t* group;
+    set_reset_iter__index_group_t(&src->index_groups, 0);
+    while (set_iter_next__index_group_t(&src->index_groups, 0, &group)) {
+        set_add__index_group_t(&dst->index_groups, *group);
+    }
+
+    ulong* p;
+    set_reset_iter__ulong(&src->indexes, 0);
+    while (set_iter_next__ulong(&src->indexes, 0, &p)) {
+        set_add__ulong(&dst->indexes, *p);
+    }
+}
+
+static void __detect_involved_inputs(fuzzy_ctx_t* ctx, Z3_ast v,
+                                     ast_data_t* data);
+static void __detect_assignment_involved_inputs(fuzzy_ctx_t* ctx,
+                                                unsigned     assignment_idx,
+                                                ast_data_t*  data)
+{
+    dict__ast_data_ptr* assignment_inputs_cache =
+        (dict__ast_data_ptr*)ctx->assignment_inputs_cache;
+
+    ast_data_ptr  cached_el;
+    ast_data_ptr* cached_el_ptr = dict_get_ref__ast_data_ptr(
+        assignment_inputs_cache, (unsigned long)assignment_idx);
+    if (cached_el_ptr != NULL) {
+        cached_el = *cached_el_ptr;
+    } else {
+        cached_el = (ast_data_ptr)malloc(sizeof(ast_data_t));
+        __detect_involved_inputs(ctx, ctx->assignments[assignment_idx],
+                                 cached_el);
+        dict_set__ast_data_ptr(assignment_inputs_cache,
+                               (unsigned long)assignment_idx, cached_el);
+    }
+    __union_indexes(data, cached_el);
+}
+
 static void __detect_involved_inputs(fuzzy_ctx_t* ctx, Z3_ast v,
                                      ast_data_t* data)
 {
@@ -522,8 +591,8 @@ static void __detect_involved_inputs(fuzzy_ctx_t* ctx, Z3_ast v,
                         // the symbol is indeed an assignment. Resolve the
                         // assignment
 
-                        __detect_involved_inputs(
-                            ctx, ctx->assignments[symbol_index], data);
+                        __detect_assignment_involved_inputs(ctx, symbol_index,
+                                                            data);
                         break;
                     }
 
@@ -1844,7 +1913,7 @@ void z3fuzz_add_assignment(fuzzy_ctx_t* ctx, int idx, Z3_ast assignment_value)
         ctx->assignments      = (Z3_ast*)realloc(
             ctx->assignments, sizeof(Z3_ast) * ctx->size_assignments);
         assert(ctx->assignments != NULL &&
-               "z3fuzz_add_assignment() failed realloc");
+               "z3fuzz_add_assignment() ctx->assignments - failed realloc");
 
         // set to zero the new memory
         memset(ctx->assignments + old_size, 0,
@@ -1872,11 +1941,19 @@ void z3fuzz_add_assignment(fuzzy_ctx_t* ctx, int idx, Z3_ast assignment_value)
             testcase->values_len = (idx + 1) * 3 / 2;
             testcase->values     = (unsigned long*)realloc(
                 testcase->values, sizeof(unsigned long) * testcase->values_len);
+            assert(testcase->values != 0 &&
+                   "z3fuzz_add_assignment() testcase->values - failed realloc");
             testcase->value_sizes = (unsigned char*)realloc(
                 testcase->value_sizes,
                 sizeof(unsigned char) * testcase->values_len);
+            assert(testcase->value_sizes != 0 &&
+                   "z3fuzz_add_assignment() testcase->value_sizes - failed "
+                   "realloc");
             testcase->z3_values = (Z3_ast*)realloc(
                 testcase->z3_values, sizeof(Z3_ast) * testcase->values_len);
+            assert(
+                testcase->z3_values != 0 &&
+                "z3fuzz_add_assignment() testcase->z3_values - failed realloc");
         }
 
         testcase->value_sizes[idx] = assignment_size;
@@ -1891,8 +1968,10 @@ void z3fuzz_add_assignment(fuzzy_ctx_t* ctx, int idx, Z3_ast assignment_value)
 
     if (old_len < ctx->testcases.data[0].values_len) {
         tmp_input = (unsigned long*)realloc(
-            tmp_input, sizeof(unsigned long) * ctx->testcases.data[0].values_len);
-        assert(tmp_input != 0 && "z3fuzz_add_assignment - failed realloc");
+            tmp_input,
+            sizeof(unsigned long) * ctx->testcases.data[0].values_len);
+        assert(tmp_input != 0 &&
+               "z3fuzz_add_assignment() tmp_input - failed realloc");
     }
 }
 
