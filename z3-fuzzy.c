@@ -1934,10 +1934,6 @@ void z3fuzz_add_assignment(fuzzy_ctx_t* ctx, int idx, Z3_ast assignment_value)
     for (i = 0; i < ctx->testcases.size; ++i) {
         testcase = &ctx->testcases.data[i];
 
-        unsigned long assignment_value_concrete =
-            ctx->model_eval(ctx->z3_ctx, assignment_value, testcase->values,
-                            testcase->value_sizes, testcase->values_len);
-
         if (testcase->values_len <= idx) {
             testcase->values_len = (idx + 1) * 3 / 2;
             testcase->values     = (unsigned long*)realloc(
@@ -1956,6 +1952,10 @@ void z3fuzz_add_assignment(fuzzy_ctx_t* ctx, int idx, Z3_ast assignment_value)
                 testcase->z3_values != 0 &&
                 "z3fuzz_add_assignment() testcase->z3_values - failed realloc");
         }
+
+        unsigned long assignment_value_concrete =
+            ctx->model_eval(ctx->z3_ctx, assignment_value, testcase->values,
+                            testcase->value_sizes, testcase->values_len);
 
         testcase->value_sizes[idx] = assignment_size;
         testcase->values[idx]      = assignment_value_concrete;
