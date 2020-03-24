@@ -1863,7 +1863,7 @@ L4:
         // do evaluate
         if (__evaluate_branch_query(ctx, query, tmp_input,
                                     current_testcase->value_sizes,
-                                    current_testcase->testcase_len)) {
+                                    current_testcase->values_len)) {
 #ifdef PRINT_SAT
             Z3FUZZ_LOG("[havoc L5] "
                        "Query is SAT\n");
