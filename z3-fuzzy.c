@@ -525,6 +525,7 @@ static void __detect_assignment_involved_inputs(fuzzy_ctx_t* ctx,
         cached_el = *cached_el_ptr;
     } else {
         cached_el = (ast_data_ptr)malloc(sizeof(ast_data_t));
+        __init_ast_data(cached_el);
         __detect_involved_inputs(ctx, ctx->assignments[assignment_idx],
                                  cached_el);
         dict_set__ast_data_ptr(assignment_inputs_cache,
@@ -1124,7 +1125,7 @@ L4:
             tmp_input[input_index_0] = (unsigned long)tmp_byte;
             if (__evaluate_branch_query(ctx, query, tmp_input,
                                         current_testcase->value_sizes,
-                                        current_testcase->testcase_len)) {
+                                        current_testcase->values_len)) {
 #ifdef PRINT_SAT
                 Z3FUZZ_LOG("[check light L4 - flip2] "
                            "Query is SAT\n");
@@ -1148,7 +1149,7 @@ L4:
             tmp_input[input_index_0] = (unsigned long)tmp_byte;
             if (__evaluate_branch_query(ctx, query, tmp_input,
                                         current_testcase->value_sizes,
-                                        current_testcase->testcase_len)) {
+                                        current_testcase->values_len)) {
 #ifdef PRINT_SAT
                 Z3FUZZ_LOG("[check light L4 - flip4] "
                            "Query is SAT\n");
@@ -1363,7 +1364,7 @@ L4:
 
             if (__evaluate_branch_query(ctx, query, tmp_input,
                                         current_testcase->value_sizes,
-                                        current_testcase->testcase_len)) {
+                                        current_testcase->values_len)) {
 #ifdef PRINT_SAT
                 Z3FUZZ_LOG("[check light L4 - int16] "
                            "Query is SAT\n");
@@ -1479,7 +1480,7 @@ L4:
 
             if (__evaluate_branch_query(ctx, query, tmp_input,
                                         current_testcase->value_sizes,
-                                        current_testcase->testcase_len)) {
+                                        current_testcase->values_len)) {
 #ifdef PRINT_SAT
                 Z3FUZZ_LOG("[check light L4 - arith32-sum-BE] "
                            "Query is SAT\n");
@@ -1503,7 +1504,7 @@ L4:
 
             if (__evaluate_branch_query(ctx, query, tmp_input,
                                         current_testcase->value_sizes,
-                                        current_testcase->testcase_len)) {
+                                        current_testcase->values_len)) {
 #ifdef PRINT_SAT
                 Z3FUZZ_LOG("[check light L4 - arith32-sub-BE] "
                            "Query is SAT\n");
@@ -1531,7 +1532,7 @@ L4:
 
             if (__evaluate_branch_query(ctx, query, tmp_input,
                                         current_testcase->value_sizes,
-                                        current_testcase->testcase_len)) {
+                                        current_testcase->values_len)) {
 #ifdef PRINT_SAT
                 Z3FUZZ_LOG("[check light L4 - int32] "
                            "Query is SAT\n");
