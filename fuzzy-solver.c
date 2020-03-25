@@ -8,7 +8,7 @@ static_assert(Z3_VERSION == 487, "This executable requires z3 4.8.7+");
 #define SOLVER_TIMEOUT "10000" // 10 sec // 0
 
 #define PRINT_STATUS
-#define PRINT_SAT_IDX
+// #define PRINT_SAT_IDX
 // #define PRINT_STATS_ON_FILE
 // #define DUMP_SAT_QUERIES
 // #define DUMP_Z3_SAT_ONLY
@@ -236,6 +236,9 @@ int main(int argc, char* argv[])
             z3fuzz_dump_proof(&fctx, var_name, proof, proof_size);
 #endif
         } else {
+            unsat_queries_z3++;
+            gettimeofday(&stop, NULL);
+            elapsed_time_unsat += compute_time_msec(&start, &stop);
 #ifdef PRINT_SAT_IDX
             fprintf(log_idx_sat, "%u ; UNSAT\n", i);
 #endif
@@ -336,6 +339,10 @@ int main(int argc, char* argv[])
            (double)elapsed_time_unsat / 1000,
            (double)elapsed_time_unknown / 1000);
 #endif
+
+    printf("elaps time unsat:\t%.3lf s\n"
+           "num unsat:\t%lu\n",
+           (double)elapsed_time_unsat / 1000, unsat_queries_z3);
 
     Z3_ast_vector_dec_ref(ctx, queries);
     free(str_symbols);

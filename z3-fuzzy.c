@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include "utility/md5.h"
+#include "utility/gradient_descend.h"
 #include "z3-fuzzy.h"
 
 #ifndef likely
@@ -205,6 +206,8 @@ void z3fuzz_init(fuzzy_ctx_t* fctx, Z3_context ctx, char* seed_filename,
     dict__ast_data_ptr* assignment_inputs_cache =
         (dict__ast_data_ptr*)fctx->assignment_inputs_cache;
     dict_init__ast_data_ptr(assignment_inputs_cache);
+
+    gd_init();
 }
 
 void z3fuzz_free(fuzzy_ctx_t* ctx)
@@ -242,6 +245,8 @@ void z3fuzz_free(fuzzy_ctx_t* ctx)
 
     set_free__ulong((set__ulong*)ctx->univocally_defined_inputs);
     free(ctx->univocally_defined_inputs);
+
+    gd_free();
 
 #ifdef PRINT_NUM_EVALUATE
     printf("num evaluate:\t%lu\n", ctx->stats.num_evaluate);
@@ -1981,10 +1986,9 @@ static int compare_ulong(const void* v1, const void* v2)
     return *(unsigned long*)v1 - *(unsigned long*)v2;
 }
 
-static inline unsigned long
-__minimize_maximize_inner(fuzzy_ctx_t* ctx, Z3_ast pi,
-                          Z3_ast                to_maximize_minimize,
-                          unsigned char const** out_values, unsigned is_max)
+static inline unsigned long __minimize_maximize_inner_greedy(
+    fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_maximize_minimize,
+    unsigned char const** out_values, unsigned is_max)
 {
     __reset_ast_data();
     __detect_involved_inputs(ctx, to_maximize_minimize, &ast_data);
@@ -2036,22 +2040,79 @@ __minimize_maximize_inner(fuzzy_ctx_t* ctx, Z3_ast pi,
     return max_min;
 }
 
+static char         __glob_gd_is_maximizing;
+static Z3_ast       __glob_gd_pi      = 0;
+static Z3_ast       __glob_gd_ast     = 0;
+static fuzzy_ctx_t* __glob_gd_context = NULL;
+unsigned long       __gd_eval(unsigned long* x)
+{
+    testcase_t* seed_testcase = &__glob_gd_context->testcases.data[0];
+
+    unsigned long pi_eval = __glob_gd_context->model_eval(
+        __glob_gd_context->z3_ctx, __glob_gd_pi, x, seed_testcase->value_sizes,
+        seed_testcase->values_len);
+
+    if (!pi_eval) {
+        if (__glob_gd_is_maximizing) {
+            return 0;
+        } else {
+            return 0xffffffffffffffff;
+        }
+    }
+
+    return __glob_gd_context->model_eval(
+        __glob_gd_context->z3_ctx, __glob_gd_ast, x, seed_testcase->value_sizes,
+        seed_testcase->values_len);
+}
+
 unsigned long z3fuzz_maximize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_maximize,
                               unsigned char const** out_values,
                               unsigned long*        out_len)
 {
-    // greedy - maximize one byte at a time
     *out_len = ctx->testcases.data[0].testcase_len;
+#ifdef USE_GREEDY_MAXMIN
     return __minimize_maximize_inner(ctx, pi, to_maximize, out_values, 1);
+#else
+    __glob_gd_context = ctx;
+    __glob_gd_is_maximizing = 1;
+    __glob_gd_pi = pi;
+    __glob_gd_ast = to_maximize;
+    unsigned long* max_inputs = (unsigned long*)malloc(
+        sizeof(unsigned long) * ctx->testcases.data[0].values_len);
+    unsigned long max_val;
+    gd_maximize(__gd_eval, ctx->testcases.data[0].values, max_inputs, &max_val,
+                ctx->testcases.data[0].values_len);
+
+    __vals_long_to_char(max_inputs, tmp_proof, *out_len);
+    *out_values = tmp_proof;
+    free(max_inputs);
+    return max_val;
+#endif
 }
 
 unsigned long z3fuzz_minimize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_minimize,
                               unsigned char const** out_values,
                               unsigned long*        out_len)
 {
-    // greedy - minimize one byte at a time
     *out_len = ctx->testcases.data[0].testcase_len;
+#ifdef USE_GREEDY_MAXMIN
     return __minimize_maximize_inner(ctx, pi, to_minimize, out_values, 0);
+#else
+    __glob_gd_context = ctx;
+    __glob_gd_is_maximizing = 0;
+    __glob_gd_pi = pi;
+    __glob_gd_ast = to_minimize;
+    unsigned long* min_inputs = (unsigned long*)malloc(
+        sizeof(unsigned long) * ctx->testcases.data[0].values_len);
+
+    unsigned long min_val;
+    gd_minimize(__gd_eval, ctx->testcases.data[0].values, min_inputs, &min_val,
+                ctx->testcases.data[0].values_len);
+    __vals_long_to_char(min_inputs, tmp_proof, *out_len);
+    *out_values = tmp_proof;
+    free(min_inputs);
+    return min_val;
+#endif
 }
 
 void z3fuzz_notify_constraint(fuzzy_ctx_t* ctx, Z3_ast constraint)

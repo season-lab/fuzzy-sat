@@ -1,5 +1,6 @@
 .vscode/
 query_db/
+tests/
 *.o
 debug-eval
 eval-driver
