@@ -2090,6 +2090,8 @@ void z3fuzz_add_assignment(fuzzy_ctx_t* ctx, int idx, Z3_ast assignment_value)
             assert(
                 testcase->z3_values != 0 &&
                 "z3fuzz_add_assignment() testcase->z3_values - failed realloc");
+            memset(testcase->z3_values + old_len, 0,
+                   testcase->values_len - old_len);
         }
 
         unsigned long assignment_value_concrete =
@@ -2101,6 +2103,7 @@ void z3fuzz_add_assignment(fuzzy_ctx_t* ctx, int idx, Z3_ast assignment_value)
         testcase->z3_values[idx] =
             Z3_mk_unsigned_int(ctx->z3_ctx, assignment_value_concrete,
                                Z3_mk_bv_sort(ctx->z3_ctx, assignment_size));
+        Z3_inc_ref(ctx->z3_ctx, testcase->z3_values[idx]);
 
         testcase->values_len =
             (testcase->values_len > idx + 1) ? testcase->values_len : idx + 1;
@@ -2205,7 +2208,8 @@ unsigned long z3fuzz_maximize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_maximize,
 {
     *out_len = ctx->testcases.data[0].testcase_len;
 #ifdef USE_GREEDY_MAXMIN
-    return __minimize_maximize_inner_greedy(ctx, pi, to_maximize, out_values, 1);
+    return __minimize_maximize_inner_greedy(ctx, pi, to_maximize, out_values,
+                                            1);
 #else
     __glob_gd_context = ctx;
     __glob_gd_is_maximizing = 1;
@@ -2241,7 +2245,8 @@ unsigned long z3fuzz_minimize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_minimize,
 {
     *out_len = ctx->testcases.data[0].testcase_len;
 #ifdef USE_GREEDY_MAXMIN
-    return __minimize_maximize_inner_greedy(ctx, pi, to_minimize, out_values, 0);
+    return __minimize_maximize_inner_greedy(ctx, pi, to_minimize, out_values,
+                                            0);
 #else
     __glob_gd_context = ctx;
     __glob_gd_is_maximizing = 0;

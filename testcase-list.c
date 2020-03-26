@@ -14,7 +14,8 @@ void free_testcase_list(Z3_context ctx, testcase_list_t* t)
         free(t->data[i].values);
         t->data[i].values = NULL;
         for (j = 0; j < t->data[i].values_len; ++j)
-            Z3_dec_ref(ctx, t->data[i].z3_values[j]);
+            if (t->data[i].z3_values[j] != NULL)
+                Z3_dec_ref(ctx, t->data[i].z3_values[j]);
         free(t->data[i].z3_values);
         t->data[i].z3_values = NULL;
         free(t->data[i].value_sizes);
