@@ -24,6 +24,7 @@
 // #define CHECK_UNNECESSARY_EVALS
 // #define SKIP_NOTIFY
 // #define SKIP_DETERMINISTIC
+// #define USE_GREEDY_MAXMIN
 #define SKIP_HAVOC
 
 // generate parametric data structures
@@ -818,6 +819,139 @@ static inline int __check_univocally_defined(fuzzy_ctx_t* ctx, Z3_ast expr,
                        ig->indexes[i]);
     }
     return 1;
+}
+
+static inline int __detect_strcmp_pattern(fuzzy_ctx_t* ctx, Z3_ast ast,
+                                          unsigned long* values)
+{
+    /*
+        (... whatever
+            (concat
+                #x0..0
+                (ite (= inp_0 const_0) #b1 #b0)
+                (ite (= inp_1 const_1) #b1 #b0)
+                ...
+                (ite (= inp_i const_i) #b1 #b0)))
+    */
+    Z3_bool     successGet;
+    unsigned    i;
+    Z3_ast_kind kind = Z3_get_ast_kind(ctx->z3_ctx, ast);
+    if (kind != Z3_APP_AST)
+        return 0;
+
+    int          res        = 0;
+    Z3_app       app        = Z3_to_app(ctx->z3_ctx, ast);
+    unsigned     num_fields = Z3_get_app_num_args(ctx->z3_ctx, app);
+    Z3_func_decl decl       = Z3_get_app_decl(ctx->z3_ctx, app);
+    Z3_decl_kind decl_kind  = Z3_get_decl_kind(ctx->z3_ctx, decl);
+
+    if (decl_kind == Z3_OP_CONCAT) {
+        res = 1;
+        for (i = 0; i < num_fields; ++i) {
+            Z3_ast      child      = Z3_get_app_arg(ctx->z3_ctx, app, i);
+            Z3_ast_kind child_kind = Z3_get_ast_kind(ctx->z3_ctx, child);
+            if (child_kind == Z3_NUMERAL_AST)
+                continue;
+            if (child_kind == Z3_APP_AST) {
+                Z3_app       child_app = Z3_to_app(ctx->z3_ctx, child);
+                Z3_func_decl child_decl =
+                    Z3_get_app_decl(ctx->z3_ctx, child_app);
+                Z3_decl_kind child_decl_kind =
+                    Z3_get_decl_kind(ctx->z3_ctx, child_decl);
+                if (child_decl_kind != Z3_OP_ITE) {
+                    res = 0;
+                    break;
+                }
+                Z3_ast cond    = Z3_get_app_arg(ctx->z3_ctx, child_app, 0);
+                Z3_ast iftrue  = Z3_get_app_arg(ctx->z3_ctx, child_app, 1);
+                Z3_ast iffalse = Z3_get_app_arg(ctx->z3_ctx, child_app, 2);
+
+                // iftrue must be #b0 or #b1
+                if (Z3_get_ast_kind(ctx->z3_ctx, iftrue) != Z3_NUMERAL_AST) {
+                    res = 0;
+                    break;
+                }
+                uint64_t iftrue_v;
+                successGet = Z3_get_numeral_uint64(ctx->z3_ctx, iftrue,
+                                                   (uint64_t*)&iftrue_v);
+                if (!successGet || (iftrue_v != 0 && iftrue_v != 1)) {
+                    res = 0;
+                    break;
+                }
+                if (Z3_get_ast_kind(ctx->z3_ctx, iffalse) != Z3_NUMERAL_AST) {
+                    res = 0;
+                    break;
+                }
+
+                // iffalse must be #b0 or #b1
+                uint64_t iffalse_v;
+                successGet = Z3_get_numeral_uint64(ctx->z3_ctx, iftrue,
+                                                   (uint64_t*)&iffalse_v);
+                if (!successGet || (iffalse_v != 0 && iffalse_v != 1)) {
+                    res = 0;
+                    break;
+                }
+
+                // cond must be (= inp_i const_i)
+                if (Z3_get_ast_kind(ctx->z3_ctx, cond) != Z3_APP_AST) {
+                    res = 0;
+                    break;
+                }
+                Z3_app       cond_app  = Z3_to_app(ctx->z3_ctx, cond);
+                Z3_func_decl cond_decl = Z3_get_app_decl(ctx->z3_ctx, cond_app);
+                Z3_decl_kind cond_decl_kind =
+                    Z3_get_decl_kind(ctx->z3_ctx, cond_decl);
+                if (cond_decl_kind != Z3_OP_EQ) {
+                    res = 0;
+                    break;
+                }
+                Z3_ast inp_i   = Z3_get_app_arg(ctx->z3_ctx, cond_app, 0);
+                Z3_ast const_i = Z3_get_app_arg(ctx->z3_ctx, cond_app, 1);
+                if (Z3_get_ast_kind(ctx->z3_ctx, inp_i) != Z3_APP_AST) {
+                    res = 0;
+                    break;
+                }
+                if (Z3_get_ast_kind(ctx->z3_ctx, const_i) != Z3_NUMERAL_AST) {
+                    res = 0;
+                    break;
+                }
+                Z3_app       inp_i_app = Z3_to_app(ctx->z3_ctx, inp_i);
+                Z3_func_decl inp_i_decl =
+                    Z3_get_app_decl(ctx->z3_ctx, inp_i_app);
+                Z3_decl_kind inp_i_decl_kind =
+                    Z3_get_decl_kind(ctx->z3_ctx, inp_i_decl);
+                if (inp_i_decl_kind != Z3_OP_UNINTERPRETED) {
+                    res = 0;
+                    break;
+                }
+                int inp_i_idx = Z3_get_symbol_int(
+                    ctx->z3_ctx, Z3_get_decl_name(ctx->z3_ctx, inp_i_decl));
+                uint64_t const_i_v;
+                successGet = Z3_get_numeral_uint64(ctx->z3_ctx, const_i,
+                                                   (uint64_t*)&const_i_v);
+                if (!successGet) {
+                    res = 0;
+                    break;
+                }
+
+                // finally. Set value
+                values[inp_i_idx] = const_i_v;
+                res               = 1;
+            } else {
+                res = 0;
+                break;
+            }
+        }
+        if (res)
+            return res;
+    }
+
+    for (i = 0; i < num_fields; ++i) {
+        res |= __detect_strcmp_pattern(ctx, Z3_get_app_arg(ctx->z3_ctx, app, i),
+                                       values);
+    }
+
+    return res;
 }
 
 // *************************************************
@@ -2040,11 +2174,11 @@ static inline unsigned long __minimize_maximize_inner_greedy(
     return max_min;
 }
 
-static char         __glob_gd_is_maximizing;
-static Z3_ast       __glob_gd_pi      = 0;
-static Z3_ast       __glob_gd_ast     = 0;
-static fuzzy_ctx_t* __glob_gd_context = NULL;
-unsigned long       __gd_eval(unsigned long* x)
+static char          __glob_gd_is_maximizing;
+static Z3_ast        __glob_gd_pi      = 0;
+static Z3_ast        __glob_gd_ast     = 0;
+static fuzzy_ctx_t*  __glob_gd_context = NULL;
+static unsigned long __gd_eval(unsigned long* x)
 {
     testcase_t* seed_testcase = &__glob_gd_context->testcases.data[0];
 
@@ -2077,15 +2211,26 @@ unsigned long z3fuzz_maximize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_maximize,
     __glob_gd_is_maximizing = 1;
     __glob_gd_pi = pi;
     __glob_gd_ast = to_maximize;
-    unsigned long* max_inputs = (unsigned long*)malloc(
-        sizeof(unsigned long) * ctx->testcases.data[0].values_len);
+
+    testcase_t* current_testcase = &ctx->testcases.data[0];
+    memcpy(tmp_input, current_testcase->values,
+           current_testcase->values_len * sizeof(unsigned long));
+
+    // detect the strcmp pattern
+    if (__detect_strcmp_pattern(ctx, to_maximize, tmp_input)) {
+        __vals_long_to_char(tmp_input, tmp_proof, *out_len);
+        *out_values = tmp_proof;
+        return Z3_custom_eval(ctx->z3_ctx, to_maximize, tmp_input,
+                              current_testcase->value_sizes,
+                              current_testcase->values_len);
+    }
+
     unsigned long max_val;
-    gd_maximize(__gd_eval, ctx->testcases.data[0].values, max_inputs, &max_val,
+    gd_maximize(__gd_eval, ctx->testcases.data[0].values, tmp_input, &max_val,
                 ctx->testcases.data[0].values_len);
 
-    __vals_long_to_char(max_inputs, tmp_proof, *out_len);
+    __vals_long_to_char(tmp_input, tmp_proof, *out_len);
     *out_values = tmp_proof;
-    free(max_inputs);
     return max_val;
 #endif
 }
@@ -2102,15 +2247,16 @@ unsigned long z3fuzz_minimize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_minimize,
     __glob_gd_is_maximizing = 0;
     __glob_gd_pi = pi;
     __glob_gd_ast = to_minimize;
-    unsigned long* min_inputs = (unsigned long*)malloc(
-        sizeof(unsigned long) * ctx->testcases.data[0].values_len);
 
+    testcase_t* current_testcase = &ctx->testcases.data[0];
+    memcpy(tmp_input, current_testcase->values,
+           current_testcase->values_len * sizeof(unsigned long));
     unsigned long min_val;
-    gd_minimize(__gd_eval, ctx->testcases.data[0].values, min_inputs, &min_val,
+    gd_minimize(__gd_eval, ctx->testcases.data[0].values, tmp_input, &min_val,
                 ctx->testcases.data[0].values_len);
-    __vals_long_to_char(min_inputs, tmp_proof, *out_len);
+
+    __vals_long_to_char(tmp_input, tmp_proof, *out_len);
     *out_values = tmp_proof;
-    free(min_inputs);
     return min_val;
 #endif
 }
