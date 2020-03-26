@@ -1,5 +1,5 @@
 CC=gcc
-CFLAGS=-Wall -g -O3 -fPIC
+CFLAGS=-Wall -s -O3 -fPIC
 CLIBS=-lz3
 CLIB_PATHS=-L./fuzzolic-z3/build
 CINCLUDE=-I./fuzzolic-z3/src/api -I./include
@@ -32,7 +32,7 @@ fuzzy-lib:
 	rm z3-fuzzy.o testcase-list.o gradient_descend.o md5.o
 
 clean:
-	rm -f libZ3Fuzzy.a z3-fuzzy-lib-old.a fuzzy-solver solver test-old
+	rm -f libZ3Fuzzy.a fuzzy-solver solver eval-driver maxmin-driver debug-eval
 
 clean-tests:
 	rm tests/*
