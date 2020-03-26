@@ -2,7 +2,6 @@
 #include <fcntl.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include "utility/md5.h"
 #include "utility/gradient_descend.h"
 #include "z3-fuzzy.h"
 
@@ -21,11 +20,19 @@
 // #define LOG_QUERY_STATS
 // #define DEBUG_CHECK_LIGHT
 
-#define CHECK_UNNECESSARY_EVALS
 // #define SKIP_NOTIFY
 // #define SKIP_DETERMINISTIC
 #define USE_GREEDY_MAXMIN
 #define SKIP_HAVOC
+
+#define CHECK_UNNECESSARY_EVALS
+// #define USE_MD5_HASH
+
+#ifdef USE_MD5_HASH
+#include "utility/md5.h"
+#else
+#include "utility/xxhash/xxh3.h"
+#endif
 
 // generate parametric data structures
 #include "z3-fuzzy-datastructures-gen.h"
@@ -91,8 +98,8 @@ static inline unsigned UR(unsigned limit)
 
 static void __init_ast_data(ast_data_t* ast_data)
 {
-    set_init__md5_digest_t(&ast_data->processed_set, &md5_64bit_hash,
-                           &md5_digest_equals);
+    set_init__digest_t(&ast_data->processed_set, &digest_64bit_hash,
+                       &digest_equals);
     set_init__index_group_t(&ast_data->index_groups, &index_group_hash,
                             &index_group_equals);
     set_init__ulong(&ast_data->indexes, &index_hash, &index_equals);
@@ -101,7 +108,7 @@ static void __init_ast_data(ast_data_t* ast_data)
 
 static void __free_ast_data(ast_data_t* ast_data)
 {
-    set_free__md5_digest_t(&ast_data->processed_set);
+    set_free__digest_t(&ast_data->processed_set);
     set_free__index_group_t(&ast_data->index_groups);
     set_free__ulong(&ast_data->indexes);
     da_free__ulong(&ast_data->values, NULL);
@@ -286,13 +293,26 @@ static inline int __evaluate_branch_query(fuzzy_ctx_t* ctx, Z3_ast query,
     ctx->stats.num_evaluate++;
 
 #ifdef CHECK_UNNECESSARY_EVALS
-    md5_digest_t d;
+    digest_t d;
+#ifdef USE_MD5_HASH
     md5((unsigned char*)values, ctx->n_symbols * sizeof(unsigned long),
         d.digest);
+#else
+    XXH128_hash_t xxd = XXH3_128bits((unsigned char*)values,
+                                     ctx->n_symbols * sizeof(unsigned long));
+    d.digest[0]       = xxd.high64 & 0xff;
+    d.digest[1]       = (xxd.high64 >> 8) & 0xff;
+    d.digest[2]       = (xxd.high64 >> 16) & 0xff;
+    d.digest[3]       = (xxd.high64 >> 24) & 0xff;
+    d.digest[4]       = xxd.low64 & 0xff;
+    d.digest[5]       = (xxd.low64 >> 8) & 0xff;
+    d.digest[6]       = (xxd.low64 >> 16) & 0xff;
+    d.digest[7]       = (xxd.low64 >> 24) & 0xff;
+#endif
 
-    if (set_check__md5_digest_t(&ast_data.processed_set, d))
+    if (set_check__digest_t(&ast_data.processed_set, d))
         return 0;
-    set_add__md5_digest_t(&ast_data.processed_set, d);
+    set_add__digest_t(&ast_data.processed_set, d);
 #endif
 
     int res =
@@ -960,7 +980,7 @@ static inline int __detect_strcmp_pattern(fuzzy_ctx_t* ctx, Z3_ast ast,
 
 static inline void __reset_ast_data()
 {
-    set_remove_all__md5_digest_t(&ast_data.processed_set);
+    set_remove_all__digest_t(&ast_data.processed_set);
     set_remove_all__index_group_t(&ast_data.index_groups);
     set_remove_all__ulong(&ast_data.indexes);
     da_remove_all__ulong(&ast_data.values);
@@ -2177,11 +2197,11 @@ static inline unsigned long __minimize_maximize_inner_greedy(
     return max_min;
 }
 
-static char          __glob_gd_is_maximizing;
-static Z3_ast        __glob_gd_pi      = 0;
-static Z3_ast        __glob_gd_ast     = 0;
-static fuzzy_ctx_t*  __glob_gd_context = NULL;
-static __attribute__ ((unused)) unsigned long __gd_eval(unsigned long* x)
+static char                                  __glob_gd_is_maximizing;
+static Z3_ast                                __glob_gd_pi      = 0;
+static Z3_ast                                __glob_gd_ast     = 0;
+static fuzzy_ctx_t*                          __glob_gd_context = NULL;
+static __attribute__((unused)) unsigned long __gd_eval(unsigned long* x)
 {
     testcase_t* seed_testcase = &__glob_gd_context->testcases.data[0];
 

@@ -47,14 +47,14 @@ typedef da__ulong values_t;
 // *********** end values array **********
 
 // *********** evaluate set **************
-typedef struct md5_digest_t {
+typedef struct digest_t {
     unsigned char digest[16];
-} md5_digest_t;
-unsigned long md5_64bit_hash(md5_digest_t* el)
+} digest_t;
+unsigned long digest_64bit_hash(digest_t* el)
 {
     return *((unsigned long*)&el->digest);
 }
-unsigned int md5_digest_equals(md5_digest_t* el1, md5_digest_t* el2)
+unsigned int digest_equals(digest_t* el1, digest_t* el2)
 {
     unsigned i;
     for (i = 0; i < 16; ++i)
@@ -63,8 +63,8 @@ unsigned int md5_digest_equals(md5_digest_t* el1, md5_digest_t* el2)
     return 1;
 }
 
-#define SET_DATA_T md5_digest_t
+#define SET_DATA_T digest_t
 #include <set.h>
 
-typedef set__md5_digest_t processed_set_t;
+typedef set__digest_t processed_set_t;
 // ********* end evaluate set ************
