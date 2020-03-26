@@ -170,7 +170,7 @@ int main(int argc, char* argv[])
     char           var_name[128];
     Z3_sort        bsort = Z3_mk_bv_sort(ctx, 8);
     struct timeval stop, start;
-    unsigned long  elapsed_time = 0, elapsed_time_fast_sat = 0,
+    __attribute__ ((unused)) unsigned long  elapsed_time = 0, elapsed_time_fast_sat = 0,
                   elapsed_time_slow_sat = 0, elapsed_time_unsat = 0,
                   elapsed_time_unknown = 0;
     unsigned int i;
@@ -211,7 +211,7 @@ int main(int argc, char* argv[])
         Z3_ast query = Z3_ast_vector_get(ctx, queries, i);
         query        = Z3_substitute(ctx, query, fctx.n_symbols, str_symbols,
                               fctx.symbols);
-        Z3_ast branch_condition = find_branch_condition(query);
+        __attribute__ ((unused)) Z3_ast branch_condition = find_branch_condition(query);
 
 #ifdef EVAL_ONLY_BRANCH
         query = branch_condition;

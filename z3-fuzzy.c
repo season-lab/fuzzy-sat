@@ -2178,7 +2178,7 @@ static char          __glob_gd_is_maximizing;
 static Z3_ast        __glob_gd_pi      = 0;
 static Z3_ast        __glob_gd_ast     = 0;
 static fuzzy_ctx_t*  __glob_gd_context = NULL;
-static unsigned long __gd_eval(unsigned long* x)
+static __attribute__ ((unused)) unsigned long __gd_eval(unsigned long* x)
 {
     testcase_t* seed_testcase = &__glob_gd_context->testcases.data[0];
 
