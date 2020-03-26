@@ -21,10 +21,10 @@
 // #define LOG_QUERY_STATS
 // #define DEBUG_CHECK_LIGHT
 
-// #define CHECK_UNNECESSARY_EVALS
+#define CHECK_UNNECESSARY_EVALS
 // #define SKIP_NOTIFY
 // #define SKIP_DETERMINISTIC
-// #define USE_GREEDY_MAXMIN
+#define USE_GREEDY_MAXMIN
 #define SKIP_HAVOC
 
 // generate parametric data structures
@@ -2205,7 +2205,7 @@ unsigned long z3fuzz_maximize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_maximize,
 {
     *out_len = ctx->testcases.data[0].testcase_len;
 #ifdef USE_GREEDY_MAXMIN
-    return __minimize_maximize_inner(ctx, pi, to_maximize, out_values, 1);
+    return __minimize_maximize_inner_greedy(ctx, pi, to_maximize, out_values, 1);
 #else
     __glob_gd_context = ctx;
     __glob_gd_is_maximizing = 1;
@@ -2241,7 +2241,7 @@ unsigned long z3fuzz_minimize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_minimize,
 {
     *out_len = ctx->testcases.data[0].testcase_len;
 #ifdef USE_GREEDY_MAXMIN
-    return __minimize_maximize_inner(ctx, pi, to_minimize, out_values, 0);
+    return __minimize_maximize_inner_greedy(ctx, pi, to_minimize, out_values, 0);
 #else
     __glob_gd_context = ctx;
     __glob_gd_is_maximizing = 0;
