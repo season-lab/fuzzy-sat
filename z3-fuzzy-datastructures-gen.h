@@ -50,10 +50,14 @@ typedef da__ulong values_t;
 typedef struct digest_t {
     unsigned char digest[16];
 } digest_t;
+
 unsigned long digest_64bit_hash(digest_t* el)
 {
-    return *((unsigned long*)&el->digest);
+    unsigned long* __attribute__((__may_alias__)) digest_p =
+        ((unsigned long*)&el->digest);
+    return *digest_p;
 }
+
 unsigned int digest_equals(digest_t* el1, digest_t* el2)
 {
     unsigned i;
