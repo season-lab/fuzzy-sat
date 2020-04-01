@@ -24,13 +24,19 @@
 
 #define WRAPPING_ADD_8(x, y) (uint8_t)((uint8_t)(x) + (uint8_t)(y))
 #define WRAPPING_SUB_8(x, y) (uint8_t)((uint8_t)(x) - (uint8_t)(y))
-#define SATURATING_ADD_64(x, y)                                                \
-    (uint64_t)((((uint64_t)(x) + (uint64_t)(y)) < (uint64_t)(x))               \
-                   ? INT64_MAX                                                 \
-                   : ((uint64_t)(x) + (uint64_t)(y)))
 #define STATIONARY 0
 #define ASCENDING 1
 #define DESCENDING 2
+
+static inline uint8_t saturating_add8(uint8_t a, uint8_t b)
+{
+    return (a > 0xFFFF - b) ? 0xFFFF : a + b;
+}
+
+static inline uint8_t saturating_sub8(uint8_t a, uint8_t b)
+{
+    return b > a ? 0 : a - b;
+}
 
 typedef struct gradient_el_t {
     uint64_t value;
@@ -54,14 +60,14 @@ static inline unsigned UR(unsigned limit)
 }
 
 static void partial_derivative(gradient_el_t* out_grad_el,
-                               uint64_t (*function)(uint64_t*), uint64_t f0,
+                               uint64_t (*function)(uint64_t*), int64_t f0,
                                uint64_t* x0, uint32_t i)
 {
     uint64_t original_val = x0[i];
     x0[i]                 = (uint64_t)WRAPPING_ADD_8(original_val, 1);
-    uint64_t f_plus       = function(x0);
+    int64_t f_plus        = (int64_t)function(x0);
     x0[i]                 = (uint64_t)WRAPPING_SUB_8(original_val, 1);
-    uint64_t f_minus      = function(x0);
+    int64_t f_minus       = (int64_t)function(x0);
     x0[i]                 = original_val;
 
 #if DEBUG_PARTIAL_DERIVATIVE
@@ -105,7 +111,7 @@ static void partial_derivative(gradient_el_t* out_grad_el,
 }
 
 static void compute_gradient(gradient_el_t* out_grad,
-                             uint64_t (*function)(uint64_t*), uint64_t f0,
+                             uint64_t (*function)(uint64_t*), int64_t f0,
                              uint64_t* x0, uint32_t n)
 {
     uint32_t i;
@@ -142,25 +148,25 @@ static void compute_delta_all(uint64_t* x, gradient_el_t* grad, uint64_t step,
     uint32_t i;
     for (i = 0; i < n; ++i) {
         if (descending && grad[i].direction == ASCENDING)
-            x[i] -= grad[i].pct * step;
+            x[i] = saturating_sub8(x[i], grad[i].pct * step);
         else if (descending && grad[i].direction == DESCENDING)
-            x[i] += grad[i].pct * step;
+            x[i] = saturating_add8(x[i], grad[i].pct * step);
         else if (!descending && grad[i].direction == ASCENDING)
-            x[i] += grad[i].pct * step;
+            x[i] = saturating_add8(x[i], grad[i].pct * step);
         else if (!descending && grad[i].direction == DESCENDING)
-            x[i] -= grad[i].pct * step;
+            x[i] = saturating_sub8(x[i], grad[i].pct * step);
     }
 }
 
 static void descend(uint64_t (*function)(uint64_t*), gradient_el_t* grad,
-                    uint64_t* x0, uint64_t f0, uint64_t* out_x, uint64_t* out_f,
+                    uint64_t* x0, int64_t f0, uint64_t* out_x, int64_t* out_f,
                     uint32_t n)
 {
 #if DEBUG_DESCEND
     fprintf(stderr, ">>> DESCEND\n");
 #endif
-    uint64_t  f_prev = f0;
-    uint64_t  f_next = f0;
+    int64_t   f_prev = f0;
+    int64_t   f_next = f0;
     uint64_t* x_prev = (uint64_t*)malloc(sizeof(uint64_t) * n);
     uint64_t* x_next = out_x;
     memcpy(x_next, x0, sizeof(uint64_t) * n);
@@ -202,9 +208,11 @@ static void descend(uint64_t (*function)(uint64_t*), gradient_el_t* grad,
 
             uint64_t movement = grad[delta_idx].pct * step;
             if (grad[delta_idx].direction == ASCENDING)
-                x_next[delta_idx] -= movement;
+                x_next[delta_idx] =
+                    saturating_sub8(x_next[delta_idx], movement);
             else if (grad[delta_idx].direction == DESCENDING)
-                x_next[delta_idx] += movement;
+                x_next[delta_idx] =
+                    saturating_add8(x_next[delta_idx], movement);
             else {
                 assert(0 && "descend - should be unreachable");
             }
@@ -243,14 +251,14 @@ OUT:
 }
 
 static void ascend(uint64_t (*function)(uint64_t*), gradient_el_t* grad,
-                   uint64_t* x0, uint64_t f0, uint64_t* out_x, uint64_t* out_f,
+                   uint64_t* x0, int64_t f0, uint64_t* out_x, int64_t* out_f,
                    uint32_t n)
 {
 #if DEBUG_ASCEND
     fprintf(stderr, ">>> ASCEND\n");
 #endif
-    uint64_t  f_prev = f0;
-    uint64_t  f_next = f0;
+    int64_t   f_prev = f0;
+    int64_t   f_next = f0;
     uint64_t* x_prev = (uint64_t*)malloc(sizeof(uint64_t) * n);
     uint64_t* x_next = out_x;
     memcpy(x_next, x0, sizeof(uint64_t) * n);
@@ -292,9 +300,11 @@ static void ascend(uint64_t (*function)(uint64_t*), gradient_el_t* grad,
 
             uint64_t movement = grad[delta_idx].pct * step;
             if (grad[delta_idx].direction == ASCENDING)
-                x_next[delta_idx] += movement;
+                x_next[delta_idx] =
+                    saturating_add8(x_next[delta_idx], movement);
             else if (grad[delta_idx].direction == DESCENDING)
-                x_next[delta_idx] -= movement;
+                x_next[delta_idx] =
+                    saturating_sub8(x_next[delta_idx], movement);
             else {
                 assert(0 && "ascend - should be unreachable");
             }
@@ -351,8 +361,8 @@ void gd_minimize(uint64_t (*function)(uint64_t*), uint64_t* x0,
     uint64_t* x_next = out_x_min;
     memcpy(x_next, x0, n * sizeof(uint64_t));
 
-    uint64_t f_prev = function(x0);
-    uint64_t f_next = f_prev;
+    int64_t f_prev = (int64_t)function(x0);
+    int64_t f_next = f_prev;
 
     uint32_t epoch = 0;
     while (epoch < MAX_EPOCH) {
@@ -360,7 +370,7 @@ void gd_minimize(uint64_t (*function)(uint64_t*), uint64_t* x0,
         f_prev = f_next;
 
         compute_gradient(gradient, function, f_prev, x_prev, n);
-        uint32_t i = 0;
+        uint32_t i        = 0;
         uint64_t max_grad = max_gradient(gradient, n);
         while (max_grad == 0 && i++ < MAX_RANDOM_INPUT) {
             x_prev[UR(n)] ^= UR(256);
@@ -406,7 +416,7 @@ void gd_minimize(uint64_t (*function)(uint64_t*), uint64_t* x0,
         epoch++;
     }
 
-    *out_f_min = f_next;
+    *out_f_min = (uint64_t)f_next;
     free(gradient);
     free(x_prev);
 
@@ -434,8 +444,8 @@ void gd_maximize(uint64_t (*function)(uint64_t*), uint64_t* x0,
     uint64_t* x_next = out_x_max;
     memcpy(x_next, x0, n * sizeof(uint64_t));
 
-    uint64_t f_prev = function(x0);
-    uint64_t f_next = f_prev;
+    int64_t f_prev = (int64_t)function(x0);
+    int64_t f_next = f_prev;
 
     uint32_t epoch = 0;
     while (epoch < MAX_EPOCH) {
@@ -443,7 +453,7 @@ void gd_maximize(uint64_t (*function)(uint64_t*), uint64_t* x0,
         f_prev = f_next;
 
         compute_gradient(gradient, function, f_prev, x_prev, n);
-        uint32_t i = 0;
+        uint32_t i        = 0;
         uint64_t max_grad = max_gradient(gradient, n);
         while (max_grad == 0 && i++ < MAX_RANDOM_INPUT) {
             x_prev[UR(n)] ^= UR(256);
@@ -498,12 +508,66 @@ void gd_maximize(uint64_t (*function)(uint64_t*), uint64_t* x0,
 #endif
 }
 
-void gd_init() {
+static gradient_el_t* __tmp_gradient;
+static unsigned       __tmp_gradient_size = 0;
+static void           init_tmp_gradient(uint32_t n)
+{
+    if (__tmp_gradient_size < n) {
+        __tmp_gradient = realloc(__tmp_gradient, n * sizeof(gradient_el_t));
+        __tmp_gradient_size = n;
+    }
+}
+
+int gd_descend_transf(uint64_t (*function)(uint64_t*), uint64_t* x0,
+                      uint64_t* out_x, uint64_t* out_f, uint32_t n)
+{
+    init_tmp_gradient(n);
+    gradient_el_t* gradient = __tmp_gradient;
+
+    int64_t f0 = function(x0);
+    compute_gradient(gradient, function, f0, x0, n);
+    if (max_gradient(gradient, n) == 0) {
+        // we reached a min
+        return 1;
+    }
+    normalize_gradient(gradient, n);
+
+    descend(function, gradient, x0, f0, out_x, (int64_t*)out_f, n);
+    return 0;
+}
+
+int gd_ascend_transf(uint64_t (*function)(uint64_t*), uint64_t* x0,
+                     uint64_t* out_x, uint64_t* out_f, uint32_t n)
+{
+    init_tmp_gradient(n);
+    gradient_el_t* gradient = __tmp_gradient;
+
+    int64_t f0 = function(x0);
+    compute_gradient(gradient, function, f0, x0, n);
+    if (max_gradient(gradient, n) == 0) {
+        // we reached a max
+        return 1;
+    }
+    normalize_gradient(gradient, n);
+
+    ascend(function, gradient, x0, f0, out_x, (int64_t*)out_f, n);
+    return 0;
+}
+
+void gd_init()
+{
     dev_urandom_fd = open("/dev/urandom", O_RDONLY);
     if (dev_urandom_fd < 0)
         assert(0 && "Unable to open /dev/urandom");
 
+    __tmp_gradient      = (gradient_el_t*)malloc(sizeof(gradient_el_t) * 10);
+    __tmp_gradient_size = 10;
 }
-void gd_free() {
+
+void gd_free()
+{
     close(dev_urandom_fd);
+    free(__tmp_gradient);
+    __tmp_gradient_size = 0;
+    __tmp_gradient      = NULL;
 }

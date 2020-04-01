@@ -22,7 +22,8 @@
 
 // #define SKIP_NOTIFY
 // #define SKIP_DETERMINISTIC
-#define USE_GREEDY_MAXMIN
+// #define SKIP_GRADIENT_TRANSF
+// #define USE_GREEDY_MAXMIN
 #define SKIP_HAVOC
 
 #define CHECK_UNNECESSARY_EVALS
@@ -95,6 +96,181 @@ static inline unsigned UR(unsigned limit)
     }
     return random() % limit;
 }
+
+// ********* gradient stuff *********
+static void __reset_ast_data();
+static void __detect_involved_inputs(fuzzy_ctx_t* ctx, Z3_ast v,
+                                     ast_data_t* data);
+
+static char                         __glob_gd_is_maximizing;
+static char                         __glob_check_pi_eval;
+static unsigned long*               __glob_gd_input         = NULL;
+static unsigned long*               __glob_gd_mapping       = NULL;
+static unsigned                     __glob_gd_mapping_size  = 0;
+static unsigned                     __glob_gb_ast_sort_size = 0;
+static Z3_ast                       __glob_gd_pi            = 0;
+static Z3_ast                       __glob_gd_ast           = 0;
+static fuzzy_ctx_t*                 __glob_gd_context       = NULL;
+static __attribute__((unused)) void __gd_fix_tmp_input(unsigned long* x)
+{
+    unsigned i = 0;
+    for (i = 0; i < __glob_gd_mapping_size; ++i)
+        tmp_input[__glob_gd_mapping[i]] = x[i];
+}
+
+static __attribute__((unused)) unsigned long __gd_eval(unsigned long* x)
+{
+    testcase_t* seed_testcase = &__glob_gd_context->testcases.data[0];
+    __gd_fix_tmp_input(x);
+
+    if (__glob_check_pi_eval) {
+        unsigned long pi_eval = __glob_gd_context->model_eval(
+            __glob_gd_context->z3_ctx, __glob_gd_pi, x,
+            seed_testcase->value_sizes, seed_testcase->values_len);
+
+        if (!pi_eval) {
+            if (__glob_gd_is_maximizing) {
+                return 0;
+            } else {
+                return 0xffffffffffffffff;
+            }
+        }
+    }
+
+    unsigned long res = __glob_gd_context->model_eval(
+        __glob_gd_context->z3_ctx, __glob_gd_ast, x, seed_testcase->value_sizes,
+        seed_testcase->values_len);
+    unsigned sign_bit = 1 << (__glob_gb_ast_sort_size - 1);
+
+    if (res & sign_bit)
+        // sign extend
+        res += (((2 << (64 - __glob_gb_ast_sort_size - 1)) - 1)
+                << __glob_gb_ast_sort_size);
+    return res;
+}
+
+static __attribute__((unused)) void
+__gd_init_eval(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast expr, char is_maximizing,
+               char check_pi_eval, char must_initialize_ast)
+{
+    __glob_gd_context       = ctx;
+    __glob_gd_is_maximizing = is_maximizing;
+    __glob_gd_pi            = pi;
+    __glob_gd_ast           = expr;
+    __glob_check_pi_eval    = check_pi_eval;
+
+    Z3_sort bv_sort = Z3_get_sort(ctx->z3_ctx, expr);
+    assert(Z3_get_sort_kind(ctx->z3_ctx, bv_sort) == Z3_BV_SORT &&
+           "gd works with bitvectors");
+    __glob_gb_ast_sort_size = Z3_get_bv_sort_size(ctx->z3_ctx, bv_sort);
+
+    if (must_initialize_ast) {
+        __reset_ast_data();
+        __detect_involved_inputs(ctx, expr, &ast_data);
+        assert(ast_data.indexes.size > 0 &&
+               "__gd_init_eval() no input in expr");
+    }
+
+    if (__glob_gd_mapping_size < ast_data.indexes.size) {
+        if (__glob_gd_mapping == 0)
+            __glob_gd_mapping = (unsigned long*)malloc(sizeof(unsigned long) *
+                                                       ast_data.indexes.size);
+        else
+            __glob_gd_mapping = (unsigned long*)realloc(
+                __glob_gd_mapping,
+                sizeof(unsigned long) * ast_data.indexes.size);
+
+        if (__glob_gd_input == 0)
+            __glob_gd_input = (unsigned long*)malloc(sizeof(unsigned long) *
+                                                     ast_data.indexes.size);
+        else
+            __glob_gd_input = (unsigned long*)realloc(
+                __glob_gd_input, sizeof(unsigned long) * ast_data.indexes.size);
+
+        __glob_gd_mapping_size = ast_data.indexes.size;
+    }
+
+    unsigned i = 0;
+    ulong*   p;
+    set_reset_iter__ulong(&ast_data.indexes, 0);
+    while (set_iter_next__ulong(&ast_data.indexes, 0, &p)) {
+        __glob_gd_mapping[i] = *p;
+        __glob_gd_input[i++] = tmp_input[*p];
+    }
+}
+
+static void __gradient_transf_init(Z3_context ctx, Z3_ast expr, Z3_ast* out_exp,
+                                   int* is_ascend)
+{
+    assert(Z3_get_ast_kind(ctx, expr) == Z3_APP_AST &&
+           "__gradient_transf_init expects an APP argument");
+
+    Z3_app       app       = Z3_to_app(ctx, expr);
+    Z3_func_decl decl      = Z3_get_app_decl(ctx, app);
+    Z3_decl_kind decl_kind = Z3_get_decl_kind(ctx, decl);
+
+    int    is_not = 0;
+    Z3_ast arg;
+    while (decl_kind == Z3_OP_NOT) {
+        arg       = Z3_get_app_arg(ctx, app, 0);
+        app       = Z3_to_app(ctx, arg);
+        decl      = Z3_get_app_decl(ctx, app);
+        decl_kind = Z3_get_decl_kind(ctx, decl);
+        is_not    = !is_not;
+    }
+
+    assert(Z3_get_app_num_args(ctx, app) == 2 &&
+           "__gradient_transf_init requires a binary APP");
+
+    Z3_ast arg1    = Z3_get_app_arg(ctx, app, 0);
+    Z3_ast arg2    = Z3_get_app_arg(ctx, app, 1);
+    Z3_ast args[2] = {0};
+
+PRE_SWITCH:
+    switch (decl_kind) {
+        case Z3_OP_SGT:
+        case Z3_OP_SGEQ:
+        case Z3_OP_UGT:
+        case Z3_OP_UGEQ: { // arg1 > arg2 => arg1 - arg2
+            if (is_not) {
+                is_not    = 0;
+                decl_kind = Z3_OP_SLT;
+                goto PRE_SWITCH;
+            }
+            args[0]    = arg1;
+            args[1]    = arg2;
+            *out_exp   = Z3_mk_bvsub(ctx, args[0], args[1]);
+            *is_ascend = 1;
+            break;
+        }
+        case Z3_OP_SLT:
+        case Z3_OP_SLEQ:
+        case Z3_OP_ULT:
+        case Z3_OP_ULEQ: { // arg1 < arg2 => arg2 - arg1
+            if (is_not) {
+                is_not    = 0;
+                decl_kind = Z3_OP_SGT;
+                goto PRE_SWITCH;
+            }
+            args[0]    = arg2;
+            args[1]    = arg1;
+            *out_exp   = Z3_mk_bvsub(ctx, args[0], args[1]);
+            *is_ascend = 1;
+            break;
+        }
+        case Z3_OP_EQ: { // arg1 (== or !=) arg2 => arg1 - arg2
+            args[0]    = arg1;
+            args[1]    = arg2;
+            *out_exp   = Z3_mk_bvsub(ctx, args[0], args[1]);
+            *is_ascend = 0;
+            break;
+        }
+
+        default:
+            assert(0 && "__gradient_transf_init unknown decl kind");
+    }
+}
+// **********************************
 
 static void __init_ast_data(ast_data_t* ast_data)
 {
@@ -169,6 +345,8 @@ void z3fuzz_init(fuzzy_ctx_t* fctx, Z3_context ctx, char* seed_filename,
                  uint64_t (*model_eval)(Z3_context, Z3_ast, uint64_t*, uint8_t*,
                                         size_t))
 {
+    memset((void*)&fctx->stats, 0, sizeof(fuzzy_stats_t));
+
     Z3_set_ast_print_mode(ctx, Z3_PRINT_SMTLIB2_COMPLIANT);
 
     dev_urandom_fd = open("/dev/urandom", O_RDONLY);
@@ -254,6 +432,9 @@ void z3fuzz_free(fuzzy_ctx_t* ctx)
     set_free__ulong((set__ulong*)ctx->univocally_defined_inputs);
     free(ctx->univocally_defined_inputs);
 
+    free(__glob_gd_input);
+    free(__glob_gd_mapping);
+
     gd_free();
 
 #ifdef PRINT_NUM_EVALUATE
@@ -285,21 +466,14 @@ static inline void __vals_long_to_char(unsigned long* in_vals,
         out_vals[i] = (unsigned char)in_vals[i];
 }
 
-static inline int __evaluate_branch_query(fuzzy_ctx_t* ctx, Z3_ast query,
-                                          unsigned long* values,
-                                          unsigned char* value_sizes,
-                                          unsigned long  n_values)
+static inline int __check_or_add_digest(set__digest_t* set,
+                                        unsigned char* values, unsigned n)
 {
-    ctx->stats.num_evaluate++;
-
-#ifdef CHECK_UNNECESSARY_EVALS
     digest_t d;
 #ifdef USE_MD5_HASH
-    md5((unsigned char*)values, ctx->n_symbols * sizeof(unsigned long),
-        d.digest);
+    md5((unsigned char*)values, n, d.digest);
 #else
-    XXH128_hash_t xxd = XXH3_128bits((unsigned char*)values,
-                                     ctx->n_symbols * sizeof(unsigned long));
+    XXH128_hash_t xxd = XXH3_128bits((unsigned char*)values, n);
     d.digest[0]       = xxd.high64 & 0xff;
     d.digest[1]       = (xxd.high64 >> 8) & 0xff;
     d.digest[2]       = (xxd.high64 >> 16) & 0xff;
@@ -310,9 +484,23 @@ static inline int __evaluate_branch_query(fuzzy_ctx_t* ctx, Z3_ast query,
     d.digest[7]       = (xxd.low64 >> 24) & 0xff;
 #endif
 
-    if (set_check__digest_t(&ast_data.processed_set, d))
+    if (set_check__digest_t(set, d))
+        return 1;
+    set_add__digest_t(set, d);
+    return 0;
+}
+
+static inline int __evaluate_branch_query(fuzzy_ctx_t* ctx, Z3_ast query,
+                                          unsigned long* values,
+                                          unsigned char* value_sizes,
+                                          unsigned long  n_values)
+{
+    ctx->stats.num_evaluate++;
+
+#ifdef CHECK_UNNECESSARY_EVALS
+    if (__check_or_add_digest(&ast_data.processed_set, (unsigned char*)values,
+                              ctx->n_symbols * sizeof(unsigned long)))
         return 0;
-    set_add__digest_t(&ast_data.processed_set, d);
 #endif
 
     int res =
@@ -535,8 +723,6 @@ static void __union_indexes(ast_data_t* dst, ast_data_t* src)
     }
 }
 
-static void __detect_involved_inputs(fuzzy_ctx_t* ctx, Z3_ast v,
-                                     ast_data_t* data);
 static void __detect_assignment_involved_inputs(fuzzy_ctx_t* ctx,
                                                 unsigned     assignment_idx,
                                                 ast_data_t*  data)
@@ -1200,7 +1386,7 @@ L3:
 
     if (ast_data.indexes.size != 1) {
         // too much entropy
-        goto L4;
+        goto L31;
     }
 #ifdef DEBUG_CHECK_LIGHT
     Z3FUZZ_LOG("Trying L3\n");
@@ -1226,6 +1412,69 @@ L3:
     }
     // if we are here, the query is UNSAT
     return 0;
+
+    // L33 -- GRADIENT BASED TRANSFORMATIONS
+L31:
+
+#ifdef SKIP_GRADIENT_TRANSF
+    goto L4;
+#endif
+
+    if (0)
+        goto L4;
+
+    Z3_ast out_ast;
+    int    is_ascend;
+    __gradient_transf_init(ctx->z3_ctx, branch_condition, &out_ast, &is_ascend);
+
+    __gd_init_eval(ctx, query, out_ast, 0, 0, 0);
+    set__digest_t digest_set;
+    set_init__digest_t(&digest_set, digest_64bit_hash, digest_equals);
+
+    int (*transf)(uint64_t(*)(uint64_t*), uint64_t*, uint64_t*, uint64_t*,
+                  uint32_t);
+    if (is_ascend)
+        transf = gd_ascend_transf;
+    else
+        transf = gd_descend_transf;
+
+    unsigned long* out =
+        (unsigned long*)malloc(__glob_gd_mapping_size * sizeof(unsigned long));
+
+    uint64_t val;
+    while ((transf(__gd_eval, __glob_gd_input, out, &val,
+                   __glob_gd_mapping_size) == 0) &&
+           (__check_or_add_digest(&digest_set, (unsigned char*)out,
+                                  __glob_gd_mapping_size *
+                                      sizeof(unsigned long)) == 0)) {
+        __gd_fix_tmp_input(out);
+        if (__evaluate_branch_query(ctx, query, tmp_input,
+                                    current_testcase->value_sizes,
+                                    current_testcase->values_len)) {
+#ifdef PRINT_SAT
+            Z3FUZZ_LOG("[check light L31] "
+                       "Query is SAT\n");
+#endif
+            ctx->stats.L31++;
+            ctx->stats.num_sat++;
+            __vals_long_to_char(tmp_input, tmp_proof,
+                                current_testcase->testcase_len);
+            *proof      = tmp_proof;
+            *proof_size = current_testcase->testcase_len;
+            set_free__digest_t(&digest_set);
+            free(out);
+            return 1;
+        }
+        memcpy(__glob_gd_input, out,
+               sizeof(unsigned long) * __glob_gd_mapping_size);
+    }
+
+    set_free__digest_t(&digest_set);
+    free(out);
+    for (i = 0; i < __glob_gd_mapping_size; ++i)
+        tmp_input[__glob_gd_mapping[i]] =
+            current_testcase->values[__glob_gd_mapping[i]];
+    goto L4;
 
     // L4 -- DETERMINISTIC AFL TRANSFORMATIONS
 L4:
@@ -2197,31 +2446,6 @@ static inline unsigned long __minimize_maximize_inner_greedy(
     return max_min;
 }
 
-static char                                  __glob_gd_is_maximizing;
-static Z3_ast                                __glob_gd_pi      = 0;
-static Z3_ast                                __glob_gd_ast     = 0;
-static fuzzy_ctx_t*                          __glob_gd_context = NULL;
-static __attribute__((unused)) unsigned long __gd_eval(unsigned long* x)
-{
-    testcase_t* seed_testcase = &__glob_gd_context->testcases.data[0];
-
-    unsigned long pi_eval = __glob_gd_context->model_eval(
-        __glob_gd_context->z3_ctx, __glob_gd_pi, x, seed_testcase->value_sizes,
-        seed_testcase->values_len);
-
-    if (!pi_eval) {
-        if (__glob_gd_is_maximizing) {
-            return 0;
-        } else {
-            return 0xffffffffffffffff;
-        }
-    }
-
-    return __glob_gd_context->model_eval(
-        __glob_gd_context->z3_ctx, __glob_gd_ast, x, seed_testcase->value_sizes,
-        seed_testcase->values_len);
-}
-
 unsigned long z3fuzz_maximize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_maximize,
                               unsigned char const** out_values,
                               unsigned long*        out_len)
@@ -2231,14 +2455,9 @@ unsigned long z3fuzz_maximize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_maximize,
     return __minimize_maximize_inner_greedy(ctx, pi, to_maximize, out_values,
                                             1);
 #else
-    __glob_gd_context = ctx;
-    __glob_gd_is_maximizing = 1;
-    __glob_gd_pi = pi;
-    __glob_gd_ast = to_maximize;
+    __gd_init_eval(ctx, pi, to_maximize, 1, 1, 1);
 
     testcase_t* current_testcase = &ctx->testcases.data[0];
-    memcpy(tmp_input, current_testcase->values,
-           current_testcase->values_len * sizeof(unsigned long));
 
     // detect the strcmp pattern
     if (__detect_strcmp_pattern(ctx, to_maximize, tmp_input)) {
@@ -2250,9 +2469,10 @@ unsigned long z3fuzz_maximize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_maximize,
     }
 
     unsigned long max_val;
-    gd_maximize(__gd_eval, ctx->testcases.data[0].values, tmp_input, &max_val,
-                ctx->testcases.data[0].values_len);
+    gd_maximize(__gd_eval, __glob_gd_input, __glob_gd_input, &max_val,
+                __glob_gd_mapping_size);
 
+    __gd_fix_tmp_input(__glob_gd_input);
     __vals_long_to_char(tmp_input, tmp_proof, *out_len);
     *out_values = tmp_proof;
     return max_val;
@@ -2268,18 +2488,13 @@ unsigned long z3fuzz_minimize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_minimize,
     return __minimize_maximize_inner_greedy(ctx, pi, to_minimize, out_values,
                                             0);
 #else
-    __glob_gd_context = ctx;
-    __glob_gd_is_maximizing = 0;
-    __glob_gd_pi = pi;
-    __glob_gd_ast = to_minimize;
+    __gd_init_eval(ctx, pi, to_minimize, 0, 1, 1);
 
-    testcase_t* current_testcase = &ctx->testcases.data[0];
-    memcpy(tmp_input, current_testcase->values,
-           current_testcase->values_len * sizeof(unsigned long));
     unsigned long min_val;
-    gd_minimize(__gd_eval, ctx->testcases.data[0].values, tmp_input, &min_val,
-                ctx->testcases.data[0].values_len);
+    gd_minimize(__gd_eval, __glob_gd_input, __glob_gd_input, &min_val,
+                __glob_gd_mapping_size);
 
+    __gd_fix_tmp_input(__glob_gd_input);
     __vals_long_to_char(tmp_input, tmp_proof, *out_len);
     *out_values = tmp_proof;
     return min_val;

@@ -11,4 +11,9 @@ void gd_minimize(uint64_t (*function)(uint64_t*), uint64_t* x0,
 void gd_maximize(uint64_t (*function)(uint64_t*), uint64_t* x0,
                  uint64_t* out_x_max, uint64_t* out_f_max, uint32_t n);
 
+int gd_descend_transf(uint64_t (*function)(uint64_t*), uint64_t* x0,
+                      uint64_t* out_x, uint64_t* out_f, uint32_t n);
+int gd_ascend_transf(uint64_t (*function)(uint64_t*), uint64_t* x0,
+                     uint64_t* out_x, uint64_t* out_f, uint32_t n);
+
 #endif

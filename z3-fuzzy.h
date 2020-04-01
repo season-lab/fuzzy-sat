@@ -12,6 +12,7 @@ typedef struct fuzzy_stats_t {
     unsigned long L1;
     unsigned long L2;
     unsigned long L3;
+    unsigned long L31;
     unsigned long L4_flip1;
     unsigned long L4_flip2;
     unsigned long L4_flip4;
