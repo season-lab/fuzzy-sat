@@ -138,13 +138,14 @@ static __attribute__((unused)) unsigned long __gd_eval(unsigned long* x)
     }
 
     unsigned long res = __glob_gd_context->model_eval(
-        __glob_gd_context->z3_ctx, __glob_gd_ast, x, seed_testcase->value_sizes,
-        seed_testcase->values_len);
-    unsigned sign_bit = 1 << (__glob_gb_ast_sort_size - 1);
+        __glob_gd_context->z3_ctx, __glob_gd_ast, tmp_input,
+        seed_testcase->value_sizes, seed_testcase->values_len);
+
+    unsigned long sign_bit = 1UL << (__glob_gb_ast_sort_size - 1UL);
 
     if (res & sign_bit)
         // sign extend
-        res += (((2 << (64 - __glob_gb_ast_sort_size - 1)) - 1)
+        res |= (((2UL << (64UL - __glob_gb_ast_sort_size - 1UL)) - 1UL)
                 << __glob_gb_ast_sort_size);
     return res;
 }
@@ -199,8 +200,7 @@ __gd_init_eval(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast expr, char is_maximizing,
     }
 }
 
-static void __gradient_transf_init(Z3_context ctx, Z3_ast expr, Z3_ast* out_exp,
-                                   int* is_ascend)
+static void __gradient_transf_init(Z3_context ctx, Z3_ast expr, Z3_ast* out_exp)
 {
     assert(Z3_get_ast_kind(ctx, expr) == Z3_APP_AST &&
            "__gradient_transf_init expects an APP argument");
@@ -226,43 +226,60 @@ static void __gradient_transf_init(Z3_context ctx, Z3_ast expr, Z3_ast* out_exp,
     Z3_ast arg2    = Z3_get_app_arg(ctx, app, 1);
     Z3_ast args[2] = {0};
 
+    Z3_sort arg_sort = Z3_get_sort(ctx, arg1);
+    assert(Z3_get_sort_kind(ctx, arg_sort) == Z3_BV_SORT &&
+           "__gradient_transf_init requires a BV sort");
+    unsigned sort_size = Z3_get_bv_sort_size(ctx, arg_sort);
+    assert(sort_size > 1 && "__gradient_transf_init unexpected sort size");
+
+    if (sort_size < 64) {
+        arg1      = Z3_mk_sign_ext(ctx, 64 - sort_size, arg1);
+        arg2      = Z3_mk_sign_ext(ctx, 64 - sort_size, arg2);
+        sort_size = 64;
+    }
+
 PRE_SWITCH:
     switch (decl_kind) {
         case Z3_OP_SGT:
         case Z3_OP_SGEQ:
         case Z3_OP_UGT:
-        case Z3_OP_UGEQ: { // arg1 > arg2 => arg1 - arg2
+        case Z3_OP_UGEQ: { // arg1 > arg2 => arg2 - arg1
             if (is_not) {
                 is_not    = 0;
                 decl_kind = Z3_OP_SLT;
                 goto PRE_SWITCH;
             }
-            args[0]    = arg1;
-            args[1]    = arg2;
-            *out_exp   = Z3_mk_bvsub(ctx, args[0], args[1]);
-            *is_ascend = 1;
+            args[0]  = arg2;
+            args[1]  = arg1;
+            *out_exp = Z3_mk_bvsub(ctx, args[0], args[1]);
             break;
         }
         case Z3_OP_SLT:
         case Z3_OP_SLEQ:
         case Z3_OP_ULT:
-        case Z3_OP_ULEQ: { // arg1 < arg2 => arg2 - arg1
+        case Z3_OP_ULEQ: { // arg1 < arg2 => arg1 - arg2
             if (is_not) {
                 is_not    = 0;
                 decl_kind = Z3_OP_SGT;
                 goto PRE_SWITCH;
             }
-            args[0]    = arg2;
-            args[1]    = arg1;
-            *out_exp   = Z3_mk_bvsub(ctx, args[0], args[1]);
-            *is_ascend = 1;
+            args[0]  = arg1;
+            args[1]  = arg2;
+            *out_exp = Z3_mk_bvsub(ctx, args[0], args[1]);
             break;
         }
-        case Z3_OP_EQ: { // arg1 (== or !=) arg2 => arg1 - arg2
-            args[0]    = arg1;
-            args[1]    = arg2;
-            *out_exp   = Z3_mk_bvsub(ctx, args[0], args[1]);
-            *is_ascend = 0;
+        case Z3_OP_EQ: { // arg1 == arg2 =>   abs(arg1 - arg2)
+                         // arg1 != arg2 => - abs(arg1 - arg2)
+            args[0]  = arg1;
+            args[1]  = arg2;
+            *out_exp = Z3_mk_ite(ctx, Z3_mk_bvsgt(ctx, args[0], args[1]),
+                                 Z3_mk_bvsub(ctx, args[0], args[1]),
+                                 Z3_mk_bvsub(ctx, args[1], args[0]));
+            if (is_not)
+                *out_exp = Z3_mk_bvsub(
+                    ctx,
+                    Z3_mk_unsigned_int64(ctx, 0, Z3_mk_bv_sort(ctx, sort_size)),
+                    *out_exp);
             break;
         }
 
@@ -1424,8 +1441,8 @@ L31:
         goto L4;
 
     Z3_ast out_ast;
-    int    is_ascend;
-    __gradient_transf_init(ctx->z3_ctx, branch_condition, &out_ast, &is_ascend);
+    __gradient_transf_init(ctx->z3_ctx, branch_condition, &out_ast);
+    // printf("out_ast: %s\n", Z3_ast_to_string(ctx->z3_ctx, out_ast));
 
     __gd_init_eval(ctx, query, out_ast, 0, 0, 0);
     set__digest_t digest_set;
@@ -1433,10 +1450,7 @@ L31:
 
     int (*transf)(uint64_t(*)(uint64_t*), uint64_t*, uint64_t*, uint64_t*,
                   uint32_t);
-    if (is_ascend)
-        transf = gd_ascend_transf;
-    else
-        transf = gd_descend_transf;
+    transf = gd_descend_transf;
 
     unsigned long* out =
         (unsigned long*)malloc(__glob_gd_mapping_size * sizeof(unsigned long));

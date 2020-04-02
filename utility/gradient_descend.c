@@ -6,11 +6,15 @@
 #include <fcntl.h>
 #include "gradient_descend.h"
 
+#define DEBUG_GRADIENT 0
 #define DEBUG_PARTIAL_DERIVATIVE 0
 #define DEBUG_DESCEND 0
 #define DEBUG_ASCEND 0
 #define DEBUG_MINIMIZE 0
 #define DEBUG_MAXIMIZE 0
+
+#define max(x, y) (x) > (y) ? (x) : (y)
+#define min(x, y) (x) < (y) ? (x) : (y)
 
 #define DEBUG_PRINTF(format, ...)                                              \
     if (DEBUG) {                                                               \
@@ -59,6 +63,17 @@ static inline unsigned UR(unsigned limit)
     return random() % limit;
 }
 
+static __attribute__((unused)) void debug_dump_vector(char* name, uint64_t* v,
+                                                      uint32_t n)
+{
+    fprintf(stderr, "*** vector %s ***\n", name);
+    unsigned j;
+    for (j = 0; j < n; ++j) {
+        fprintf(stderr, "-> v[%u]\t= 0x%016lx\n", j, v[j]);
+    }
+    fprintf(stderr, "*** end %s ***\n", name);
+}
+
 static void partial_derivative(gradient_el_t* out_grad_el,
                                uint64_t (*function)(uint64_t*), int64_t f0,
                                uint64_t* x0, uint32_t i)
@@ -75,10 +90,10 @@ static void partial_derivative(gradient_el_t* out_grad_el,
     fprintf(stderr,
             "i:       %u\n"
             "x0[i]:   0x%016lx\n"
-            "f0:      0x%016lx\n"
-            "f_plus:  0x%016lx\n"
-            "f_minus: 0x%016lx\n",
-            i, x0[i], f0, f_plus, f_minus);
+            "f0:      0x%016lx [%ld]\n"
+            "f_plus:  0x%016lx [%ld]\n"
+            "f_minus: 0x%016lx [%ld]\n",
+            i, x0[i], f0, f0, f_plus, f_plus, f_minus, f_minus);
     fprintf(stderr, "<<< END PARTIAL DERIVATIVE\n");
 #endif
 
@@ -140,6 +155,22 @@ static void normalize_gradient(gradient_el_t* grad, uint32_t size)
     for (i = 0; i < size; ++i)
         grad[i].pct = GD_MOMENTUM_BETA * grad[i].pct +
                       (1.0L - GD_MOMENTUM_BETA) * ((double)grad[i].value) / max;
+
+#if DEBUG_GRADIENT
+    fprintf(stderr, "  gradient:\n");
+    unsigned j;
+    for (j = 0; j < size; ++j)
+        fprintf(stderr,
+                "    grad[%u].value     = 0x%016lx\n"
+                "    grad[%u].direction = %s\n"
+                "    grad[%u].pct       = %.08lf\n\n",
+                j, grad[j].value, j,
+                grad[j].direction == ASCENDING
+                    ? "ASCENDING"
+                    : (grad[j].direction == DESCENDING ? "DESCENDING"
+                                                       : "STATIONARY"),
+                j, grad[j].pct);
+#endif
 }
 
 static void compute_delta_all(uint64_t* x, gradient_el_t* grad, uint64_t step,
@@ -148,13 +179,13 @@ static void compute_delta_all(uint64_t* x, gradient_el_t* grad, uint64_t step,
     uint32_t i;
     for (i = 0; i < n; ++i) {
         if (descending && grad[i].direction == ASCENDING)
-            x[i] = saturating_sub8(x[i], grad[i].pct * step);
+            x[i] = WRAPPING_SUB_8(x[i], grad[i].pct * step);
         else if (descending && grad[i].direction == DESCENDING)
-            x[i] = saturating_add8(x[i], grad[i].pct * step);
+            x[i] = WRAPPING_ADD_8(x[i], grad[i].pct * step);
         else if (!descending && grad[i].direction == ASCENDING)
-            x[i] = saturating_add8(x[i], grad[i].pct * step);
+            x[i] = WRAPPING_ADD_8(x[i], grad[i].pct * step);
         else if (!descending && grad[i].direction == DESCENDING)
-            x[i] = saturating_sub8(x[i], grad[i].pct * step);
+            x[i] = WRAPPING_SUB_8(x[i], grad[i].pct * step);
     }
 }
 
@@ -209,10 +240,10 @@ static void descend(uint64_t (*function)(uint64_t*), gradient_el_t* grad,
             uint64_t movement = grad[delta_idx].pct * step;
             if (grad[delta_idx].direction == ASCENDING)
                 x_next[delta_idx] =
-                    saturating_sub8(x_next[delta_idx], movement);
+                    WRAPPING_SUB_8(x_next[delta_idx], movement);
             else if (grad[delta_idx].direction == DESCENDING)
                 x_next[delta_idx] =
-                    saturating_add8(x_next[delta_idx], movement);
+                    WRAPPING_ADD_8(x_next[delta_idx], movement);
             else {
                 assert(0 && "descend - should be unreachable");
             }
@@ -266,7 +297,9 @@ static void ascend(uint64_t (*function)(uint64_t*), gradient_el_t* grad,
     uint64_t step = 1;
     while (1) {
         memcpy(x_prev, x_next, sizeof(uint64_t) * n);
+        // debug_dump_vector("x_next (pre dall)", x_next, n);
         compute_delta_all(x_next, grad, step, n, 0);
+        // debug_dump_vector("x_next (post dall)", x_next, n);
 
         f_next = function(x_next);
 #if DEBUG_ASCEND
@@ -301,10 +334,10 @@ static void ascend(uint64_t (*function)(uint64_t*), gradient_el_t* grad,
             uint64_t movement = grad[delta_idx].pct * step;
             if (grad[delta_idx].direction == ASCENDING)
                 x_next[delta_idx] =
-                    saturating_add8(x_next[delta_idx], movement);
+                    WRAPPING_ADD_8(x_next[delta_idx], movement);
             else if (grad[delta_idx].direction == DESCENDING)
                 x_next[delta_idx] =
-                    saturating_sub8(x_next[delta_idx], movement);
+                    WRAPPING_SUB_8(x_next[delta_idx], movement);
             else {
                 assert(0 && "ascend - should be unreachable");
             }
@@ -326,7 +359,7 @@ static void ascend(uint64_t (*function)(uint64_t*), gradient_el_t* grad,
         memcpy(x_next, x_prev, sizeof(uint64_t) * n);
 
         delta_idx++;
-        while (delta_idx < n && grad[delta_idx].pct < 0.01)
+        while (delta_idx < n && grad[delta_idx].pct == 0)
             delta_idx++;
 
         if (delta_idx >= n)
@@ -521,6 +554,8 @@ static void           init_tmp_gradient(uint32_t n)
 int gd_descend_transf(uint64_t (*function)(uint64_t*), uint64_t* x0,
                       uint64_t* out_x, uint64_t* out_f, uint32_t n)
 {
+    // debug_dump_vector("x0 (desc)", x0, n);
+
     init_tmp_gradient(n);
     gradient_el_t* gradient = __tmp_gradient;
 
@@ -533,12 +568,16 @@ int gd_descend_transf(uint64_t (*function)(uint64_t*), uint64_t* x0,
     normalize_gradient(gradient, n);
 
     descend(function, gradient, x0, f0, out_x, (int64_t*)out_f, n);
+
+    // debug_dump_vector("out_x (desc)", out_x, n);
     return 0;
 }
 
 int gd_ascend_transf(uint64_t (*function)(uint64_t*), uint64_t* x0,
                      uint64_t* out_x, uint64_t* out_f, uint32_t n)
 {
+    // debug_dump_vector("x0 (asc)", x0, n);
+
     init_tmp_gradient(n);
     gradient_el_t* gradient = __tmp_gradient;
 
@@ -551,6 +590,8 @@ int gd_ascend_transf(uint64_t (*function)(uint64_t*), uint64_t* x0,
     normalize_gradient(gradient, n);
 
     ascend(function, gradient, x0, f0, out_x, (int64_t*)out_f, n);
+
+    // debug_dump_vector("out_x (asc)", out_x, n);
     return 0;
 }
 

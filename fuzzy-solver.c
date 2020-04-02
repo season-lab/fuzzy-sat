@@ -162,18 +162,22 @@ int main(int argc, char* argv[])
     char*     tests_dir      = argc > 3 ? argv[3] : NULL;
     Z3_config cfg            = Z3_mk_config();
     Z3_set_param_value(cfg, "timeout", SOLVER_TIMEOUT);
-    Z3_context           ctx = Z3_mk_context(cfg);
-    unsigned char const* proof;
-    unsigned long        proof_size;
-    unsigned long        num_queries = 0, sat_queries = 0, sat_queries_z3 = 0,
-                  unsat_queries_z3 = 0, unkn_queries_z3 = 0;
-    Z3_ast*        str_symbols;
-    char           var_name[128];
-    Z3_sort        bsort = Z3_mk_bv_sort(ctx, 8);
-    struct timeval stop, start;
-    __attribute__ ((unused)) unsigned long  elapsed_time = 0, elapsed_time_fast_sat = 0,
-                  elapsed_time_slow_sat = 0, elapsed_time_unsat = 0,
-                  elapsed_time_unknown = 0;
+    Z3_context                            ctx = Z3_mk_context(cfg);
+    unsigned char const*                  proof;
+    unsigned long                         proof_size;
+    __attribute__((unused)) unsigned long num_queries = 0, sat_queries = 0,
+                                          sat_queries_z3   = 0,
+                                          unsat_queries_z3 = 0,
+                                          unkn_queries_z3  = 0;
+    Z3_ast*                               str_symbols;
+    char                                  var_name[128];
+    Z3_sort                               bsort = Z3_mk_bv_sort(ctx, 8);
+    struct timeval                        stop, start;
+    __attribute__((unused)) unsigned long elapsed_time          = 0,
+                                          elapsed_time_fast_sat = 0,
+                                          elapsed_time_slow_sat = 0,
+                                          elapsed_time_unsat    = 0,
+                                          elapsed_time_unknown  = 0;
     unsigned int i;
     int          n;
 
@@ -212,7 +216,8 @@ int main(int argc, char* argv[])
         Z3_ast query = Z3_ast_vector_get(ctx, queries, i);
         query        = Z3_substitute(ctx, query, fctx.n_symbols, str_symbols,
                               fctx.symbols);
-        __attribute__ ((unused)) Z3_ast branch_condition = find_branch_condition(query);
+        __attribute__((unused)) Z3_ast branch_condition =
+            find_branch_condition(query);
 
 #ifdef EVAL_ONLY_BRANCH
         query = branch_condition;
