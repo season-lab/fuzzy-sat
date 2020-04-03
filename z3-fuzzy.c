@@ -102,23 +102,52 @@ static void __reset_ast_data();
 static void __detect_involved_inputs(fuzzy_ctx_t* ctx, Z3_ast v,
                                      ast_data_t* data);
 
-static char                         __glob_gd_is_maximizing;
-static char                         __glob_check_pi_eval;
-static unsigned long*               __glob_gd_input         = NULL;
-static unsigned long*               __glob_gd_mapping       = NULL;
-static unsigned                     __glob_gd_mapping_size  = 0;
-static unsigned                     __glob_gb_ast_sort_size = 0;
-static Z3_ast                       __glob_gd_pi            = 0;
-static Z3_ast                       __glob_gd_ast           = 0;
-static fuzzy_ctx_t*                 __glob_gd_context       = NULL;
-static __attribute__((unused)) void __gd_fix_tmp_input(unsigned long* x)
+typedef struct mapping_subel_t {
+    unsigned      idx;
+    unsigned      shift;
+    unsigned long mask;
+} mapping_subel_t;
+
+typedef struct mapping_el_t {
+    mapping_subel_t subels[8];
+    unsigned        n;
+} mapping_el_t;
+
+static char           __glob_check_pi_eval;
+static unsigned long* __glob_gd_input             = NULL;
+mapping_el_t*         __glob_gd_mapping           = NULL;
+static unsigned       __glob_gd_mapping_data_size = 0;
+static unsigned       __glob_gd_mapping_size      = 0;
+static unsigned       __glob_gb_ast_sort_size     = 0;
+static Z3_ast         __glob_gd_pi                = 0;
+static Z3_ast         __glob_gd_ast               = 0;
+static fuzzy_ctx_t*   __glob_gd_context           = NULL;
+static void           __gd_fix_tmp_input(unsigned long* x)
 {
-    unsigned i = 0;
-    for (i = 0; i < __glob_gd_mapping_size; ++i)
-        tmp_input[__glob_gd_mapping[i]] = x[i];
+    unsigned i, j;
+    for (i = 0; i < __glob_gd_mapping_data_size; ++i) {
+        mapping_el_t* mel = &__glob_gd_mapping[i];
+        for (j = 0; j < mel->n; ++j) {
+            mapping_subel_t* sel   = &mel->subels[j];
+            unsigned long    value = (x[i] & sel->mask) >> sel->shift;
+            tmp_input[sel->idx] = value & 0xff;
+        }
+    }
 }
 
-static __attribute__((unused)) unsigned long __gd_eval(unsigned long* x)
+static void __gd_restore_tmp_input(testcase_t* t)
+{
+    unsigned i, j;
+    for (i = 0; i < __glob_gd_mapping_data_size; ++i) {
+        mapping_el_t* mel = &__glob_gd_mapping[i];
+        for (j = 0; j < mel->n; ++j) {
+            mapping_subel_t* sel = &mel->subels[j];
+            tmp_input[sel->idx]  = t->values[sel->idx];
+        }
+    }
+}
+
+static unsigned long __gd_eval(unsigned long* x)
 {
     testcase_t* seed_testcase = &__glob_gd_context->testcases.data[0];
     __gd_fix_tmp_input(x);
@@ -128,37 +157,47 @@ static __attribute__((unused)) unsigned long __gd_eval(unsigned long* x)
             __glob_gd_context->z3_ctx, __glob_gd_pi, x,
             seed_testcase->value_sizes, seed_testcase->values_len);
 
-        if (!pi_eval) {
-            if (__glob_gd_is_maximizing) {
-                return 0;
-            } else {
-                return 0xffffffffffffffff;
-            }
-        }
+        if (!pi_eval)
+            return 0xffffffffffffffff;
     }
 
     unsigned long res = __glob_gd_context->model_eval(
         __glob_gd_context->z3_ctx, __glob_gd_ast, tmp_input,
         seed_testcase->value_sizes, seed_testcase->values_len);
-
-    unsigned long sign_bit = 1UL << (__glob_gb_ast_sort_size - 1UL);
-
-    if (res & sign_bit)
-        // sign extend
-        res |= (((2UL << (64UL - __glob_gb_ast_sort_size - 1UL)) - 1UL)
-                << __glob_gb_ast_sort_size);
     return res;
 }
 
-static __attribute__((unused)) void
-__gd_init_eval(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast expr, char is_maximizing,
-               char check_pi_eval, char must_initialize_ast)
+static void __resize_mapping_input(unsigned long new_size)
 {
-    __glob_gd_context       = ctx;
-    __glob_gd_is_maximizing = is_maximizing;
-    __glob_gd_pi            = pi;
-    __glob_gd_ast           = expr;
-    __glob_check_pi_eval    = check_pi_eval;
+    if (__glob_gd_mapping_size < new_size) {
+        if (__glob_gd_mapping == 0)
+            __glob_gd_mapping =
+                (mapping_el_t*)malloc(sizeof(mapping_el_t) * new_size);
+        else
+            __glob_gd_mapping = (mapping_el_t*)realloc(
+                __glob_gd_mapping, sizeof(mapping_el_t) * new_size);
+
+        if (__glob_gd_input == 0)
+            __glob_gd_input =
+                (unsigned long*)malloc(sizeof(unsigned long) * new_size);
+        else
+            __glob_gd_input = (unsigned long*)realloc(
+                __glob_gd_input, sizeof(unsigned long) * new_size);
+
+        __glob_gd_mapping_size = new_size;
+    }
+
+    // memset(__glob_gd_mapping, 0, sizeof(mapping_el_t) * __glob_gd_mapping_size);
+    // memset(__glob_gd_input, 0, sizeof(unsigned long) * __glob_gd_mapping_size);
+}
+
+static void __gd_init_eval(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast expr,
+                           char check_pi_eval, char must_initialize_ast)
+{
+    __glob_gd_context    = ctx;
+    __glob_gd_pi         = pi;
+    __glob_gd_ast        = expr;
+    __glob_check_pi_eval = check_pi_eval;
 
     Z3_sort bv_sort = Z3_get_sort(ctx->z3_ctx, expr);
     assert(Z3_get_sort_kind(ctx->z3_ctx, bv_sort) == Z3_BV_SORT &&
@@ -172,32 +211,35 @@ __gd_init_eval(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast expr, char is_maximizing,
                "__gd_init_eval() no input in expr");
     }
 
-    if (__glob_gd_mapping_size < ast_data.indexes.size) {
-        if (__glob_gd_mapping == 0)
-            __glob_gd_mapping = (unsigned long*)malloc(sizeof(unsigned long) *
-                                                       ast_data.indexes.size);
-        else
-            __glob_gd_mapping = (unsigned long*)realloc(
-                __glob_gd_mapping,
-                sizeof(unsigned long) * ast_data.indexes.size);
+    __resize_mapping_input(ast_data.index_groups.size);
 
-        if (__glob_gd_input == 0)
-            __glob_gd_input = (unsigned long*)malloc(sizeof(unsigned long) *
-                                                     ast_data.indexes.size);
-        else
-            __glob_gd_input = (unsigned long*)realloc(
-                __glob_gd_input, sizeof(unsigned long) * ast_data.indexes.size);
+    unsigned       idx = 0;
+    index_group_t* g;
+    set_reset_iter__index_group_t(&ast_data.index_groups, 0);
+    while (set_iter_next__index_group_t(&ast_data.index_groups, 0, &g)) {
+        int i;
+        __glob_gd_mapping[idx].n = g->n;
+        for (i = 0; i < g->n; ++i) {
+            unsigned fixed_i                             = g->n - i - 1;
+            __glob_gd_mapping[idx].subels[fixed_i].idx   = g->indexes[i];
+            __glob_gd_mapping[idx].subels[fixed_i].shift = fixed_i * 8;
+            __glob_gd_mapping[idx].subels[fixed_i].mask = 0xff << (fixed_i * 8);
 
-        __glob_gd_mapping_size = ast_data.indexes.size;
+            __glob_gd_input[idx] |= tmp_input[g->indexes[i]] << (fixed_i * 8);
+        }
+        idx++;
     }
+    __glob_gd_mapping_data_size = idx;
 
-    unsigned i = 0;
-    ulong*   p;
-    set_reset_iter__ulong(&ast_data.indexes, 0);
-    while (set_iter_next__ulong(&ast_data.indexes, 0, &p)) {
-        __glob_gd_mapping[i] = *p;
-        __glob_gd_input[i++] = tmp_input[*p];
-    }
+    // groups can overlap... Detect it and fallback to byte-byte method
+
+    // unsigned i = 0;
+    // ulong*   p;
+    // set_reset_iter__ulong(&ast_data.indexes, 0);
+    // while (set_iter_next__ulong(&ast_data.indexes, 0, &p)) {
+    //     __glob_gd_mapping[i] = *p;
+    //     __glob_gd_input[i++] = tmp_input[*p];
+    // }
 }
 
 static void __gradient_transf_init(Z3_context ctx, Z3_ast expr, Z3_ast* out_exp)
@@ -233,9 +275,20 @@ static void __gradient_transf_init(Z3_context ctx, Z3_ast expr, Z3_ast* out_exp)
     assert(sort_size > 1 && "__gradient_transf_init unexpected sort size");
 
     if (sort_size < 64) {
-        arg1      = Z3_mk_sign_ext(ctx, 64 - sort_size, arg1);
-        arg2      = Z3_mk_sign_ext(ctx, 64 - sort_size, arg2);
-        sort_size = 64;
+        int is_unsigned = 0;
+        if (decl_kind == Z3_OP_UGT || decl_kind == Z3_OP_UGEQ ||
+            decl_kind == Z3_OP_ULT || decl_kind == Z3_OP_ULEQ)
+            is_unsigned = 1;
+
+        if (is_unsigned) {
+            arg1      = Z3_mk_zero_ext(ctx, 64 - sort_size, arg1);
+            arg2      = Z3_mk_zero_ext(ctx, 64 - sort_size, arg2);
+            sort_size = 64;
+        } else {
+            arg1      = Z3_mk_sign_ext(ctx, 64 - sort_size, arg1);
+            arg2      = Z3_mk_sign_ext(ctx, 64 - sort_size, arg2);
+            sort_size = 64;
+        }
     }
 
 PRE_SWITCH:
@@ -687,7 +740,8 @@ static void __detect_input_to_state_query(fuzzy_ctx_t* ctx, Z3_ast node,
                 (uint64_t*)&data->input_to_state_const
 #endif
             );
-            assert(successGet == Z3_TRUE && "failed to get constant");
+            if (successGet == Z3_FALSE)
+                return; // constant is too big
             data->input_to_state_const += const_transformation;
             condition_ok  = 1;
             const_operand = i;
@@ -1444,7 +1498,7 @@ L31:
     __gradient_transf_init(ctx->z3_ctx, branch_condition, &out_ast);
     // printf("out_ast: %s\n", Z3_ast_to_string(ctx->z3_ctx, out_ast));
 
-    __gd_init_eval(ctx, query, out_ast, 0, 0, 0);
+    __gd_init_eval(ctx, query, out_ast, 0, 0);
     set__digest_t digest_set;
     set_init__digest_t(&digest_set, digest_64bit_hash, digest_equals);
 
@@ -1452,16 +1506,13 @@ L31:
                   uint32_t);
     transf = gd_descend_transf;
 
-    unsigned long* out =
-        (unsigned long*)malloc(__glob_gd_mapping_size * sizeof(unsigned long));
-
     uint64_t val;
-    while ((transf(__gd_eval, __glob_gd_input, out, &val,
+    while ((transf(__gd_eval, __glob_gd_input, __glob_gd_input, &val,
                    __glob_gd_mapping_size) == 0) &&
-           (__check_or_add_digest(&digest_set, (unsigned char*)out,
+           (__check_or_add_digest(&digest_set, (unsigned char*)__glob_gd_input,
                                   __glob_gd_mapping_size *
                                       sizeof(unsigned long)) == 0)) {
-        __gd_fix_tmp_input(out);
+        __gd_fix_tmp_input(__glob_gd_input);
         if (__evaluate_branch_query(ctx, query, tmp_input,
                                     current_testcase->value_sizes,
                                     current_testcase->values_len)) {
@@ -1476,18 +1527,12 @@ L31:
             *proof      = tmp_proof;
             *proof_size = current_testcase->testcase_len;
             set_free__digest_t(&digest_set);
-            free(out);
             return 1;
         }
-        memcpy(__glob_gd_input, out,
-               sizeof(unsigned long) * __glob_gd_mapping_size);
     }
 
     set_free__digest_t(&digest_set);
-    free(out);
-    for (i = 0; i < __glob_gd_mapping_size; ++i)
-        tmp_input[__glob_gd_mapping[i]] =
-            current_testcase->values[__glob_gd_mapping[i]];
+    __gd_restore_tmp_input(current_testcase);
     goto L4;
 
     // L4 -- DETERMINISTIC AFL TRANSFORMATIONS
@@ -2469,26 +2514,47 @@ unsigned long z3fuzz_maximize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_maximize,
     return __minimize_maximize_inner_greedy(ctx, pi, to_maximize, out_values,
                                             1);
 #else
-    __gd_init_eval(ctx, pi, to_maximize, 1, 1, 1);
-
     testcase_t* current_testcase = &ctx->testcases.data[0];
-
     // detect the strcmp pattern
     if (__detect_strcmp_pattern(ctx, to_maximize, tmp_input)) {
         __vals_long_to_char(tmp_input, tmp_proof, *out_len);
-        *out_values = tmp_proof;
-        return Z3_custom_eval(ctx->z3_ctx, to_maximize, tmp_input,
-                              current_testcase->value_sizes,
-                              current_testcase->values_len);
+        *out_values       = tmp_proof;
+        unsigned long res = Z3_custom_eval(ctx->z3_ctx, to_maximize, tmp_input,
+                                           current_testcase->value_sizes,
+                                           current_testcase->values_len);
+        memcpy(tmp_input, current_testcase->values,
+               current_testcase->values_len * sizeof(unsigned long));
+        return res;
     }
 
+    Z3_ast  original_to_maximize = to_maximize;
+    Z3_sort arg_sort             = Z3_get_sort(ctx->z3_ctx, to_maximize);
+    assert(Z3_get_sort_kind(ctx->z3_ctx, arg_sort) == Z3_BV_SORT &&
+           "z3fuzz_minimize requires a BV sort");
+    unsigned sort_size = Z3_get_bv_sort_size(ctx->z3_ctx, arg_sort);
+    assert(sort_size > 1 && "z3fuzz_minimize unexpected sort size");
+
+    if (sort_size < 64) {
+        to_maximize = Z3_mk_sign_ext(ctx->z3_ctx, 64 - sort_size, to_maximize);
+        sort_size   = 64;
+    }
+
+    to_maximize = Z3_mk_bvneg(ctx->z3_ctx, to_maximize);
+    __gd_init_eval(ctx, pi, to_maximize, 0, 1);
+
     unsigned long max_val;
-    gd_maximize(__gd_eval, __glob_gd_input, __glob_gd_input, &max_val,
+    gd_minimize(__gd_eval, __glob_gd_input, __glob_gd_input, &max_val,
                 __glob_gd_mapping_size);
 
     __gd_fix_tmp_input(__glob_gd_input);
+    max_val = ctx->model_eval(ctx->z3_ctx, original_to_maximize, tmp_input,
+                              current_testcase->value_sizes,
+                              current_testcase->values_len);
     __vals_long_to_char(tmp_input, tmp_proof, *out_len);
     *out_values = tmp_proof;
+
+    memcpy(tmp_input, current_testcase->values,
+           current_testcase->values_len * sizeof(unsigned long));
     return max_val;
 #endif
 }
@@ -2502,7 +2568,20 @@ unsigned long z3fuzz_minimize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_minimize,
     return __minimize_maximize_inner_greedy(ctx, pi, to_minimize, out_values,
                                             0);
 #else
-    __gd_init_eval(ctx, pi, to_minimize, 0, 1, 1);
+    testcase_t* current_testcase = &ctx->testcases.data[0];
+
+    Z3_sort arg_sort = Z3_get_sort(ctx->z3_ctx, to_minimize);
+    assert(Z3_get_sort_kind(ctx->z3_ctx, arg_sort) == Z3_BV_SORT &&
+           "z3fuzz_minimize requires a BV sort");
+    unsigned sort_size = Z3_get_bv_sort_size(ctx->z3_ctx, arg_sort);
+    assert(sort_size > 1 && "z3fuzz_minimize unexpected sort size");
+
+    if (sort_size < 64) {
+        to_minimize = Z3_mk_sign_ext(ctx->z3_ctx, 64 - sort_size, to_minimize);
+        sort_size   = 64;
+    }
+
+    __gd_init_eval(ctx, pi, to_minimize, 0, 1);
 
     unsigned long min_val;
     gd_minimize(__gd_eval, __glob_gd_input, __glob_gd_input, &min_val,
@@ -2511,6 +2590,9 @@ unsigned long z3fuzz_minimize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_minimize,
     __gd_fix_tmp_input(__glob_gd_input);
     __vals_long_to_char(tmp_input, tmp_proof, *out_len);
     *out_values = tmp_proof;
+
+    memcpy(tmp_input, current_testcase->values,
+           current_testcase->values_len * sizeof(unsigned long));
     return min_val;
 #endif
 }
