@@ -23,7 +23,7 @@
 // #define SKIP_NOTIFY
 // #define SKIP_DETERMINISTIC
 // #define SKIP_GRADIENT_TRANSF
-// #define USE_GREEDY_MAXMIN
+#define USE_GREEDY_MAXMIN
 #define SKIP_HAVOC
 
 #define CHECK_UNNECESSARY_EVALS
@@ -49,6 +49,7 @@ typedef struct ast_data_t {
     unsigned n_useless_eval;
 
     unsigned      is_input_to_state;
+    unsigned      op_input_to_state;
     index_group_t input_to_state_group;
     unsigned long input_to_state_const;
     unsigned long query_size;
@@ -113,24 +114,37 @@ typedef struct mapping_el_t {
     unsigned        n;
 } mapping_el_t;
 
-static char           __glob_check_pi_eval;
-static unsigned long* __glob_gd_input             = NULL;
-mapping_el_t*         __glob_gd_mapping           = NULL;
-static unsigned       __glob_gd_mapping_data_size = 0;
-static unsigned       __glob_gd_mapping_size      = 0;
-static unsigned       __glob_gb_ast_sort_size     = 0;
-static Z3_ast         __glob_gd_pi                = 0;
-static Z3_ast         __glob_gd_ast               = 0;
-static fuzzy_ctx_t*   __glob_gd_context           = NULL;
-static void           __gd_fix_tmp_input(unsigned long* x)
+typedef struct eval_wapper_ctx_t {
+    char           check_pi_eval;
+    unsigned long* input;
+    mapping_el_t*  mapping;
+    unsigned       mapping_size;
+    unsigned       ast_sort_size;
+    Z3_ast         pi;
+    Z3_ast         ast;
+    fuzzy_ctx_t*   fctx;
+} eval_wapper_ctx_t;
+
+static eval_wapper_ctx_t* eval_ctx;
+static eval_wapper_ctx_t* multi_eval_ctx;
+static unsigned           multi_eval_n;
+
+void eval_set_ctx(eval_wapper_ctx_t* c) { eval_ctx = c; }
+void eval_multi_set_ctx(eval_wapper_ctx_t* c, unsigned n)
+{
+    multi_eval_ctx = c;
+    multi_eval_n   = n;
+}
+
+static void __gd_fix_tmp_input(unsigned long* x)
 {
     unsigned i, j;
-    for (i = 0; i < __glob_gd_mapping_data_size; ++i) {
-        mapping_el_t* mel = &__glob_gd_mapping[i];
+    for (i = 0; i < eval_ctx->mapping_size; ++i) {
+        mapping_el_t* mel = &eval_ctx->mapping[i];
         for (j = 0; j < mel->n; ++j) {
             mapping_subel_t* sel   = &mel->subels[j];
             unsigned long    value = (x[i] & sel->mask) >> sel->shift;
-            tmp_input[sel->idx] = value & 0xff;
+            tmp_input[sel->idx]    = value & 0xff;
         }
     }
 }
@@ -138,8 +152,8 @@ static void           __gd_fix_tmp_input(unsigned long* x)
 static void __gd_restore_tmp_input(testcase_t* t)
 {
     unsigned i, j;
-    for (i = 0; i < __glob_gd_mapping_data_size; ++i) {
-        mapping_el_t* mel = &__glob_gd_mapping[i];
+    for (i = 0; i < eval_ctx->mapping_size; ++i) {
+        mapping_el_t* mel = &eval_ctx->mapping[i];
         for (j = 0; j < mel->n; ++j) {
             mapping_subel_t* sel = &mel->subels[j];
             tmp_input[sel->idx]  = t->values[sel->idx];
@@ -149,60 +163,44 @@ static void __gd_restore_tmp_input(testcase_t* t)
 
 static unsigned long __gd_eval(unsigned long* x)
 {
-    testcase_t* seed_testcase = &__glob_gd_context->testcases.data[0];
+    testcase_t* seed_testcase = &eval_ctx->fctx->testcases.data[0];
     __gd_fix_tmp_input(x);
 
-    if (__glob_check_pi_eval) {
-        unsigned long pi_eval = __glob_gd_context->model_eval(
-            __glob_gd_context->z3_ctx, __glob_gd_pi, x,
-            seed_testcase->value_sizes, seed_testcase->values_len);
+    if (eval_ctx->check_pi_eval) {
+        unsigned long pi_eval = eval_ctx->fctx->model_eval(
+            eval_ctx->fctx->z3_ctx, eval_ctx->pi, x, seed_testcase->value_sizes,
+            seed_testcase->values_len);
 
         if (!pi_eval)
             return 0xffffffffffffffff;
     }
 
-    unsigned long res = __glob_gd_context->model_eval(
-        __glob_gd_context->z3_ctx, __glob_gd_ast, tmp_input,
+    unsigned long res = eval_ctx->fctx->model_eval(
+        eval_ctx->fctx->z3_ctx, eval_ctx->ast, tmp_input,
         seed_testcase->value_sizes, seed_testcase->values_len);
     return res;
 }
 
-static void __resize_mapping_input(unsigned long new_size)
+static unsigned long __multi_eval(unsigned long* x, unsigned i)
 {
-    if (__glob_gd_mapping_size < new_size) {
-        if (__glob_gd_mapping == 0)
-            __glob_gd_mapping =
-                (mapping_el_t*)malloc(sizeof(mapping_el_t) * new_size);
-        else
-            __glob_gd_mapping = (mapping_el_t*)realloc(
-                __glob_gd_mapping, sizeof(mapping_el_t) * new_size);
-
-        if (__glob_gd_input == 0)
-            __glob_gd_input =
-                (unsigned long*)malloc(sizeof(unsigned long) * new_size);
-        else
-            __glob_gd_input = (unsigned long*)realloc(
-                __glob_gd_input, sizeof(unsigned long) * new_size);
-
-        __glob_gd_mapping_size = new_size;
-    }
-
-    // memset(__glob_gd_mapping, 0, sizeof(mapping_el_t) * __glob_gd_mapping_size);
-    // memset(__glob_gd_input, 0, sizeof(unsigned long) * __glob_gd_mapping_size);
+    assert(i < multi_eval_n && "eval multi overflow");
+    eval_set_ctx(&multi_eval_ctx[i]);
+    return __gd_eval(x);
 }
 
 static void __gd_init_eval(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast expr,
-                           char check_pi_eval, char must_initialize_ast)
+                           char check_pi_eval, char must_initialize_ast,
+                           eval_wapper_ctx_t* out_ctx)
 {
-    __glob_gd_context    = ctx;
-    __glob_gd_pi         = pi;
-    __glob_gd_ast        = expr;
-    __glob_check_pi_eval = check_pi_eval;
+    out_ctx->fctx          = ctx;
+    out_ctx->pi            = pi;
+    out_ctx->ast           = expr;
+    out_ctx->check_pi_eval = check_pi_eval;
 
     Z3_sort bv_sort = Z3_get_sort(ctx->z3_ctx, expr);
     assert(Z3_get_sort_kind(ctx->z3_ctx, bv_sort) == Z3_BV_SORT &&
            "gd works with bitvectors");
-    __glob_gb_ast_sort_size = Z3_get_bv_sort_size(ctx->z3_ctx, bv_sort);
+    out_ctx->ast_sort_size = Z3_get_bv_sort_size(ctx->z3_ctx, bv_sort);
 
     if (must_initialize_ast) {
         __reset_ast_data();
@@ -211,25 +209,28 @@ static void __gd_init_eval(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast expr,
                "__gd_init_eval() no input in expr");
     }
 
-    __resize_mapping_input(ast_data.index_groups.size);
+    out_ctx->mapping_size = ast_data.index_groups.size;
+    out_ctx->mapping =
+        (mapping_el_t*)malloc(sizeof(mapping_el_t) * out_ctx->mapping_size);
+    out_ctx->input =
+        (unsigned long*)malloc(sizeof(unsigned long) * out_ctx->mapping_size);
 
     unsigned       idx = 0;
     index_group_t* g;
     set_reset_iter__index_group_t(&ast_data.index_groups, 0);
     while (set_iter_next__index_group_t(&ast_data.index_groups, 0, &g)) {
         int i;
-        __glob_gd_mapping[idx].n = g->n;
+        out_ctx->mapping[idx].n = g->n;
         for (i = 0; i < g->n; ++i) {
-            unsigned fixed_i                             = g->n - i - 1;
-            __glob_gd_mapping[idx].subels[fixed_i].idx   = g->indexes[i];
-            __glob_gd_mapping[idx].subels[fixed_i].shift = fixed_i * 8;
-            __glob_gd_mapping[idx].subels[fixed_i].mask = 0xff << (fixed_i * 8);
+            unsigned fixed_i                            = g->n - i - 1;
+            out_ctx->mapping[idx].subels[fixed_i].idx   = g->indexes[i];
+            out_ctx->mapping[idx].subels[fixed_i].shift = fixed_i * 8;
+            out_ctx->mapping[idx].subels[fixed_i].mask  = 0xff << (fixed_i * 8);
 
-            __glob_gd_input[idx] |= tmp_input[g->indexes[i]] << (fixed_i * 8);
+            out_ctx->input[idx] |= tmp_input[g->indexes[i]] << (fixed_i * 8);
         }
         idx++;
     }
-    __glob_gd_mapping_data_size = idx;
 
     // groups can overlap... Detect it and fallback to byte-byte method
 
@@ -502,9 +503,6 @@ void z3fuzz_free(fuzzy_ctx_t* ctx)
     set_free__ulong((set__ulong*)ctx->univocally_defined_inputs);
     free(ctx->univocally_defined_inputs);
 
-    free(__glob_gd_input);
-    free(__glob_gd_mapping);
-
     gd_free();
 
 #ifdef PRINT_NUM_EVALUATE
@@ -775,6 +773,7 @@ static void __detect_input_to_state_query(fuzzy_ctx_t* ctx, Z3_ast node,
         data->input_to_state_const += (const_operand == 1 ? -1 : 1);
     }
 
+    data->op_input_to_state = op_type;
     data->is_input_to_state = 1;
     return;
 }
@@ -1400,6 +1399,11 @@ L1:
         *proof_size = current_testcase->testcase_len;
         return 1;
     }
+
+    if (ast_data.op_input_to_state == Z3_OP_EQ)
+        // query is UNSAT
+        return 0;
+
     // restore tmp_input
     for (k = 0; k < group->n; ++k) {
         index            = group->indexes[group->n - k - 1];
@@ -1484,7 +1488,7 @@ L3:
     // if we are here, the query is UNSAT
     return 0;
 
-    // L33 -- GRADIENT BASED TRANSFORMATIONS
+    // L31 -- GRADIENT BASED TRANSFORMATIONS
 L31:
 
 #ifdef SKIP_GRADIENT_TRANSF
@@ -1498,21 +1502,20 @@ L31:
     __gradient_transf_init(ctx->z3_ctx, branch_condition, &out_ast);
     // printf("out_ast: %s\n", Z3_ast_to_string(ctx->z3_ctx, out_ast));
 
-    __gd_init_eval(ctx, query, out_ast, 0, 0);
+    eval_wapper_ctx_t ew;
+
+    __gd_init_eval(ctx, query, out_ast, 0, 0, &ew);
+    eval_set_ctx(&ew);
     set__digest_t digest_set;
     set_init__digest_t(&digest_set, digest_64bit_hash, digest_equals);
 
-    int (*transf)(uint64_t(*)(uint64_t*), uint64_t*, uint64_t*, uint64_t*,
-                  uint32_t);
-    transf = gd_descend_transf;
-
     uint64_t val;
-    while ((transf(__gd_eval, __glob_gd_input, __glob_gd_input, &val,
-                   __glob_gd_mapping_size) == 0) &&
-           (__check_or_add_digest(&digest_set, (unsigned char*)__glob_gd_input,
-                                  __glob_gd_mapping_size *
-                                      sizeof(unsigned long)) == 0)) {
-        __gd_fix_tmp_input(__glob_gd_input);
+    while (
+        (gd_descend_transf(__gd_eval, ew.input, ew.input, &val,
+                           ew.mapping_size) == 0) &&
+        (__check_or_add_digest(&digest_set, (unsigned char*)ew.input,
+                               ew.mapping_size * sizeof(unsigned long)) == 0)) {
+        __gd_fix_tmp_input(ew.input);
         if (__evaluate_branch_query(ctx, query, tmp_input,
                                     current_testcase->value_sizes,
                                     current_testcase->values_len)) {
@@ -2457,6 +2460,8 @@ static inline unsigned long __minimize_maximize_inner_greedy(
 {
     __reset_ast_data();
     __detect_involved_inputs(ctx, to_maximize_minimize, &ast_data);
+    memcpy(tmp_input, ctx->testcases.data[0].values,
+           ctx->testcases.data[0].values_len * sizeof(unsigned long));
 
     testcase_t*   current_testcase = &ctx->testcases.data[0];
     unsigned long max_min          = ctx->model_eval(
@@ -2539,14 +2544,16 @@ unsigned long z3fuzz_maximize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_maximize,
         sort_size   = 64;
     }
 
+    eval_wapper_ctx_t ew;
+
     to_maximize = Z3_mk_bvneg(ctx->z3_ctx, to_maximize);
-    __gd_init_eval(ctx, pi, to_maximize, 0, 1);
+    __gd_init_eval(ctx, pi, to_maximize, 0, 1, &ew);
+    eval_set_ctx(&ew);
 
     unsigned long max_val;
-    gd_minimize(__gd_eval, __glob_gd_input, __glob_gd_input, &max_val,
-                __glob_gd_mapping_size);
+    gd_minimize(__gd_eval, ew.input, ew.input, &max_val, ew.mapping_size);
 
-    __gd_fix_tmp_input(__glob_gd_input);
+    __gd_fix_tmp_input(ew.input);
     max_val = ctx->model_eval(ctx->z3_ctx, original_to_maximize, tmp_input,
                               current_testcase->value_sizes,
                               current_testcase->values_len);
@@ -2581,13 +2588,15 @@ unsigned long z3fuzz_minimize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_minimize,
         sort_size   = 64;
     }
 
-    __gd_init_eval(ctx, pi, to_minimize, 0, 1);
+    eval_wapper_ctx_t ew;
+
+    __gd_init_eval(ctx, pi, to_minimize, 0, 1, &ew);
+    eval_set_ctx(&ew);
 
     unsigned long min_val;
-    gd_minimize(__gd_eval, __glob_gd_input, __glob_gd_input, &min_val,
-                __glob_gd_mapping_size);
+    gd_minimize(__gd_eval, ew.input, ew.input, &min_val, ew.mapping_size);
 
-    __gd_fix_tmp_input(__glob_gd_input);
+    __gd_fix_tmp_input(ew.input);
     __vals_long_to_char(tmp_input, tmp_proof, *out_len);
     *out_values = tmp_proof;
 

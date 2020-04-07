@@ -32,7 +32,7 @@
 
 static inline uint8_t saturating_add8(uint8_t a, uint8_t b)
 {
-    return (a > 0xFFFF - b) ? 0xFFFF : a + b;
+    return (a > 0xFF - b) ? 0xFF : a + b;
 }
 
 static inline uint8_t saturating_sub8(uint8_t a, uint8_t b)
