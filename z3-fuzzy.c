@@ -21,6 +21,8 @@
 
 // #define USE_MD5_HASH
 
+// #define USE_AFL_DET_GROUPS
+
 static int log_query_stats = 0;
 static int skip_notify     = 0;
 
@@ -43,6 +45,9 @@ static int skip_afl_det_int16              = 0;
 static int skip_afl_det_flip_int           = 0;
 static int skip_afl_det_arith32            = 0;
 static int skip_afl_det_int32              = 0;
+static int skip_afl_det_flip_long          = 0;
+static int skip_afl_det_arith64            = 0;
+static int skip_afl_det_int64              = 0;
 
 static int skip_afl_havoc         = 1;
 static int use_greedy_mamin       = 0;
@@ -99,6 +104,36 @@ static int   interesting32[] = {
     2147483647,  -32768,     -129,   128,   255,   256,   512,
     1000,        1024,       4096,   32767, -128,  -1,    0,
     1,           16,         32,     64,    100,   127};
+
+static long interesting64[] = {-9223372036854775807,
+                               9223372036854775807,
+                               -2147483648,
+                               -100663046,
+                               -32769,
+                               32768,
+                               65535,
+                               65536,
+                               100663045,
+                               2147483647,
+                               -32768,
+                               -129,
+                               128,
+                               255,
+                               256,
+                               512,
+                               1000,
+                               1024,
+                               4096,
+                               32767,
+                               -128,
+                               -1,
+                               0,
+                               1,
+                               16,
+                               32,
+                               64,
+                               100,
+                               127};
 
 #define RESEED_RNG 10000
 static int             dev_urandom_fd = -1;
@@ -525,6 +560,9 @@ static void init_config_params()
     env_get_or_die(&skip_afl_det_flip_int, getenv("Z3FUZZ_SKIP_FLIP_INT"));
     env_get_or_die(&skip_afl_det_arith32, getenv("Z3FUZZ_SKIP_ARITH32"));
     env_get_or_die(&skip_afl_det_int32, getenv("Z3FUZZ_SKIP_INT32"));
+    env_get_or_die(&skip_afl_det_flip_long, getenv("Z3FUZZ_SKIP_FLIP_LONG"));
+    env_get_or_die(&skip_afl_det_arith64, getenv("Z3FUZZ_SKIP_ARITH64"));
+    env_get_or_die(&skip_afl_det_int64, getenv("Z3FUZZ_SKIP_INT64"));
     env_get_or_die(&skip_afl_havoc, getenv("Z3FUZZ_SKIP_HAVOC"));
     env_get_or_die(&skip_gradient_descend,
                    getenv("Z3FUZZ_SKIP_GRADIENT_DESCEND"));
@@ -877,9 +915,12 @@ static void __detect_input_to_state_query(fuzzy_ctx_t* ctx, Z3_ast node,
     }
 
     // condition 3 - the other child is input-to-state
-    condition_ok = __detect_input_group(
-        ctx, Z3_get_app_arg(ctx->z3_ctx, node_app, const_operand == 1 ? 0 : 1),
-        &data->input_to_state_group);
+    condition_ok =
+        __detect_input_group(
+            ctx,
+            Z3_get_app_arg(ctx->z3_ctx, node_app, const_operand == 1 ? 0 : 1),
+            &data->input_to_state_group) &&
+        data->input_to_state_group.n > 0;
 
     if (!condition_ok) {
         data->is_input_to_state = 0;
@@ -966,7 +1007,7 @@ static void __detect_involved_inputs(fuzzy_ctx_t* ctx, Z3_ast v,
                     data->input_extract_ops++;
                 case Z3_OP_CONCAT: {
                     index_group_t group = {0};
-                    if (__detect_input_group(ctx, v, &group)) {
+                    if (__detect_input_group(ctx, v, &group) && group.n > 0) {
                         // concat chain. commit
                         set_add__index_group_t(
                             &data->index_groups,
@@ -1526,7 +1567,8 @@ static __always_inline int PHASE_input_to_state_extended(
                                         current_testcase->value_sizes,
                                         current_testcase->values_len)) {
 #ifdef PRINT_SAT
-                Z3FUZZ_LOG("[check light - input to state extended] Query is SAT\n");
+                Z3FUZZ_LOG(
+                    "[check light - input to state extended] Query is SAT\n");
 #endif
                 ctx->stats.input_to_state_ext++;
                 ctx->stats.num_sat++;
@@ -2104,12 +2146,10 @@ static __always_inline int SUBPHASE_afl_det_arith32(
         (unsigned char)current_testcase->values[input_index_2];
     unsigned char input_byte_3 =
         (unsigned char)current_testcase->values[input_index_3];
-    unsigned short input_word_LE = (input_byte_1 << 8) | input_byte_0;
-    unsigned short input_word_BE = (input_byte_0 << 8) | input_byte_1;
-    unsigned       input_dword_LE =
-        (((input_byte_3 << 8) | input_byte_2) << 16) | input_word_LE;
-    unsigned input_dword_BE =
-        (input_word_BE << 16) | (input_byte_2 << 8) | input_byte_3;
+    unsigned input_dword_LE = (input_byte_3 << 24) | (input_byte_2 << 16) |
+                              (input_byte_1 << 8) | input_byte_0;
+    unsigned input_dword_BE = (input_byte_0 << 24) | (input_byte_1 << 16) |
+                              (input_byte_2 << 8) | input_byte_3;
 
     unsigned i;
     for (i = 1; i < 35; ++i) {
@@ -2174,7 +2214,7 @@ static __always_inline int SUBPHASE_afl_det_arith32(
             Z3FUZZ_LOG("[check light - arith32-sum-BE] "
                        "Query is SAT\n");
 #endif
-            ctx->stats.arith16_sum_BE++;
+            ctx->stats.arith32_sum_BE++;
             ctx->stats.num_sat++;
             __vals_long_to_char(tmp_input, tmp_proof,
                                 current_testcase->testcase_len);
@@ -2249,6 +2289,465 @@ SUBPHASE_afl_det_int32(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
     return 0;
 }
 
+static __always_inline int SUBPHASE_afl_det_flip_long(
+    fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
+    unsigned char const** proof, unsigned long* proof_size,
+    unsigned long input_index_0, unsigned long input_index_1,
+    unsigned long input_index_2, unsigned long input_index_3,
+    unsigned long input_index_4, unsigned long input_index_5,
+    unsigned long input_index_6, unsigned long input_index_7)
+{
+    if (unlikely(skip_afl_det_flip_long))
+        return 0;
+
+    testcase_t* current_testcase = &ctx->testcases.data[0];
+
+    unsigned char input_byte_0 =
+        (unsigned char)current_testcase->values[input_index_0];
+    unsigned char input_byte_1 =
+        (unsigned char)current_testcase->values[input_index_1];
+    unsigned char input_byte_2 =
+        (unsigned char)current_testcase->values[input_index_2];
+    unsigned char input_byte_3 =
+        (unsigned char)current_testcase->values[input_index_3];
+    unsigned char input_byte_4 =
+        (unsigned char)current_testcase->values[input_index_4];
+    unsigned char input_byte_5 =
+        (unsigned char)current_testcase->values[input_index_5];
+    unsigned char input_byte_6 =
+        (unsigned char)current_testcase->values[input_index_6];
+    unsigned char input_byte_7 =
+        (unsigned char)current_testcase->values[input_index_7];
+
+    tmp_input[input_index_0] = (unsigned long)input_byte_0 ^ 0xffUL;
+    tmp_input[input_index_1] = (unsigned long)input_byte_1 ^ 0xffUL;
+    tmp_input[input_index_2] = (unsigned long)input_byte_2 ^ 0xffUL;
+    tmp_input[input_index_3] = (unsigned long)input_byte_3 ^ 0xffUL;
+    tmp_input[input_index_4] = (unsigned long)input_byte_4 ^ 0xffUL;
+    tmp_input[input_index_5] = (unsigned long)input_byte_5 ^ 0xffUL;
+    tmp_input[input_index_6] = (unsigned long)input_byte_6 ^ 0xffUL;
+    tmp_input[input_index_7] = (unsigned long)input_byte_7 ^ 0xffUL;
+
+    if (__evaluate_branch_query(ctx, query, tmp_input,
+                                current_testcase->value_sizes,
+                                current_testcase->values_len)) {
+#ifdef PRINT_SAT
+        Z3FUZZ_LOG("[check light - flip64] "
+                   "Query is SAT\n");
+#endif
+        ctx->stats.flip64++;
+        ctx->stats.num_sat++;
+        __vals_long_to_char(tmp_input, tmp_proof,
+                            current_testcase->testcase_len);
+        *proof      = tmp_proof;
+        *proof_size = current_testcase->testcase_len;
+        return 1;
+    }
+    return 0;
+}
+
+static __always_inline int SUBPHASE_afl_det_arith64(
+    fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
+    unsigned char const** proof, unsigned long* proof_size,
+    unsigned long input_index_0, unsigned long input_index_1,
+    unsigned long input_index_2, unsigned long input_index_3,
+    unsigned long input_index_4, unsigned long input_index_5,
+    unsigned long input_index_6, unsigned long input_index_7)
+{
+    if (unlikely(skip_afl_det_arith64))
+        return 0;
+
+    testcase_t* current_testcase = &ctx->testcases.data[0];
+
+    unsigned char input_byte_0 =
+        (unsigned char)current_testcase->values[input_index_0];
+    unsigned char input_byte_1 =
+        (unsigned char)current_testcase->values[input_index_1];
+    unsigned char input_byte_2 =
+        (unsigned char)current_testcase->values[input_index_2];
+    unsigned char input_byte_3 =
+        (unsigned char)current_testcase->values[input_index_3];
+    unsigned char input_byte_4 =
+        (unsigned char)current_testcase->values[input_index_4];
+    unsigned char input_byte_5 =
+        (unsigned char)current_testcase->values[input_index_5];
+    unsigned char input_byte_6 =
+        (unsigned char)current_testcase->values[input_index_6];
+    unsigned char input_byte_7 =
+        (unsigned char)current_testcase->values[input_index_7];
+
+    unsigned long input_qword_LE =
+        ((ulong)input_byte_7 << 56) | ((ulong)input_byte_6 << 48) |
+        ((ulong)input_byte_5 << 40) | ((ulong)input_byte_4 << 32) |
+        ((ulong)input_byte_3 << 24) | ((ulong)input_byte_2 << 16) |
+        ((ulong)input_byte_1 << 8) | (ulong)input_byte_0;
+    unsigned long input_qword_BE =
+        ((ulong)input_byte_0 << 56) | ((ulong)input_byte_1 << 48) |
+        ((ulong)input_byte_2 << 40) | ((ulong)input_byte_3 << 32) |
+        ((ulong)input_byte_4 << 24) | ((ulong)input_byte_5 << 16) |
+        ((ulong)input_byte_6 << 8) | (ulong)input_byte_7;
+
+    unsigned i;
+    for (i = 1; i < 35; ++i) {
+        tmp_input[input_index_0] = (unsigned long)(input_qword_LE + i) & 0xffUL;
+        tmp_input[input_index_1] =
+            (unsigned long)((input_qword_LE + i) >> 8) & 0xffUL;
+        tmp_input[input_index_2] =
+            (unsigned long)((input_qword_LE + i) >> 16) & 0xffUL;
+        tmp_input[input_index_3] =
+            (unsigned long)((input_qword_LE + i) >> 24) & 0xffUL;
+        tmp_input[input_index_4] =
+            (unsigned long)((input_qword_LE + i) >> 32) & 0xffUL;
+        tmp_input[input_index_5] =
+            (unsigned long)((input_qword_LE + i) >> 40) & 0xffUL;
+        tmp_input[input_index_6] =
+            (unsigned long)((input_qword_LE + i) >> 48) & 0xffUL;
+        tmp_input[input_index_7] =
+            (unsigned long)((input_qword_LE + i) >> 56) & 0xffUL;
+
+        if (__evaluate_branch_query(ctx, query, tmp_input,
+                                    current_testcase->value_sizes,
+                                    current_testcase->values_len)) {
+#ifdef PRINT_SAT
+            Z3FUZZ_LOG("[check light - arith64-sum-LE] "
+                       "Query is SAT\n");
+#endif
+            ctx->stats.arith64_sum_LE++;
+            ctx->stats.num_sat++;
+            __vals_long_to_char(tmp_input, tmp_proof,
+                                current_testcase->testcase_len);
+            *proof      = tmp_proof;
+            *proof_size = current_testcase->testcase_len;
+            return 1;
+        }
+        tmp_input[input_index_0] = (unsigned long)(input_qword_LE + i) & 0xffUL;
+        tmp_input[input_index_1] =
+            (unsigned long)((input_qword_LE + i) >> 8) & 0xffUL;
+        tmp_input[input_index_2] =
+            (unsigned long)((input_qword_LE + i) >> 16) & 0xffUL;
+        tmp_input[input_index_3] =
+            (unsigned long)((input_qword_LE + i) >> 24) & 0xffUL;
+        tmp_input[input_index_4] =
+            (unsigned long)((input_qword_LE + i) >> 32) & 0xffUL;
+        tmp_input[input_index_5] =
+            (unsigned long)((input_qword_LE + i) >> 40) & 0xffUL;
+        tmp_input[input_index_6] =
+            (unsigned long)((input_qword_LE + i) >> 48) & 0xffUL;
+        tmp_input[input_index_7] =
+            (unsigned long)((input_qword_LE + i) >> 56) & 0xffUL;
+        if (__evaluate_branch_query(ctx, query, tmp_input,
+                                    current_testcase->value_sizes,
+                                    current_testcase->values_len)) {
+#ifdef PRINT_SAT
+            Z3FUZZ_LOG("[check light - arith64-sub-LE] "
+                       "Query is SAT\n");
+#endif
+            ctx->stats.arith64_sub_LE++;
+            ctx->stats.num_sat++;
+            __vals_long_to_char(tmp_input, tmp_proof,
+                                current_testcase->testcase_len);
+            *proof      = tmp_proof;
+            *proof_size = current_testcase->testcase_len;
+            return 1;
+        }
+        tmp_input[input_index_0] = (unsigned long)(input_qword_BE + i) & 0xffUL;
+        tmp_input[input_index_1] =
+            (unsigned long)((input_qword_BE + i) >> 8) & 0xffUL;
+        tmp_input[input_index_2] =
+            (unsigned long)((input_qword_BE + i) >> 16) & 0xffUL;
+        tmp_input[input_index_3] =
+            (unsigned long)((input_qword_BE + i) >> 24) & 0xffUL;
+        tmp_input[input_index_4] =
+            (unsigned long)((input_qword_BE + i) >> 32) & 0xffUL;
+        tmp_input[input_index_5] =
+            (unsigned long)((input_qword_BE + i) >> 40) & 0xffUL;
+        tmp_input[input_index_6] =
+            (unsigned long)((input_qword_BE + i) >> 48) & 0xffUL;
+        tmp_input[input_index_7] =
+            (unsigned long)((input_qword_BE + i) >> 56) & 0xffUL;
+
+        if (__evaluate_branch_query(ctx, query, tmp_input,
+                                    current_testcase->value_sizes,
+                                    current_testcase->values_len)) {
+#ifdef PRINT_SAT
+            Z3FUZZ_LOG("[check light - arith64-sum-BE] "
+                       "Query is SAT\n");
+#endif
+            ctx->stats.arith64_sum_BE++;
+            ctx->stats.num_sat++;
+            __vals_long_to_char(tmp_input, tmp_proof,
+                                current_testcase->testcase_len);
+            *proof      = tmp_proof;
+            *proof_size = current_testcase->testcase_len;
+            return 1;
+        }
+        tmp_input[input_index_0] = (unsigned long)(input_qword_BE + i) & 0xffUL;
+        tmp_input[input_index_1] =
+            (unsigned long)((input_qword_BE + i) >> 8) & 0xffUL;
+        tmp_input[input_index_2] =
+            (unsigned long)((input_qword_BE + i) >> 16) & 0xffUL;
+        tmp_input[input_index_3] =
+            (unsigned long)((input_qword_BE + i) >> 24) & 0xffUL;
+        tmp_input[input_index_4] =
+            (unsigned long)((input_qword_BE + i) >> 32) & 0xffUL;
+        tmp_input[input_index_5] =
+            (unsigned long)((input_qword_BE + i) >> 40) & 0xffUL;
+        tmp_input[input_index_6] =
+            (unsigned long)((input_qword_BE + i) >> 48) & 0xffUL;
+        tmp_input[input_index_7] =
+            (unsigned long)((input_qword_BE + i) >> 56) & 0xffUL;
+
+        if (__evaluate_branch_query(ctx, query, tmp_input,
+                                    current_testcase->value_sizes,
+                                    current_testcase->values_len)) {
+#ifdef PRINT_SAT
+            Z3FUZZ_LOG("[check light - arith64-sub-BE] "
+                       "Query is SAT\n");
+#endif
+            ctx->stats.arith64_sub_BE++;
+            ctx->stats.num_sat++;
+            __vals_long_to_char(tmp_input, tmp_proof,
+                                current_testcase->testcase_len);
+            *proof      = tmp_proof;
+            *proof_size = current_testcase->testcase_len;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static __always_inline int
+SUBPHASE_afl_det_int64(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
+                       unsigned char const** proof, unsigned long* proof_size,
+                       unsigned long input_index_0, unsigned long input_index_1,
+                       unsigned long input_index_2, unsigned long input_index_3,
+                       unsigned long input_index_4, unsigned long input_index_5,
+                       unsigned long input_index_6, unsigned long input_index_7)
+{
+    if (unlikely(skip_afl_det_int32))
+        return 0;
+
+    testcase_t* current_testcase = &ctx->testcases.data[0];
+
+    unsigned i;
+    for (i = 0; i < sizeof(interesting64) / sizeof(int); ++i) {
+        tmp_input[input_index_0] = (unsigned long)(interesting64[i]) & 0xffU;
+        tmp_input[input_index_1] =
+            (unsigned long)(interesting64[i] >> 8) & 0xffU;
+        tmp_input[input_index_2] =
+            (unsigned long)(interesting64[i] >> 16) & 0xffU;
+        tmp_input[input_index_3] =
+            (unsigned long)(interesting64[i] >> 24) & 0xffU;
+        tmp_input[input_index_4] =
+            (unsigned long)(interesting64[i] >> 24) & 0xffU;
+        tmp_input[input_index_5] =
+            (unsigned long)(interesting64[i] >> 24) & 0xffU;
+        tmp_input[input_index_6] =
+            (unsigned long)(interesting64[i] >> 24) & 0xffU;
+        tmp_input[input_index_7] =
+            (unsigned long)(interesting64[i] >> 24) & 0xffU;
+
+        if (__evaluate_branch_query(ctx, query, tmp_input,
+                                    current_testcase->value_sizes,
+                                    current_testcase->values_len)) {
+#ifdef PRINT_SAT
+            Z3FUZZ_LOG("[check light - int64] "
+                       "Query is SAT\n");
+#endif
+            ctx->stats.int64++;
+            ctx->stats.num_sat++;
+            __vals_long_to_char(tmp_input, tmp_proof,
+                                current_testcase->testcase_len);
+            *proof      = tmp_proof;
+            *proof_size = current_testcase->testcase_len;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static __always_inline int PHASE_afl_deterministic_groups(
+    fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
+    unsigned char const** proof, unsigned long* proof_size)
+{
+    if (unlikely(skip_afl_deterministic))
+        return 0;
+
+    int            ret;
+    testcase_t*    current_testcase = &ctx->testcases.data[0];
+    index_group_t* g;
+
+#ifdef DEBUG_CHECK_LIGHT
+    Z3FUZZ_LOG("Trying AFL Deterministic (groups)\n");
+#endif
+
+    set_reset_iter__index_group_t(&ast_data.index_groups, 1);
+    while (set_iter_next__index_group_t(&ast_data.index_groups, 1, &g)) {
+        unsigned i;
+        // flip 1/2/4 -> do for every group type
+        for (i = 0; i < g->n; ++i) {
+            unsigned long input_index = g->indexes[i];
+
+            ret = SUBPHASE_afl_det_single_waliking_bit(
+                ctx, query, branch_condition, proof, proof_size, input_index);
+            if (ret)
+                return 1;
+
+            ret = SUBPHASE_afl_det_two_waliking_bits(
+                ctx, query, branch_condition, proof, proof_size, input_index);
+            if (ret)
+                return 1;
+
+            ret = SUBPHASE_afl_det_byte_flip(ctx, query, branch_condition,
+                                             proof, proof_size, input_index);
+            if (ret)
+                return 1;
+
+            tmp_input[input_index] =
+                (unsigned long)current_testcase->values[input_index];
+        }
+
+        switch (g->n) {
+            case 2: {
+                // flip short
+                ret = SUBPHASE_afl_det_flip_short(ctx, query, branch_condition,
+                                                  proof, proof_size,
+                                                  g->indexes[0], g->indexes[1]);
+                if (ret)
+                    return 1;
+
+                // 16-bit arithmetics
+                ret = SUBPHASE_afl_det_arith16(ctx, query, branch_condition,
+                                               proof, proof_size, g->indexes[0],
+                                               g->indexes[1]);
+                if (ret)
+                    return 1;
+
+                // interesting 16
+                ret = SUBPHASE_afl_det_int16(ctx, query, branch_condition,
+                                             proof, proof_size, g->indexes[0],
+                                             g->indexes[1]);
+                if (ret)
+                    return 1;
+
+                tmp_input[g->indexes[0]] =
+                    current_testcase->values[g->indexes[0]];
+                tmp_input[g->indexes[1]] =
+                    current_testcase->values[g->indexes[1]];
+                break;
+            }
+            case 4: {
+                // flip int
+                ret = SUBPHASE_afl_det_flip_int(
+                    ctx, query, branch_condition, proof, proof_size,
+                    g->indexes[0], g->indexes[1], g->indexes[2], g->indexes[3]);
+                if (ret)
+                    return 1;
+
+                // 32-bit arithmetics
+                ret = SUBPHASE_afl_det_arith32(
+                    ctx, query, branch_condition, proof, proof_size,
+                    g->indexes[0], g->indexes[1], g->indexes[2], g->indexes[3]);
+                if (ret)
+                    return 1;
+
+                // interesting 32
+                ret = SUBPHASE_afl_det_int32(
+                    ctx, query, branch_condition, proof, proof_size,
+                    g->indexes[0], g->indexes[1], g->indexes[2], g->indexes[3]);
+                if (ret)
+                    return 1;
+
+                tmp_input[g->indexes[0]] =
+                    current_testcase->values[g->indexes[0]];
+                tmp_input[g->indexes[1]] =
+                    current_testcase->values[g->indexes[1]];
+                tmp_input[g->indexes[2]] =
+                    current_testcase->values[g->indexes[2]];
+                tmp_input[g->indexes[3]] =
+                    current_testcase->values[g->indexes[3]];
+
+                break;
+            }
+            case 8: {
+                // flip long
+                ret = SUBPHASE_afl_det_flip_long(
+                    ctx, query, branch_condition, proof, proof_size,
+                    g->indexes[0], g->indexes[1], g->indexes[2], g->indexes[3],
+                    g->indexes[4], g->indexes[5], g->indexes[6], g->indexes[7]);
+                if (ret)
+                    return 1;
+
+                // 64-bit arithmetics
+                ret = SUBPHASE_afl_det_arith64(
+                    ctx, query, branch_condition, proof, proof_size,
+                    g->indexes[0], g->indexes[1], g->indexes[2], g->indexes[3],
+                    g->indexes[4], g->indexes[5], g->indexes[6], g->indexes[7]);
+                if (ret)
+                    return 1;
+
+                // interesting 64
+                ret = SUBPHASE_afl_det_int64(
+                    ctx, query, branch_condition, proof, proof_size,
+                    g->indexes[0], g->indexes[1], g->indexes[2], g->indexes[3],
+                    g->indexes[4], g->indexes[5], g->indexes[6], g->indexes[7]);
+                if (ret)
+                    return 1;
+
+                tmp_input[g->indexes[0]] =
+                    current_testcase->values[g->indexes[0]];
+                tmp_input[g->indexes[1]] =
+                    current_testcase->values[g->indexes[1]];
+                tmp_input[g->indexes[2]] =
+                    current_testcase->values[g->indexes[2]];
+                tmp_input[g->indexes[3]] =
+                    current_testcase->values[g->indexes[3]];
+                tmp_input[g->indexes[4]] =
+                    current_testcase->values[g->indexes[4]];
+                tmp_input[g->indexes[5]] =
+                    current_testcase->values[g->indexes[5]];
+                tmp_input[g->indexes[6]] =
+                    current_testcase->values[g->indexes[6]];
+                tmp_input[g->indexes[7]] =
+                    current_testcase->values[g->indexes[7]];
+                break;
+            }
+            default: {
+                // group size 1 and group with strange sizes (e.g. 3, probably
+                // errors in the detection method)
+                unsigned i;
+                for (i = 0; i < g->n; ++i) {
+                    // byte flip
+                    ret = SUBPHASE_afl_det_byte_flip(ctx, query,
+                                                     branch_condition, proof,
+                                                     proof_size, g->indexes[i]);
+                    if (ret)
+                        return 1;
+
+                    // 8-bit arithmetics
+                    ret = SUBPHASE_afl_det_arith8(ctx, query, branch_condition,
+                                                  proof, proof_size,
+                                                  g->indexes[i]);
+                    if (ret)
+                        return 1;
+
+                    // interesting 8
+                    ret =
+                        SUBPHASE_afl_det_int8(ctx, query, branch_condition,
+                                              proof, proof_size, g->indexes[i]);
+                    if (ret)
+                        return 1;
+
+                    tmp_input[g->indexes[0]] =
+                        (unsigned long)current_testcase->values[g->indexes[i]];
+                }
+                break;
+            }
+        }
+    }
+    return 0;
+}
+
 static __always_inline int
 PHASE_afl_deterministic(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
                         unsigned char const** proof, unsigned long* proof_size)
@@ -2260,16 +2759,13 @@ PHASE_afl_deterministic(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
     testcase_t* current_testcase = &ctx->testcases.data[0];
 
 #ifdef DEBUG_CHECK_LIGHT
-    Z3FUZZ_LOG("Trying L4\n");
+    Z3FUZZ_LOG("Trying AFL Deterministic\n");
 #endif
-
-    set_reset_iter__ulong(&ast_data.indexes, 1);
-
-    ulong* p;
-
+    ulong*        p;
     unsigned long input_index_0, input_index_1, input_index_2, input_index_3;
     int           ret;
 
+    set_reset_iter__ulong(&ast_data.indexes, 1);
     while (set_iter_next__ulong(&ast_data.indexes, 1, &p)) {
         input_index_0 = *p;
         // ****************
@@ -2821,9 +3317,14 @@ static int __query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
     if (res)
         return 1;
 
-    // Afl Deterministic Transformations
+        // Afl Deterministic Transformations
+#ifdef USE_AFL_DET_GROUPS
+    res = PHASE_afl_deterministic_groups(ctx, query, branch_condition, proof,
+                                         proof_size);
+#else
     res = PHASE_afl_deterministic(ctx, query, branch_condition, proof,
                                   proof_size);
+#endif
     if (res)
         return 1;
 

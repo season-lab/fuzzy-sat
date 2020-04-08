@@ -32,6 +32,12 @@ typedef struct fuzzy_stats_t {
     unsigned long arith32_sub_LE;
     unsigned long arith32_sub_BE;
     unsigned long int32;
+    unsigned long flip64;
+    unsigned long arith64_sum_LE;
+    unsigned long arith64_sum_BE;
+    unsigned long arith64_sub_LE;
+    unsigned long arith64_sub_BE;
+    unsigned long int64;
     unsigned long havoc;
     unsigned long num_univocally_defined;
 } fuzzy_stats_t;

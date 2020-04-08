@@ -62,27 +62,33 @@ static inline void print_status(unsigned long current_query,
     pp_printf(11, 1, "flip8:              %ld", fctx.stats.flip8);
     pp_printf(12, 1, "flip16:             %ld", fctx.stats.flip16);
     pp_printf(13, 1, "flip32:             %ld", fctx.stats.flip32);
-    pp_printf(14, 1, "arith8_sum:         %ld", fctx.stats.arith8_sum);
-    pp_printf(15, 1, "arith8_sub:         %ld", fctx.stats.arith8_sub);
-    pp_printf(16, 1, "arith16_sum_LE:     %ld", fctx.stats.arith16_sum_LE);
-    pp_printf(17, 1, "arith16_sum_BE:     %ld", fctx.stats.arith16_sum_BE);
-    pp_printf(18, 1, "arith16_sub_LE:     %ld", fctx.stats.arith16_sub_LE);
-    pp_printf(19, 1, "arith16_sub_BE:     %ld", fctx.stats.arith16_sub_BE);
-    pp_printf(20, 1, "arith32_sum_LE:     %ld", fctx.stats.arith32_sum_LE);
-    pp_printf(21, 1, "arith32_sum_BE:     %ld", fctx.stats.arith32_sum_BE);
-    pp_printf(22, 1, "arith32_sub_LE:     %ld", fctx.stats.arith32_sub_LE);
-    pp_printf(23, 1, "arith32_sub_BE:     %ld", fctx.stats.arith32_sub_BE);
-    pp_printf(24, 1, "int8:               %ld", fctx.stats.int8);
-    pp_printf(25, 1, "int16:              %ld", fctx.stats.int16);
-    pp_printf(26, 1, "int32:              %ld", fctx.stats.int32);
-    pp_printf(27, 1, "havoc:              %ld", fctx.stats.havoc);
+    pp_printf(14, 1, "flip64:             %ld", fctx.stats.flip64);
+    pp_printf(15, 1, "arith8_sum:         %ld", fctx.stats.arith8_sum);
+    pp_printf(16, 1, "arith8_sub:         %ld", fctx.stats.arith8_sub);
+    pp_printf(17, 1, "arith16_sum_LE:     %ld", fctx.stats.arith16_sum_LE);
+    pp_printf(18, 1, "arith16_sum_BE:     %ld", fctx.stats.arith16_sum_BE);
+    pp_printf(19, 1, "arith16_sub_LE:     %ld", fctx.stats.arith16_sub_LE);
+    pp_printf(20, 1, "arith16_sub_BE:     %ld", fctx.stats.arith16_sub_BE);
+    pp_printf(21, 1, "arith32_sum_LE:     %ld", fctx.stats.arith32_sum_LE);
+    pp_printf(22, 1, "arith32_sum_BE:     %ld", fctx.stats.arith32_sum_BE);
+    pp_printf(23, 1, "arith32_sub_LE:     %ld", fctx.stats.arith32_sub_LE);
+    pp_printf(24, 1, "arith32_sub_BE:     %ld", fctx.stats.arith32_sub_BE);
+    pp_printf(25, 1, "arith64_sum_LE:     %ld", fctx.stats.arith64_sum_LE);
+    pp_printf(26, 1, "arith64_sum_BE:     %ld", fctx.stats.arith64_sum_BE);
+    pp_printf(27, 1, "arith64_sub_LE:     %ld", fctx.stats.arith64_sub_LE);
+    pp_printf(28, 1, "arith64_sub_BE:     %ld", fctx.stats.arith64_sub_BE);
+    pp_printf(29, 1, "int8:               %ld", fctx.stats.int8);
+    pp_printf(30, 1, "int16:              %ld", fctx.stats.int16);
+    pp_printf(31, 1, "int32:              %ld", fctx.stats.int32);
+    pp_printf(32, 1, "int64:              %ld", fctx.stats.int64);
+    pp_printf(33, 1, "havoc:              %ld", fctx.stats.havoc);
 #ifdef Z3_FALLTHROUGH
-    pp_printf(33, 1, "sat z3:               %ld", sat_queries_z3);
-    pp_printf(34, 1, "unsat z3:             %ld", unsat_queries_z3);
-    pp_printf(35, 1, "unkn z3:              %ld", unkn_queries_z3);
+    pp_printf(35, 1, "sat z3:               %ld", sat_queries_z3);
+    pp_printf(36, 1, "unsat z3:             %ld", unsat_queries_z3);
+    pp_printf(37, 1, "unkn z3:              %ld", unkn_queries_z3);
 #endif
     pp_set_col(0);
-    pp_set_line(36);
+    pp_set_line(38);
 }
 
 static inline void
@@ -107,6 +113,7 @@ print_stats_on_file(const char* query_name, unsigned long num_queries,
     fprintf(logfile, ";;;flip4;%ld\n", fctx.stats.flip4);
     fprintf(logfile, ";;;flip16;%ld\n", fctx.stats.flip16);
     fprintf(logfile, ";;;flip32;%ld\n", fctx.stats.flip32);
+    fprintf(logfile, ";;;flip64;%ld\n", fctx.stats.flip64);
     fprintf(logfile, ";;;arith8_sum;%ld\n", fctx.stats.arith8_sum);
     fprintf(logfile, ";;;arith8_sub;%ld\n", fctx.stats.arith8_sub);
     fprintf(logfile, ";;;arith16_sum_LE;%ld\n", fctx.stats.arith16_sum_LE);
@@ -117,9 +124,14 @@ print_stats_on_file(const char* query_name, unsigned long num_queries,
     fprintf(logfile, ";;;arith32_sum_BE;%ld\n", fctx.stats.arith32_sum_BE);
     fprintf(logfile, ";;;arith32_sub_LE;%ld\n", fctx.stats.arith32_sub_LE);
     fprintf(logfile, ";;;arith32_sub_BE;%ld\n", fctx.stats.arith32_sub_BE);
+    fprintf(logfile, ";;;arith64_sum_LE;%ld\n", fctx.stats.arith64_sum_LE);
+    fprintf(logfile, ";;;arith64_sum_BE;%ld\n", fctx.stats.arith64_sum_BE);
+    fprintf(logfile, ";;;arith64_sub_LE;%ld\n", fctx.stats.arith64_sub_LE);
+    fprintf(logfile, ";;;arith64_sub_BE;%ld\n", fctx.stats.arith64_sub_BE);
     fprintf(logfile, ";;;int8;%ld\n", fctx.stats.int8);
     fprintf(logfile, ";;;int16;%ld\n", fctx.stats.int16);
     fprintf(logfile, ";;;int32;%ld\n", fctx.stats.int32);
+    fprintf(logfile, ";;;int64;%ld\n", fctx.stats.int64);
     fprintf(logfile, ";;;havoc;%ld\n", fctx.stats.havoc);
     fprintf(logfile, ";;;other data;\n");
     fprintf(logfile, ";;;elapsed time;%.3lf\n", elapsed_time);
