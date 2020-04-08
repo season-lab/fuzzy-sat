@@ -1,5 +1,5 @@
 CC=gcc #clang
-CFLAGS=-Wall -s -O3 -fPIC # -O1 -g -fsanitize=address -fno-omit-frame-pointer
+CFLAGS=-Wall -s -O3 -fPIC #-O1 -g -fsanitize=address -fno-omit-frame-pointer
 CLIBS=-lz3
 CLIB_PATHS=-L./fuzzolic-z3/build
 CINCLUDE=-I./fuzzolic-z3/src/api -I./include

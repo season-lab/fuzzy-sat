@@ -23,7 +23,7 @@
 // #define SKIP_NOTIFY
 // #define SKIP_DETERMINISTIC
 // #define SKIP_GRADIENT_TRANSF
-#define USE_GREEDY_MAXMIN
+// #define USE_GREEDY_MAXMIN
 #define SKIP_HAVOC
 
 #define CHECK_UNNECESSARY_EVALS
@@ -188,14 +188,17 @@ static unsigned long __multi_eval(unsigned long* x, unsigned i)
     return __gd_eval(x);
 }
 
-static void __gd_init_eval(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast expr,
-                           char check_pi_eval, char must_initialize_ast,
-                           eval_wapper_ctx_t* out_ctx)
+static int __gd_init_eval(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast expr,
+                          char check_pi_eval, char must_initialize_ast,
+                          eval_wapper_ctx_t* out_ctx)
 {
     out_ctx->fctx          = ctx;
     out_ctx->pi            = pi;
     out_ctx->ast           = expr;
     out_ctx->check_pi_eval = check_pi_eval;
+
+    Z3_inc_ref(ctx->z3_ctx, out_ctx->ast);
+    Z3_inc_ref(ctx->z3_ctx, out_ctx->pi);
 
     Z3_sort bv_sort = Z3_get_sort(ctx->z3_ctx, expr);
     assert(Z3_get_sort_kind(ctx->z3_ctx, bv_sort) == Z3_BV_SORT &&
@@ -205,8 +208,9 @@ static void __gd_init_eval(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast expr,
     if (must_initialize_ast) {
         __reset_ast_data();
         __detect_involved_inputs(ctx, expr, &ast_data);
-        assert(ast_data.indexes.size > 0 &&
-               "__gd_init_eval() no input in expr");
+
+        if (ast_data.indexes.size == 0)
+            return 0; // no index!
     }
 
     out_ctx->mapping_size = ast_data.index_groups.size;
@@ -241,6 +245,17 @@ static void __gd_init_eval(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast expr,
     //     __glob_gd_mapping[i] = *p;
     //     __glob_gd_input[i++] = tmp_input[*p];
     // }
+
+    return 1;
+}
+
+static void __gd_free_eval(eval_wapper_ctx_t* eval_ctx)
+{
+    Z3_dec_ref(eval_ctx->fctx->z3_ctx, eval_ctx->pi);
+    Z3_dec_ref(eval_ctx->fctx->z3_ctx, eval_ctx->ast);
+
+    free(eval_ctx->mapping);
+    free(eval_ctx->input);
 }
 
 static void __gradient_transf_init(Z3_context ctx, Z3_ast expr, Z3_ast* out_exp)
@@ -253,7 +268,7 @@ static void __gradient_transf_init(Z3_context ctx, Z3_ast expr, Z3_ast* out_exp)
     Z3_decl_kind decl_kind = Z3_get_decl_kind(ctx, decl);
 
     int    is_not = 0;
-    Z3_ast arg;
+    Z3_ast arg    = expr;
     while (decl_kind == Z3_OP_NOT) {
         arg       = Z3_get_app_arg(ctx, app, 0);
         app       = Z3_to_app(ctx, arg);
@@ -265,9 +280,13 @@ static void __gradient_transf_init(Z3_context ctx, Z3_ast expr, Z3_ast* out_exp)
     assert(Z3_get_app_num_args(ctx, app) == 2 &&
            "__gradient_transf_init requires a binary APP");
 
-    Z3_ast arg1    = Z3_get_app_arg(ctx, app, 0);
-    Z3_ast arg2    = Z3_get_app_arg(ctx, app, 1);
     Z3_ast args[2] = {0};
+    Z3_inc_ref(ctx, arg);
+    Z3_ast arg1 = Z3_get_app_arg(ctx, app, 0);
+    Z3_inc_ref(ctx, arg1);
+    Z3_ast arg2 = Z3_get_app_arg(ctx, app, 1);
+    Z3_inc_ref(ctx, arg2);
+    Z3_dec_ref(ctx, arg);
 
     Z3_sort arg_sort = Z3_get_sort(ctx, arg1);
     assert(Z3_get_sort_kind(ctx, arg_sort) == Z3_BV_SORT &&
@@ -282,15 +301,29 @@ static void __gradient_transf_init(Z3_context ctx, Z3_ast expr, Z3_ast* out_exp)
             is_unsigned = 1;
 
         if (is_unsigned) {
-            arg1      = Z3_mk_zero_ext(ctx, 64 - sort_size, arg1);
-            arg2      = Z3_mk_zero_ext(ctx, 64 - sort_size, arg2);
+            Z3_ast tmp1 = arg1;
+            Z3_ast tmp2 = arg2;
+            arg1        = Z3_mk_zero_ext(ctx, 64 - sort_size, tmp1);
+            Z3_inc_ref(ctx, arg1);
+            arg2 = Z3_mk_zero_ext(ctx, 64 - sort_size, tmp2);
+            Z3_inc_ref(ctx, arg2);
+            Z3_dec_ref(ctx, tmp1);
+            Z3_dec_ref(ctx, tmp2);
             sort_size = 64;
         } else {
-            arg1      = Z3_mk_sign_ext(ctx, 64 - sort_size, arg1);
-            arg2      = Z3_mk_sign_ext(ctx, 64 - sort_size, arg2);
+            Z3_ast tmp1 = arg1;
+            Z3_ast tmp2 = arg2;
+            arg1        = Z3_mk_sign_ext(ctx, 64 - sort_size, tmp1);
+            Z3_inc_ref(ctx, arg1);
+            arg2 = Z3_mk_sign_ext(ctx, 64 - sort_size, tmp2);
+            Z3_inc_ref(ctx, arg2);
+            Z3_dec_ref(ctx, tmp1);
+            Z3_dec_ref(ctx, tmp2);
             sort_size = 64;
         }
     }
+
+    Z3_ast res;
 
 PRE_SWITCH:
     switch (decl_kind) {
@@ -303,9 +336,10 @@ PRE_SWITCH:
                 decl_kind = Z3_OP_SLT;
                 goto PRE_SWITCH;
             }
-            args[0]  = arg2;
-            args[1]  = arg1;
-            *out_exp = Z3_mk_bvsub(ctx, args[0], args[1]);
+            args[0] = arg2;
+            args[1] = arg1;
+            res     = Z3_mk_bvsub(ctx, args[0], args[1]);
+            Z3_inc_ref(ctx, res);
             break;
         }
         case Z3_OP_SLT:
@@ -317,29 +351,52 @@ PRE_SWITCH:
                 decl_kind = Z3_OP_SGT;
                 goto PRE_SWITCH;
             }
-            args[0]  = arg1;
-            args[1]  = arg2;
-            *out_exp = Z3_mk_bvsub(ctx, args[0], args[1]);
+            args[0] = arg1;
+            args[1] = arg2;
+            res     = Z3_mk_bvsub(ctx, args[0], args[1]);
+            Z3_inc_ref(ctx, res);
             break;
         }
         case Z3_OP_EQ: { // arg1 == arg2 =>   abs(arg1 - arg2)
                          // arg1 != arg2 => - abs(arg1 - arg2)
-            args[0]  = arg1;
-            args[1]  = arg2;
-            *out_exp = Z3_mk_ite(ctx, Z3_mk_bvsgt(ctx, args[0], args[1]),
-                                 Z3_mk_bvsub(ctx, args[0], args[1]),
-                                 Z3_mk_bvsub(ctx, args[1], args[0]));
-            if (is_not)
-                *out_exp = Z3_mk_bvsub(
-                    ctx,
-                    Z3_mk_unsigned_int64(ctx, 0, Z3_mk_bv_sort(ctx, sort_size)),
-                    *out_exp);
+            args[0] = arg1;
+            args[1] = arg2;
+
+            Z3_ast cond = Z3_mk_bvsgt(ctx, args[0], args[1]);
+            Z3_inc_ref(ctx, cond);
+            Z3_ast ift = Z3_mk_bvsub(ctx, args[0], args[1]);
+            Z3_inc_ref(ctx, ift);
+            Z3_ast iff = Z3_mk_bvsub(ctx, args[1], args[0]);
+            Z3_inc_ref(ctx, iff);
+
+            assert(Z3_get_sort_kind(ctx, Z3_get_sort(ctx, cond)) ==
+                       Z3_BOOL_SORT &&
+                   "not bool sort");
+            Z3_ast ite = Z3_mk_ite(ctx, cond, ift, iff);
+            Z3_inc_ref(ctx, ite);
+            Z3_dec_ref(ctx, cond);
+            Z3_dec_ref(ctx, ift);
+            Z3_dec_ref(ctx, iff);
+
+            if (is_not) {
+                Z3_ast zero =
+                    Z3_mk_unsigned_int64(ctx, 0, Z3_mk_bv_sort(ctx, sort_size));
+                Z3_inc_ref(ctx, zero);
+                res = Z3_mk_bvsub(ctx, zero, ite);
+                Z3_inc_ref(ctx, res);
+                Z3_dec_ref(ctx, ite);
+                Z3_dec_ref(ctx, zero);
+            } else
+                res = ite;
             break;
         }
 
         default:
             assert(0 && "__gradient_transf_init unknown decl kind");
     }
+
+    Z3_inc_ref(ctx, res);
+    *out_exp = res;
 }
 // **********************************
 
@@ -1417,6 +1474,10 @@ L2:
         goto L3;
     }
 
+#ifdef DEBUG_CHECK_LIGHT
+    Z3FUZZ_LOG("Trying L2\n");
+#endif
+
     for (i = 0; i < ast_data.values.size; ++i) {
         set_reset_iter__index_group_t(&ast_data.index_groups, 0);
         while (
@@ -1498,13 +1559,18 @@ L31:
     if (0)
         goto L4;
 
+#ifdef DEBUG_CHECK_LIGHT
+    Z3FUZZ_LOG("Trying L31\n");
+#endif
+
     Z3_ast out_ast;
     __gradient_transf_init(ctx->z3_ctx, branch_condition, &out_ast);
-    // printf("out_ast: %s\n", Z3_ast_to_string(ctx->z3_ctx, out_ast));
 
     eval_wapper_ctx_t ew;
 
-    __gd_init_eval(ctx, query, out_ast, 0, 0, &ew);
+    int valid_eval = __gd_init_eval(ctx, query, out_ast, 0, 0, &ew);
+    assert(valid_eval == 1 && "eval should be always valid here");
+
     eval_set_ctx(&ew);
     set__digest_t digest_set;
     set_init__digest_t(&digest_set, digest_64bit_hash, digest_equals);
@@ -1530,12 +1596,16 @@ L31:
             *proof      = tmp_proof;
             *proof_size = current_testcase->testcase_len;
             set_free__digest_t(&digest_set);
+            __gd_free_eval(&ew);
+            Z3_dec_ref(ctx->z3_ctx, out_ast);
             return 1;
         }
     }
 
+    Z3_dec_ref(ctx->z3_ctx, out_ast);
     set_free__digest_t(&digest_set);
     __gd_restore_tmp_input(current_testcase);
+    __gd_free_eval(&ew);
     goto L4;
 
     // L4 -- DETERMINISTIC AFL TRANSFORMATIONS
@@ -2546,8 +2616,19 @@ unsigned long z3fuzz_maximize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_maximize,
 
     eval_wapper_ctx_t ew;
 
-    to_maximize = Z3_mk_bvneg(ctx->z3_ctx, to_maximize);
-    __gd_init_eval(ctx, pi, to_maximize, 0, 1, &ew);
+    to_maximize    = Z3_mk_bvneg(ctx->z3_ctx, to_maximize);
+    int valid_eval = __gd_init_eval(ctx, pi, to_maximize, 0, 1, &ew);
+    if (!valid_eval) {
+        // all inputs are fixed
+        unsigned long res = ctx->model_eval(ctx->z3_ctx, to_maximize, tmp_input,
+                                            current_testcase->value_sizes,
+                                            current_testcase->values_len);
+        __vals_long_to_char(tmp_input, tmp_proof,
+                            current_testcase->testcase_len);
+        *out_values = tmp_proof;
+        return res;
+    }
+
     eval_set_ctx(&ew);
 
     unsigned long max_val;
@@ -2560,6 +2641,7 @@ unsigned long z3fuzz_maximize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_maximize,
     __vals_long_to_char(tmp_input, tmp_proof, *out_len);
     *out_values = tmp_proof;
 
+    __gd_free_eval(&ew);
     memcpy(tmp_input, current_testcase->values,
            current_testcase->values_len * sizeof(unsigned long));
     return max_val;
@@ -2590,7 +2672,17 @@ unsigned long z3fuzz_minimize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_minimize,
 
     eval_wapper_ctx_t ew;
 
-    __gd_init_eval(ctx, pi, to_minimize, 0, 1, &ew);
+    int valid_eval = __gd_init_eval(ctx, pi, to_minimize, 0, 1, &ew);
+    if (!valid_eval) {
+        // all inputs are fixed
+        unsigned long res = ctx->model_eval(ctx->z3_ctx, to_minimize, tmp_input,
+                                            current_testcase->value_sizes,
+                                            current_testcase->values_len);
+        __vals_long_to_char(tmp_input, tmp_proof,
+                            current_testcase->testcase_len);
+        *out_values = tmp_proof;
+        return res;
+    }
     eval_set_ctx(&ew);
 
     unsigned long min_val;
@@ -2600,6 +2692,7 @@ unsigned long z3fuzz_minimize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_minimize,
     __vals_long_to_char(tmp_input, tmp_proof, *out_len);
     *out_values = tmp_proof;
 
+    __gd_free_eval(&ew);
     memcpy(tmp_input, current_testcase->values,
            current_testcase->values_len * sizeof(unsigned long));
     return min_val;
