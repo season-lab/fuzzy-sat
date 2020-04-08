@@ -49,33 +49,33 @@ static inline void print_status(unsigned long current_query,
                                 unsigned long unkn_queries_z3)
 {
     pp_printf(0, 1, "query %ld/%ld", current_query, num_queries);
-    pp_printf(1, 1, "num_evaluate:         %ld", fctx.stats.num_evaluate);
-    pp_printf(2, 1, "num_sat:              %ld", fctx.stats.num_sat);
-    pp_printf(3, 1, "L0:                   %ld", fctx.stats.L0);
-    pp_printf(4, 1, "L1:                   %ld", fctx.stats.L1);
-    pp_printf(5, 1, "L2:                   %ld", fctx.stats.L2);
-    pp_printf(6, 1, "L3:                   %ld", fctx.stats.L3);
-    pp_printf(7, 1, "L31:                  %ld", fctx.stats.L31);
-    pp_printf(8, 1, "L4_flip1:             %ld", fctx.stats.L4_flip1);
-    pp_printf(9, 1, "L4_flip2:             %ld", fctx.stats.L4_flip2);
-    pp_printf(10, 1, "L4_flip4:             %ld", fctx.stats.L4_flip4);
-    pp_printf(11, 1, "L4_flip8:             %ld", fctx.stats.L4_flip8);
-    pp_printf(12, 1, "L4_flip16:            %ld", fctx.stats.L4_flip16);
-    pp_printf(13, 1, "L4_flip32:            %ld", fctx.stats.L4_flip32);
-    pp_printf(14, 1, "L4_arith8_sum:        %ld", fctx.stats.L4_arith8_sum);
-    pp_printf(15, 1, "L4_arith8_sub:        %ld", fctx.stats.L4_arith8_sub);
-    pp_printf(16, 1, "L4_arith16_sum_LE:    %ld", fctx.stats.L4_arith16_sum_LE);
-    pp_printf(17, 1, "L4_arith16_sum_BE:    %ld", fctx.stats.L4_arith16_sum_BE);
-    pp_printf(18, 1, "L4_arith16_sub_LE:    %ld", fctx.stats.L4_arith16_sub_LE);
-    pp_printf(19, 1, "L4_arith16_sub_BE:    %ld", fctx.stats.L4_arith16_sub_BE);
-    pp_printf(20, 1, "L4_arith32_sum_LE:    %ld", fctx.stats.L4_arith32_sum_LE);
-    pp_printf(21, 1, "L4_arith32_sum_BE:    %ld", fctx.stats.L4_arith32_sum_BE);
-    pp_printf(22, 1, "L4_arith32_sub_LE:    %ld", fctx.stats.L4_arith32_sub_LE);
-    pp_printf(23, 1, "L4_arith32_sub_BE:    %ld", fctx.stats.L4_arith32_sub_BE);
-    pp_printf(24, 1, "L4_int8:              %ld", fctx.stats.L4_int8);
-    pp_printf(25, 1, "L4_int16:             %ld", fctx.stats.L4_int16);
-    pp_printf(26, 1, "L4_int32:             %ld", fctx.stats.L4_int32);
-    pp_printf(27, 1, "L5_havoc:             %ld", fctx.stats.L5_havoc);
+    pp_printf(1, 1, "num_evaluate:       %ld", fctx.stats.num_evaluate);
+    pp_printf(2, 1, "num_sat:            %ld", fctx.stats.num_sat);
+    pp_printf(3, 1, "reuse:              %ld", fctx.stats.reuse);
+    pp_printf(4, 1, "input_to_state:     %ld", fctx.stats.input_to_state);
+    pp_printf(5, 1, "input_to_state_ext: %ld", fctx.stats.input_to_state_ext);
+    pp_printf(6, 1, "brute_force:        %ld", fctx.stats.brute_force);
+    pp_printf(7, 1, "gradient_descend:   %ld", fctx.stats.gradient_descend);
+    pp_printf(8, 1, "flip1:              %ld", fctx.stats.flip1);
+    pp_printf(9, 1, "flip2:              %ld", fctx.stats.flip2);
+    pp_printf(10, 1, "flip4:              %ld", fctx.stats.flip4);
+    pp_printf(11, 1, "flip8:              %ld", fctx.stats.flip8);
+    pp_printf(12, 1, "flip16:             %ld", fctx.stats.flip16);
+    pp_printf(13, 1, "flip32:             %ld", fctx.stats.flip32);
+    pp_printf(14, 1, "arith8_sum:         %ld", fctx.stats.arith8_sum);
+    pp_printf(15, 1, "arith8_sub:         %ld", fctx.stats.arith8_sub);
+    pp_printf(16, 1, "arith16_sum_LE:     %ld", fctx.stats.arith16_sum_LE);
+    pp_printf(17, 1, "arith16_sum_BE:     %ld", fctx.stats.arith16_sum_BE);
+    pp_printf(18, 1, "arith16_sub_LE:     %ld", fctx.stats.arith16_sub_LE);
+    pp_printf(19, 1, "arith16_sub_BE:     %ld", fctx.stats.arith16_sub_BE);
+    pp_printf(20, 1, "arith32_sum_LE:     %ld", fctx.stats.arith32_sum_LE);
+    pp_printf(21, 1, "arith32_sum_BE:     %ld", fctx.stats.arith32_sum_BE);
+    pp_printf(22, 1, "arith32_sub_LE:     %ld", fctx.stats.arith32_sub_LE);
+    pp_printf(23, 1, "arith32_sub_BE:     %ld", fctx.stats.arith32_sub_BE);
+    pp_printf(24, 1, "int8:               %ld", fctx.stats.int8);
+    pp_printf(25, 1, "int16:              %ld", fctx.stats.int16);
+    pp_printf(26, 1, "int32:              %ld", fctx.stats.int32);
+    pp_printf(27, 1, "havoc:              %ld", fctx.stats.havoc);
 #ifdef Z3_FALLTHROUGH
     pp_printf(33, 1, "sat z3:               %ld", sat_queries_z3);
     pp_printf(34, 1, "unsat z3:             %ld", unsat_queries_z3);
@@ -96,37 +96,31 @@ print_stats_on_file(const char* query_name, unsigned long num_queries,
     FILE* logfile = fopen("/tmp/z3fuzzy-log.csv", "w");
     fprintf(logfile, "%s;%ld;%ld;flip data;\n", query_name, num_queries,
             fctx.stats.num_sat);
-    fprintf(logfile, ";;;L0;%ld\n", fctx.stats.L0);
-    fprintf(logfile, ";;;L1;%ld\n", fctx.stats.L1);
-    fprintf(logfile, ";;;L2;%ld\n", fctx.stats.L2);
-    fprintf(logfile, ";;;L3;%ld\n", fctx.stats.L3);
-    fprintf(logfile, ";;;L4_flip1;%ld\n", fctx.stats.L4_flip1);
-    fprintf(logfile, ";;;L4_flip2;%ld\n", fctx.stats.L4_flip2);
-    fprintf(logfile, ";;;L4_flip4;%ld\n", fctx.stats.L4_flip4);
-    fprintf(logfile, ";;;L4_flip16;%ld\n", fctx.stats.L4_flip16);
-    fprintf(logfile, ";;;L4_flip32;%ld\n", fctx.stats.L4_flip32);
-    fprintf(logfile, ";;;L4_arith8_sum;%ld\n", fctx.stats.L4_arith8_sum);
-    fprintf(logfile, ";;;L4_arith8_sub;%ld\n", fctx.stats.L4_arith8_sub);
-    fprintf(logfile, ";;;L4_arith16_sum_LE;%ld\n",
-            fctx.stats.L4_arith16_sum_LE);
-    fprintf(logfile, ";;;L4_arith16_sum_BE;%ld\n",
-            fctx.stats.L4_arith16_sum_BE);
-    fprintf(logfile, ";;;L4_arith16_sub_LE;%ld\n",
-            fctx.stats.L4_arith16_sub_LE);
-    fprintf(logfile, ";;;L4_arith16_sub_BE;%ld\n",
-            fctx.stats.L4_arith16_sub_BE);
-    fprintf(logfile, ";;;L4_arith32_sum_LE;%ld\n",
-            fctx.stats.L4_arith32_sum_LE);
-    fprintf(logfile, ";;;L4_arith32_sum_BE;%ld\n",
-            fctx.stats.L4_arith32_sum_BE);
-    fprintf(logfile, ";;;L4_arith32_sub_LE;%ld\n",
-            fctx.stats.L4_arith32_sub_LE);
-    fprintf(logfile, ";;;L4_arith32_sub_BE;%ld\n",
-            fctx.stats.L4_arith32_sub_BE);
-    fprintf(logfile, ";;;L4_int8;%ld\n", fctx.stats.L4_int8);
-    fprintf(logfile, ";;;L4_int16;%ld\n", fctx.stats.L4_int16);
-    fprintf(logfile, ";;;L4_int32;%ld\n", fctx.stats.L4_int32);
-    fprintf(logfile, ";;;L5_havoc;%ld\n", fctx.stats.L5_havoc);
+    fprintf(logfile, ";;;reuse;%ld\n", fctx.stats.reuse);
+    fprintf(logfile, ";;;input_to_state;%ld\n", fctx.stats.input_to_state);
+    fprintf(logfile, ";;;input_to_state_ext;%ld\n",
+            fctx.stats.input_to_state_ext);
+    fprintf(logfile, ";;;brute_force;%ld\n", fctx.stats.brute_force);
+    fprintf(logfile, ";;;gradient_descend;%ld\n", fctx.stats.gradient_descend);
+    fprintf(logfile, ";;;flip1;%ld\n", fctx.stats.flip1);
+    fprintf(logfile, ";;;flip2;%ld\n", fctx.stats.flip2);
+    fprintf(logfile, ";;;flip4;%ld\n", fctx.stats.flip4);
+    fprintf(logfile, ";;;flip16;%ld\n", fctx.stats.flip16);
+    fprintf(logfile, ";;;flip32;%ld\n", fctx.stats.flip32);
+    fprintf(logfile, ";;;arith8_sum;%ld\n", fctx.stats.arith8_sum);
+    fprintf(logfile, ";;;arith8_sub;%ld\n", fctx.stats.arith8_sub);
+    fprintf(logfile, ";;;arith16_sum_LE;%ld\n", fctx.stats.arith16_sum_LE);
+    fprintf(logfile, ";;;arith16_sum_BE;%ld\n", fctx.stats.arith16_sum_BE);
+    fprintf(logfile, ";;;arith16_sub_LE;%ld\n", fctx.stats.arith16_sub_LE);
+    fprintf(logfile, ";;;arith16_sub_BE;%ld\n", fctx.stats.arith16_sub_BE);
+    fprintf(logfile, ";;;arith32_sum_LE;%ld\n", fctx.stats.arith32_sum_LE);
+    fprintf(logfile, ";;;arith32_sum_BE;%ld\n", fctx.stats.arith32_sum_BE);
+    fprintf(logfile, ";;;arith32_sub_LE;%ld\n", fctx.stats.arith32_sub_LE);
+    fprintf(logfile, ";;;arith32_sub_BE;%ld\n", fctx.stats.arith32_sub_BE);
+    fprintf(logfile, ";;;int8;%ld\n", fctx.stats.int8);
+    fprintf(logfile, ";;;int16;%ld\n", fctx.stats.int16);
+    fprintf(logfile, ";;;int32;%ld\n", fctx.stats.int32);
+    fprintf(logfile, ";;;havoc;%ld\n", fctx.stats.havoc);
     fprintf(logfile, ";;;other data;\n");
     fprintf(logfile, ";;;elapsed time;%.3lf\n", elapsed_time);
     fprintf(logfile, ";;;elapsed time fast sat;%.3lf\n", elapsed_time_fast_sat);
