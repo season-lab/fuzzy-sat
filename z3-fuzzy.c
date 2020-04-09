@@ -51,7 +51,7 @@ static int skip_afl_det_int64              = 0;
 
 static int skip_afl_havoc         = 1;
 static int use_greedy_mamin       = 0;
-static int check_unnecessary_eval = 1;
+static int check_unnecessary_eval = 0;
 
 #ifdef USE_MD5_HASH
 #include "utility/md5.h"
@@ -730,8 +730,9 @@ static inline int __evaluate_branch_query(fuzzy_ctx_t* ctx, Z3_ast query,
     if (check_unnecessary_eval)
         if (__check_or_add_digest(&ast_data.processed_set,
                                   (unsigned char*)values,
-                                  ctx->n_symbols * sizeof(unsigned long)))
+                                  ctx->n_symbols * sizeof(unsigned long))) {
             return 0;
+        }
 
     int res =
         (int)ctx->model_eval(ctx->z3_ctx, query, values, value_sizes, n_values);
@@ -2529,7 +2530,7 @@ SUBPHASE_afl_det_int64(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
     testcase_t* current_testcase = &ctx->testcases.data[0];
 
     unsigned i;
-    for (i = 0; i < sizeof(interesting64) / sizeof(int); ++i) {
+    for (i = 0; i < sizeof(interesting64) / sizeof(long); ++i) {
         tmp_input[input_index_0] = (unsigned long)(interesting64[i]) & 0xffU;
         tmp_input[input_index_1] =
             (unsigned long)(interesting64[i] >> 8) & 0xffU;
@@ -3249,7 +3250,7 @@ static int __query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
 {
     // 1 -> succeded
 #ifdef DEBUG_CHECK_LIGHT
-    // Z3FUZZ_LOG("query: \n%s\n", Z3_ast_to_string(ctx->z3_ctx, query));
+    Z3FUZZ_LOG("query: \n%s\n", Z3_ast_to_string(ctx->z3_ctx, query));
     Z3FUZZ_LOG("branch condition: \n%s\n\n",
                Z3_ast_to_string(ctx->z3_ctx, branch_condition));
 #endif
@@ -3431,8 +3432,6 @@ static inline unsigned long __minimize_maximize_inner_greedy(
 {
     __reset_ast_data();
     __detect_involved_inputs(ctx, to_maximize_minimize, &ast_data);
-    memcpy(tmp_input, ctx->testcases.data[0].values,
-           ctx->testcases.data[0].values_len * sizeof(unsigned long));
 
     testcase_t*   current_testcase = &ctx->testcases.data[0];
     unsigned long max_min          = ctx->model_eval(
@@ -3485,6 +3484,9 @@ unsigned long z3fuzz_maximize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_maximize,
                               unsigned char const** out_values,
                               unsigned long*        out_len)
 {
+    memcpy(tmp_input, ctx->testcases.data[0].values,
+           ctx->testcases.data[0].values_len * sizeof(unsigned long));
+
     *out_len = ctx->testcases.data[0].testcase_len;
     if (use_greedy_mamin)
         return __minimize_maximize_inner_greedy(ctx, pi, to_maximize,
@@ -3497,8 +3499,6 @@ unsigned long z3fuzz_maximize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_maximize,
         unsigned long res = Z3_custom_eval(ctx->z3_ctx, to_maximize, tmp_input,
                                            current_testcase->value_sizes,
                                            current_testcase->values_len);
-        memcpy(tmp_input, current_testcase->values,
-               current_testcase->values_len * sizeof(unsigned long));
         return res;
     }
 
@@ -3520,9 +3520,9 @@ unsigned long z3fuzz_maximize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_maximize,
     int valid_eval = __gd_init_eval(ctx, pi, to_maximize, 0, 1, &ew);
     if (!valid_eval) {
         // all inputs are fixed
-        unsigned long res = ctx->model_eval(ctx->z3_ctx, to_maximize, tmp_input,
-                                            current_testcase->value_sizes,
-                                            current_testcase->values_len);
+        unsigned long res = ctx->model_eval(
+            ctx->z3_ctx, original_to_maximize, tmp_input,
+            current_testcase->value_sizes, current_testcase->values_len);
         __vals_long_to_char(tmp_input, tmp_proof,
                             current_testcase->testcase_len);
         *out_values = tmp_proof;
@@ -3551,6 +3551,9 @@ unsigned long z3fuzz_minimize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_minimize,
                               unsigned char const** out_values,
                               unsigned long*        out_len)
 {
+    memcpy(tmp_input, ctx->testcases.data[0].values,
+           ctx->testcases.data[0].values_len * sizeof(unsigned long));
+
     *out_len = ctx->testcases.data[0].testcase_len;
     if (use_greedy_mamin)
         return __minimize_maximize_inner_greedy(ctx, pi, to_minimize,
@@ -3591,8 +3594,6 @@ unsigned long z3fuzz_minimize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_minimize,
     *out_values = tmp_proof;
 
     __gd_free_eval(&ew);
-    memcpy(tmp_input, current_testcase->values,
-           current_testcase->values_len * sizeof(unsigned long));
     return min_val;
 }
 
