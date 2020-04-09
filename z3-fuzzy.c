@@ -21,7 +21,7 @@
 
 // #define USE_MD5_HASH
 
-// #define USE_AFL_DET_GROUPS
+#define USE_AFL_DET_GROUPS
 
 static int log_query_stats = 0;
 static int skip_notify     = 0;
@@ -1640,7 +1640,7 @@ PHASE_gradient_descend(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
     testcase_t* current_testcase = &ctx->testcases.data[0];
 
 #ifdef DEBUG_CHECK_LIGHT
-    Z3FUZZ_LOG("Trying L31\n");
+    Z3FUZZ_LOG("Trying Gradient Descend\n");
 #endif
 
     Z3_ast out_ast;
@@ -2056,7 +2056,6 @@ SUBPHASE_afl_det_int16(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
 {
     if (unlikely(skip_afl_det_int16))
         return 0;
-
     testcase_t* current_testcase = &ctx->testcases.data[0];
 
     unsigned i;
@@ -2584,7 +2583,7 @@ static __always_inline int PHASE_afl_deterministic_groups(
     set_reset_iter__index_group_t(&ast_data.index_groups, 1);
     while (set_iter_next__index_group_t(&ast_data.index_groups, 1, &g)) {
         unsigned i;
-        // flip 1/2/4 -> do for every group type
+        // flip 1/2/4 int8 -> do for every group type
         for (i = 0; i < g->n; ++i) {
             unsigned long input_index = g->indexes[i];
 
@@ -2598,8 +2597,13 @@ static __always_inline int PHASE_afl_deterministic_groups(
             if (ret)
                 return 1;
 
-            ret = SUBPHASE_afl_det_byte_flip(ctx, query, branch_condition,
-                                             proof, proof_size, input_index);
+            ret = SUBPHASE_afl_det_four_waliking_bits(
+                ctx, query, branch_condition, proof, proof_size, input_index);
+            if (ret)
+                return 1;
+
+            ret = SUBPHASE_afl_det_int8(ctx, query, branch_condition, proof,
+                                        proof_size, input_index);
             if (ret)
                 return 1;
 
@@ -2728,13 +2732,6 @@ static __always_inline int PHASE_afl_deterministic_groups(
                     ret = SUBPHASE_afl_det_arith8(ctx, query, branch_condition,
                                                   proof, proof_size,
                                                   g->indexes[i]);
-                    if (ret)
-                        return 1;
-
-                    // interesting 8
-                    ret =
-                        SUBPHASE_afl_det_int8(ctx, query, branch_condition,
-                                              proof, proof_size, g->indexes[i]);
                     if (ret)
                         return 1;
 
