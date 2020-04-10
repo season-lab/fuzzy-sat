@@ -152,8 +152,8 @@ static inline unsigned UR(unsigned limit)
 
 // ********* gradient stuff *********
 static void __reset_ast_data();
-static void __detect_involved_inputs(fuzzy_ctx_t* ctx, Z3_ast v,
-                                     ast_data_t* data);
+static void detect_involved_inputs_wrapper(fuzzy_ctx_t* ctx, Z3_ast v,
+                                           ast_data_t* data);
 
 typedef struct mapping_subel_t {
     unsigned      idx;
@@ -260,7 +260,7 @@ static int __gd_init_eval(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast expr,
 
     if (must_initialize_ast) {
         __reset_ast_data();
-        __detect_involved_inputs(ctx, expr, &ast_data);
+        detect_involved_inputs_wrapper(ctx, expr, &ast_data);
 
         if (ast_data.indexes.size == 0)
             return 0; // no index!
@@ -311,7 +311,7 @@ static void __gd_free_eval(eval_wapper_ctx_t* eval_ctx)
     free(eval_ctx->input);
 }
 
-static void __gradient_transf_init(Z3_context ctx, Z3_ast expr, Z3_ast* out_exp)
+static int __gradient_transf_init(Z3_context ctx, Z3_ast expr, Z3_ast* out_exp)
 {
     assert(Z3_get_ast_kind(ctx, expr) == Z3_APP_AST &&
            "__gradient_transf_init expects an APP argument");
@@ -342,8 +342,8 @@ static void __gradient_transf_init(Z3_context ctx, Z3_ast expr, Z3_ast* out_exp)
     Z3_dec_ref(ctx, arg);
 
     Z3_sort arg_sort = Z3_get_sort(ctx, arg1);
-    assert(Z3_get_sort_kind(ctx, arg_sort) == Z3_BV_SORT &&
-           "__gradient_transf_init requires a BV sort");
+    if (Z3_get_sort_kind(ctx, arg_sort) != Z3_BV_SORT)
+        return 0;
     unsigned sort_size = Z3_get_bv_sort_size(ctx, arg_sort);
     assert(sort_size > 1 && "__gradient_transf_init unexpected sort size");
 
@@ -450,6 +450,7 @@ PRE_SWITCH:
 
     Z3_inc_ref(ctx, res);
     *out_exp = res;
+    return 1;
 }
 // **********************************
 
@@ -696,8 +697,8 @@ static inline void __vals_long_to_char(unsigned long* in_vals,
         out_vals[i] = (unsigned char)in_vals[i];
 }
 
-static inline int __check_or_add_digest(set__digest_t* set,
-                                        unsigned char* values, unsigned n)
+static int __check_or_add_digest(set__digest_t* set, unsigned char* values,
+                                 unsigned n)
 {
     digest_t d;
 #ifdef USE_MD5_HASH
@@ -974,8 +975,8 @@ static void __detect_assignment_involved_inputs(fuzzy_ctx_t* ctx,
     } else {
         cached_el = (ast_data_ptr)malloc(sizeof(ast_data_t));
         __init_ast_data(cached_el);
-        __detect_involved_inputs(ctx, ctx->assignments[assignment_idx],
-                                 cached_el);
+        detect_involved_inputs_wrapper(ctx, ctx->assignments[assignment_idx],
+                                       cached_el);
         dict_set__ast_data_ptr(assignment_inputs_cache,
                                (unsigned long)assignment_idx, cached_el);
     }
@@ -983,12 +984,19 @@ static void __detect_assignment_involved_inputs(fuzzy_ctx_t* ctx,
 }
 
 static void __detect_involved_inputs(fuzzy_ctx_t* ctx, Z3_ast v,
-                                     ast_data_t* data)
+                                     ast_data_t* data,
+                                     set__ulong* visited_subtrees)
 {
     // visit the AST and collect some data
     // 1. Find "groups" of inputs involved in the AST and store them in
     // 'index_queue'
     // 2. Populate global 'indexes' with encountered indexes
+
+    ulong hash = Z3_get_ast_id(ctx->z3_ctx, v);
+    if (set_check__ulong(visited_subtrees, hash))
+        return;
+    set_add__ulong(visited_subtrees, hash);
+
     switch (Z3_get_ast_kind(ctx->z3_ctx, v)) {
         case Z3_NUMERAL_AST: {
             data->query_size++;
@@ -1083,7 +1091,8 @@ static void __detect_involved_inputs(fuzzy_ctx_t* ctx, Z3_ast v,
             if (num_fields > 0) {
                 for (i = 0; i < num_fields; i++) {
                     __detect_involved_inputs(
-                        ctx, Z3_get_app_arg(ctx->z3_ctx, app, i), data);
+                        ctx, Z3_get_app_arg(ctx->z3_ctx, app, i), data,
+                        visited_subtrees);
                 }
             }
             break;
@@ -1094,6 +1103,15 @@ static void __detect_involved_inputs(fuzzy_ctx_t* ctx, Z3_ast v,
         default:
             assert(0 && "__main_ast_visit() unknown ast kind\n");
     }
+}
+
+static void detect_involved_inputs_wrapper(fuzzy_ctx_t* ctx, Z3_ast v,
+                                           ast_data_t* data)
+{
+    set__ulong visited_subtrees;
+    set_init__ulong(&visited_subtrees, &index_hash, &index_equals);
+    __detect_involved_inputs(ctx, v, data, &visited_subtrees);
+    set_free__ulong(&visited_subtrees);
 }
 
 static void __detect_early_constants(fuzzy_ctx_t* ctx, Z3_ast v,
@@ -1241,7 +1259,7 @@ static inline int __check_univocally_defined(fuzzy_ctx_t* ctx, Z3_ast expr,
 
     set_remove_all__index_group_t(&ast_data.index_groups);
     ast_data.input_extract_ops = 0;
-    __detect_involved_inputs(ctx, expr, &ast_data);
+    detect_involved_inputs_wrapper(ctx, expr, &ast_data);
     if (ast_data.input_extract_ops > 0)
         return 0; // it is not safe to add to univocally defined
 
@@ -1422,7 +1440,7 @@ static inline void __init_global_data(fuzzy_ctx_t* ctx, Z3_ast query,
     __reset_ast_data();
 
     __detect_input_to_state_query(ctx, branch_condition, &ast_data);
-    __detect_involved_inputs(ctx, branch_condition, &ast_data);
+    detect_involved_inputs_wrapper(ctx, branch_condition, &ast_data);
     __detect_early_constants(ctx, branch_condition, &ast_data);
 
     testcase_t* current_testcase = &ctx->testcases.data[0];
@@ -1645,7 +1663,9 @@ PHASE_gradient_descend(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
 #endif
 
     Z3_ast out_ast;
-    __gradient_transf_init(ctx->z3_ctx, branch_condition, &out_ast);
+    int valid_for_gd = __gradient_transf_init(ctx->z3_ctx, branch_condition, &out_ast);
+    if (!valid_for_gd)
+        return 0;
 
     eval_wapper_ctx_t ew;
 
@@ -3280,7 +3300,6 @@ static int __query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
 #ifdef DEBUG_CHECK_LIGHT
     print_index_and_value_queue(&ast_data);
 #endif
-
     // Input to State
     if (ast_data.is_input_to_state) {
         // input to state detected
@@ -3431,7 +3450,7 @@ static inline unsigned long __minimize_maximize_inner_greedy(
     unsigned char const** out_values, unsigned is_max)
 {
     __reset_ast_data();
-    __detect_involved_inputs(ctx, to_maximize_minimize, &ast_data);
+    detect_involved_inputs_wrapper(ctx, to_maximize_minimize, &ast_data);
 
     testcase_t*   current_testcase = &ctx->testcases.data[0];
     unsigned long max_min          = ctx->model_eval(
@@ -3492,15 +3511,16 @@ unsigned long z3fuzz_maximize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_maximize,
         return __minimize_maximize_inner_greedy(ctx, pi, to_maximize,
                                                 out_values, 1);
     testcase_t* current_testcase = &ctx->testcases.data[0];
-    // detect the strcmp pattern
-    if (__detect_strcmp_pattern(ctx, to_maximize, tmp_input)) {
-        __vals_long_to_char(tmp_input, tmp_proof, *out_len);
-        *out_values       = tmp_proof;
-        unsigned long res = Z3_custom_eval(ctx->z3_ctx, to_maximize, tmp_input,
-                                           current_testcase->value_sizes,
-                                           current_testcase->values_len);
-        return res;
-    }
+    // // detect the strcmp pattern
+    // if (__detect_strcmp_pattern(ctx, to_maximize, tmp_input)) {
+    //     __vals_long_to_char(tmp_input, tmp_proof, *out_len);
+    //     *out_values       = tmp_proof;
+    //     unsigned long res = Z3_custom_eval(ctx->z3_ctx, to_maximize,
+    //     tmp_input,
+    //                                        current_testcase->value_sizes,
+    //                                        current_testcase->values_len);
+    //     return res;
+    // }
 
     Z3_ast  original_to_maximize = to_maximize;
     Z3_sort arg_sort             = Z3_get_sort(ctx->z3_ctx, to_maximize);
@@ -3572,7 +3592,6 @@ unsigned long z3fuzz_minimize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_minimize,
     }
 
     eval_wapper_ctx_t ew;
-
     int valid_eval = __gd_init_eval(ctx, pi, to_minimize, 0, 1, &ew);
     if (!valid_eval) {
         // all inputs are fixed
