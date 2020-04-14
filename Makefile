@@ -1,5 +1,5 @@
 CC=gcc #clang
-CFLAGS=-Wall -g -O3 -fPIC #-O1 -g -fsanitize=address -fno-omit-frame-pointer
+CFLAGS=-Wall -s -O3 -fPIC #-O3 -fsanitize=address -fno-omit-frame-pointer
 CLIBS=-lz3
 CLIB_PATHS=-L./fuzzolic-z3/build
 CINCLUDE=-I./fuzzolic-z3/src/api -I./include
@@ -22,7 +22,6 @@ debug-eval: fuzzy-lib
 	${CC} ${CFLAGS} debug-eval.c ./utility/pretty-print.c libZ3Fuzzy.a -o debug-eval ${CINCLUDE} ${CLIB_PATHS} ${CLIBS}
 
 fuzzy-lib:
-	sed -i 's/Z3_VERSION [0-9]\+/Z3_VERSION 487/g' z3-fuzzy.h
 	${CC} ${CFLAGS} -c z3-fuzzy.c ${CINCLUDE} ${CLIB_PATHS} ${CLIBS}
 	${CC} ${CFLAGS} -c ./utility/md5.c ${CINCLUDE} ${CLIB_PATHS} ${CLIBS}
 	${CC} ${CFLAGS} -c ./utility/gradient_descend.c ${CINCLUDE} ${CLIB_PATHS} ${CLIBS}

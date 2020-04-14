@@ -15,9 +15,13 @@
 #define Z3FUZZ_LOG(x...) fprintf(stderr, "[z3fuzz] " x)
 #define FLIP_BIT(_var, _idx) ((_var) ^ (1 << (_idx)));
 
+#define rightmost_set_bit(x) ((x) != 0 ? __builtin_ctzl(x) : -1)
+#define leftmost_set_bit(x) ((x) != 0 ? (63 - __builtin_clzl(x)) : -1)
+
 // #define PRINT_SAT
 // #define PRINT_NUM_EVALUATE
 // #define DEBUG_CHECK_LIGHT
+// #define DEBUG_DETECT_GROUP
 
 // #define USE_MD5_HASH
 
@@ -230,6 +234,7 @@ static unsigned long __gd_eval(unsigned long* x)
     unsigned long res = eval_ctx->fctx->model_eval(
         eval_ctx->fctx->z3_ctx, eval_ctx->ast, tmp_input,
         seed_testcase->value_sizes, seed_testcase->values_len);
+    eval_ctx->fctx->stats.num_evaluate++;
     return res;
 }
 
@@ -756,9 +761,255 @@ static int __detect_input_group(fuzzy_ctx_t* ctx, Z3_ast node,
             Z3_decl_kind decl_kind  = Z3_get_decl_kind(ctx->z3_ctx, decl);
             unsigned     i;
             switch (decl_kind) {
-                case Z3_OP_EXTRACT:
-                case Z3_OP_BSHL:
-                    ast_data.input_extract_ops++;
+                case Z3_OP_EXTRACT: {
+#ifdef DEBUG_DETECT_GROUP
+                    printf("DETECT_GROUP [Z3_OP_EXTRACT]\n");
+#endif
+
+                    int prev_n = ig->n;
+
+                    unsigned long hig =
+                        Z3_get_decl_int_parameter(ctx->z3_ctx, decl, 0);
+                    unsigned long low =
+                        Z3_get_decl_int_parameter(ctx->z3_ctx, decl, 1);
+#ifdef DEBUG_DETECT_GROUP
+                    printf("hig: %lu, low: %lu, prev_n: %d\n", hig, low,
+                           prev_n);
+#endif
+
+                    // recursive call
+                    res = __detect_input_group(
+                        ctx, Z3_get_app_arg(ctx->z3_ctx, app, 0), ig);
+                    if (res == 0)
+                        break;
+
+                    int next_n = ig->n;
+#ifdef DEBUG_DETECT_GROUP
+                    printf("next_n: %d\n", next_n);
+                    for (i = 0; i < ig->n; ++i)
+                        printf(" @ ig->indexes[%u] = 0x%lx\n", i,
+                               ig->indexes[i]);
+#endif
+
+                    unsigned bv_width = next_n - prev_n;
+                    if (bv_width - 1 <= (hig / 8 - low / 8))
+                        break;
+
+                    // spill in tmp (little endian)
+                    unsigned long tmp[bv_width];
+                    for (i = 0; i < bv_width; ++i)
+                        tmp[i] = ig->indexes[bv_width - 1 - i - prev_n];
+
+                    // move tmp to: ig->indexes + prev_n
+                    for (i = low / 8; i <= hig / 8; ++i) {
+                        assert(i < bv_width && "extract overflow");
+                        ig->indexes[prev_n++] = tmp[i];
+                        ig->n--;
+                    }
+
+#ifdef DEBUG_DETECT_GROUP
+                    for (i = 0; i < ig->n; ++i)
+                        printf(" > ig->indexes[%u] = 0x%lx\n", i,
+                               ig->indexes[i]);
+#endif
+                    break;
+                }
+                case Z3_OP_BAND: {
+#ifdef DEBUG_DETECT_GROUP
+                    printf("DETECT_GROUP [Z3_OP_BAND]\n");
+#endif
+                    // check if one of the two is a constant
+                    // recursive call as before
+                    if (num_fields != 2) {
+                        res = 0;
+                        break;
+                    }
+
+                    Z3_ast child_1 = Z3_get_app_arg(ctx->z3_ctx, app, 0);
+                    Z3_inc_ref(ctx->z3_ctx, child_1);
+
+                    Z3_ast child_2 = Z3_get_app_arg(ctx->z3_ctx, app, 1);
+                    Z3_inc_ref(ctx->z3_ctx, child_2);
+
+                    Z3_ast        subexpr = NULL;
+                    unsigned long mask;
+                    if (Z3_get_ast_kind(ctx->z3_ctx, child_1) ==
+                        Z3_NUMERAL_AST) {
+                        Z3_bool successGet = Z3_get_numeral_uint64(
+                            ctx->z3_ctx, child_1, (uint64_t*)&mask);
+                        if (successGet == Z3_FALSE) {
+                            res = 0;
+                            goto BVAND_EXIT;
+                        }
+                        subexpr = child_2;
+                    } else if (Z3_get_ast_kind(ctx->z3_ctx, child_2) ==
+                               Z3_NUMERAL_AST) {
+                        Z3_bool successGet = Z3_get_numeral_uint64(
+                            ctx->z3_ctx, child_2, (uint64_t*)&mask);
+                        if (successGet == Z3_FALSE) {
+                            res = 0; // constant is too big
+                            goto BVAND_EXIT;
+                        }
+                        subexpr = child_1;
+                    }
+                    if (mask == 0) {
+                        res = 1; // and with 0 -> no group, it is always 0
+                        goto BVAND_EXIT;
+                    }
+
+                    int prev_n = ig->n;
+
+                    // recursive call
+                    res = __detect_input_group(ctx, subexpr, ig);
+                    if (res == 0)
+                        goto BVAND_EXIT;
+
+                    // find rightmost and leftmost set-bit of mask
+                    unsigned long low = rightmost_set_bit(mask);
+                    unsigned long hig = leftmost_set_bit(mask);
+
+                    int next_n = ig->n;
+#ifdef DEBUG_DETECT_GROUP
+                    printf("low: %lu, hig: %lu\n", low, hig);
+                    printf("next_n: %d\n", next_n);
+                    for (i = 0; i < ig->n; ++i)
+                        printf(" @ ig->indexes[%u] = 0x%lx\n", i,
+                               ig->indexes[i]);
+#endif
+
+                    unsigned bv_width = next_n - prev_n;
+                    if (bv_width - 1 <= (hig / 8 - low / 8))
+                        goto BVAND_EXIT;
+
+                    // spill in tmp (little endian)
+                    unsigned long* tmp = (unsigned long*)malloc(
+                        sizeof(unsigned long) * bv_width);
+                    for (i = 0; i < bv_width; ++i)
+                        tmp[i] = ig->indexes[bv_width - 1 - i - prev_n];
+
+                    // move tmp to: ig->indexes + prev_n
+                    for (i = low / 8; i <= hig / 8; ++i) {
+                        assert(i < bv_width && "extract overflow");
+                        ig->indexes[prev_n++] = tmp[i];
+                        ig->n--;
+                    }
+
+#ifdef DEBUG_DETECT_GROUP
+                    for (i = 0; i < ig->n; ++i)
+                        printf(" > ig->indexes[%u] = 0x%lx\n", i,
+                               ig->indexes[i]);
+#endif
+                    free(tmp);
+
+                BVAND_EXIT:
+                    Z3_dec_ref(ctx->z3_ctx, child_1);
+                    Z3_dec_ref(ctx->z3_ctx, child_2);
+                    break;
+                }
+                case Z3_OP_BADD:
+                case Z3_OP_BOR: {
+                    // detect if is an OR/ADD of BSHL
+#ifdef DEBUG_DETECT_GROUP
+                    printf("DETECT_GROUP [Z3_OP_BADD/Z3_OP_BOR]\n");
+#endif
+
+                    res = 0;
+                    unsigned long shift_mask       = 0;
+                    int           op_without_shift = 0;
+                    for (i = 0; i < num_fields; ++i) {
+                        Z3_ast child = Z3_get_app_arg(ctx->z3_ctx, app, i);
+                        if (Z3_get_ast_kind(ctx->z3_ctx, child) == Z3_APP_AST) {
+                            Z3_app child_app = Z3_to_app(ctx->z3_ctx, child);
+                            Z3_func_decl child_decl =
+                                Z3_get_app_decl(ctx->z3_ctx, child_app);
+                            if (Z3_get_decl_kind(ctx->z3_ctx, child_decl) ==
+                                Z3_OP_BSHL) {
+#ifdef DEBUG_DETECT_GROUP
+                                printf("> shift\n");
+#endif
+                                unsigned long shift_val = 0;
+
+                                Z3_ast child_1 =
+                                    Z3_get_app_arg(ctx->z3_ctx, child_app, 0);
+                                Z3_inc_ref(ctx->z3_ctx, child_1);
+
+                                Z3_ast child_2 =
+                                    Z3_get_app_arg(ctx->z3_ctx, child_app, 1);
+                                Z3_inc_ref(ctx->z3_ctx, child_2);
+
+                                Z3_ast subexpr = NULL;
+                                if (Z3_get_ast_kind(ctx->z3_ctx, child_1) ==
+                                    Z3_NUMERAL_AST) {
+                                    Z3_bool successGet = Z3_get_numeral_uint64(
+                                        ctx->z3_ctx, child_1,
+                                        (uint64_t*)&shift_val);
+                                    if (successGet == Z3_FALSE)
+                                        res = 0; // constant is too big
+                                    else
+                                        subexpr = child_2;
+
+                                } else if (Z3_get_ast_kind(ctx->z3_ctx,
+                                                           child_2) ==
+                                           Z3_NUMERAL_AST) {
+                                    Z3_bool successGet = Z3_get_numeral_uint64(
+                                        ctx->z3_ctx, child_2,
+                                        (uint64_t*)&shift_val);
+                                    if (successGet == Z3_FALSE)
+                                        res = 0; // constant is too big
+                                    else
+                                        subexpr = child_1;
+                                } else
+                                    res = 0;
+
+                                if (!res) {
+                                    Z3_dec_ref(ctx->z3_ctx, child_1);
+                                    Z3_dec_ref(ctx->z3_ctx, child_2);
+                                    break;
+                                }
+
+#ifdef DEBUG_DETECT_GROUP
+                                printf("> shift val: 0x%016lx\n", shift_val);
+#endif
+
+                                if (((0xff << shift_val) & shift_mask) != 0) {
+                                    res = 0;
+                                    Z3_dec_ref(ctx->z3_ctx, child_1);
+                                    Z3_dec_ref(ctx->z3_ctx, child_2);
+                                    break;
+                                }
+                                shift_mask |= 0xff << shift_val;
+
+                                res = __detect_input_group(ctx, subexpr, ig);
+                                Z3_dec_ref(ctx->z3_ctx, child_1);
+                                Z3_dec_ref(ctx->z3_ctx, child_2);
+
+                                if (!res)
+                                    break;
+#ifdef DEBUG_DETECT_GROUP
+                                printf("> shift OK\n");
+#endif
+                                continue;
+                            }
+                        }
+                        if (!op_without_shift)
+                            op_without_shift = 1;
+                        else {
+                            res = 0;
+                            break;
+                        }
+#ifdef DEBUG_DETECT_GROUP
+                        printf("> op != shift\n");
+#endif
+                        res = __detect_input_group(ctx, child, ig);
+                        if (!res)
+                            break;
+#ifdef DEBUG_DETECT_GROUP
+                        printf("> op != shift OK\n");
+#endif
+                    }
+
+                    break;
+                }
                 case Z3_OP_CONCAT: {
                     // recursive call
                     res = 0;
@@ -896,11 +1147,7 @@ static void __detect_input_to_state_query(fuzzy_ctx_t* ctx, Z3_ast node,
         if (Z3_get_ast_kind(ctx->z3_ctx, child) == Z3_NUMERAL_AST) {
             Z3_bool successGet = Z3_get_numeral_uint64(
                 ctx->z3_ctx, child,
-#if Z3_VERSION <= 451
-                (long long unsigned int*)&data->input_to_state_const
-#else
                 (uint64_t*)&data->input_to_state_const
-#endif
             );
             if (successGet == Z3_FALSE)
                 return; // constant is too big
@@ -1011,9 +1258,10 @@ static void __detect_involved_inputs(fuzzy_ctx_t* ctx, Z3_ast v,
             Z3_decl_kind decl_kind  = Z3_get_decl_kind(ctx->z3_ctx, decl);
 
             switch (decl_kind) {
-                case Z3_OP_BSHL:
+                case Z3_OP_BAND:
+                case Z3_OP_BADD:
+                case Z3_OP_BOR:
                 case Z3_OP_EXTRACT:
-                    data->input_extract_ops++;
                 case Z3_OP_CONCAT: {
                     index_group_t group = {0};
                     if (__detect_input_group(ctx, v, &group) && group.n > 0) {
@@ -1062,27 +1310,6 @@ static void __detect_involved_inputs(fuzzy_ctx_t* ctx, Z3_ast v,
                         set_add__ulong(&data->indexes, symbol_index);
                     }
                     return;
-                }
-                case Z3_OP_BLSHR:
-                case Z3_OP_BASHR:
-                    data->input_extract_ops++;
-                case Z3_OP_BADD:
-                case Z3_OP_BSUB:
-                case Z3_OP_BMUL: {
-                    data->linear_arithmetic_operations++;
-                    break;
-                }
-                case Z3_OP_BAND:
-                case Z3_OP_BUREM:
-                case Z3_OP_BUREM_I:
-                case Z3_OP_BSREM:
-                case Z3_OP_BSREM_I:
-                case Z3_OP_BSMOD:
-                    data->input_extract_ops++;
-                case Z3_OP_OR:
-                case Z3_OP_BXOR: {
-                    data->nonlinear_arithmetic_operations++;
-                    break;
                 }
                 default: {
                     break;
@@ -1158,11 +1385,7 @@ static void __detect_early_constants(fuzzy_ctx_t* ctx, Z3_ast v,
                         Z3_NUMERAL_AST) {
                         successGet = Z3_get_numeral_uint64(
                             ctx->z3_ctx, child1,
-#if Z3_VERSION <= 451
-                            (long long unsigned int*)&tmp_const
-#else
                             (uint64_t*)&tmp_const
-#endif
                         );
                         assert(successGet == Z3_TRUE &&
                                "failed to get constant");
@@ -1173,11 +1396,7 @@ static void __detect_early_constants(fuzzy_ctx_t* ctx, Z3_ast v,
                                Z3_NUMERAL_AST) {
                         successGet = Z3_get_numeral_uint64(
                             ctx->z3_ctx, child2,
-#if Z3_VERSION <= 451
-                            (long long unsigned int*)&tmp_const
-#else
                             (uint64_t*)&tmp_const
-#endif
                         );
                         assert(successGet == Z3_TRUE &&
                                "failed to get constant");
@@ -1201,11 +1420,7 @@ static void __detect_early_constants(fuzzy_ctx_t* ctx, Z3_ast v,
                         Z3_NUMERAL_AST) {
                         successGet = Z3_get_numeral_uint64(
                             ctx->z3_ctx, child1,
-#if Z3_VERSION <= 451
-                            (long long unsigned int*)&tmp_const
-#else
                             (uint64_t*)&tmp_const
-#endif
                         );
                         assert(successGet == Z3_TRUE &&
                                "failed to get constant");
@@ -1216,11 +1431,7 @@ static void __detect_early_constants(fuzzy_ctx_t* ctx, Z3_ast v,
                                Z3_NUMERAL_AST) {
                         successGet = Z3_get_numeral_uint64(
                             ctx->z3_ctx, child2,
-#if Z3_VERSION <= 451
-                            (long long unsigned int*)&tmp_const
-#else
                             (uint64_t*)&tmp_const
-#endif
                         );
                         assert(successGet == Z3_TRUE &&
                                "failed to get constant");
@@ -1663,7 +1874,8 @@ PHASE_gradient_descend(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
 #endif
 
     Z3_ast out_ast;
-    int valid_for_gd = __gradient_transf_init(ctx->z3_ctx, branch_condition, &out_ast);
+    int    valid_for_gd =
+        __gradient_transf_init(ctx->z3_ctx, branch_condition, &out_ast);
     if (!valid_for_gd)
         return 0;
 
@@ -3652,26 +3864,6 @@ unsigned long z3fuzz_evaluate_expression(fuzzy_ctx_t* ctx, Z3_ast value,
     return res;
 }
 
-#if Z3_VERSION <= 451
-unsigned long z3fuzz_evaluate_expression_z3(fuzzy_ctx_t* ctx, Z3_ast query,
-                                            Z3_ast* values)
-{
-    Z3_ast solution =
-        Z3_substitute(ctx->z3_ctx, query, ctx->n_symbols, ctx->symbols, values);
-    solution = Z3_simplify(ctx->z3_ctx, solution);
-
-    if (Z3_get_ast_kind(ctx->z3_ctx, solution) == Z3_NUMERAL_AST) {
-        long long unsigned int res;
-        Z3_bool successGet = Z3_get_numeral_uint64(ctx->z3_ctx, solution, &res);
-        assert(successGet == Z3_TRUE &&
-               "z3fuzz_evaluate_expression_z3() failed to get "
-               "constant");
-        return res;
-    } else
-        return Z3_get_bool_value(ctx->z3_ctx, solution) == Z3_L_TRUE ? 1UL
-                                                                     : 0UL;
-}
-#else
 unsigned long z3fuzz_evaluate_expression_z3(fuzzy_ctx_t* ctx, Z3_ast query,
                                             Z3_ast* values)
 {
@@ -3710,4 +3902,3 @@ unsigned long z3fuzz_evaluate_expression_z3(fuzzy_ctx_t* ctx, Z3_ast query,
     Z3_dec_ref(ctx->z3_ctx, solution);
     return res;
 }
-#endif

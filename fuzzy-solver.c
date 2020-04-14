@@ -3,7 +3,6 @@
 #include <sys/time.h>
 #include "utility/pretty-print.h"
 #include "z3-fuzzy.h"
-static_assert(Z3_VERSION == 487, "This executable requires z3 4.8.7+");
 
 #define SOLVER_TIMEOUT "10000" // 10 sec // 0
 

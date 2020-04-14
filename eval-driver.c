@@ -3,7 +3,6 @@
 #include <sys/time.h>
 #include "z3-fuzzy.h"
 #include "utility/pretty-print.h"
-static_assert(Z3_VERSION == 487, "This executable requires z3 4.8.7+");
 
 #define NUM_ITERATIONS 1000
 

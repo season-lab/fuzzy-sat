@@ -3,7 +3,6 @@
 #include <sys/time.h>
 #include "utility/pretty-print.h"
 #include <z3.h>
-#define Z3_VERSION 487
 
 #define SOLVER_TIMEOUT "10000" // 10 sec // 0
 
@@ -13,8 +12,6 @@
 // #define DUMP_UNKNOWN_QUERIES
 #define DUMP_PROOFS
 // #define EVAL_ONLY_BRANCH
-
-static_assert(Z3_VERSION == 487, "This executable requires z3 4.8.7+");
 
 const char* sat_queries_filename = "solver-sat-queries.smt2";
 const char* unk_queries_filename = "solver-unknown-queries.smt2";

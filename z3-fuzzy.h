@@ -3,7 +3,6 @@
 
 #include "testcase-list.h"
 #include <z3.h>
-#define Z3_VERSION 487
 
 typedef struct fuzzy_stats_t {
     unsigned long num_evaluate;
