@@ -792,13 +792,13 @@ static int __detect_input_group(fuzzy_ctx_t* ctx, Z3_ast node,
 #endif
 
                     unsigned bv_width = next_n - prev_n;
-                    if (bv_width - 1 <= (hig / 8 - low / 8))
+                    if (bv_width <= hig / 8)
                         break;
 
                     // spill in tmp (little endian)
                     unsigned long tmp[bv_width];
                     for (i = 0; i < bv_width; ++i)
-                        tmp[i] = ig->indexes[bv_width - 1 - i - prev_n];
+                        tmp[i] = ig->indexes[next_n - i - 1];
 
                     // move tmp to: ig->indexes + prev_n
                     for (i = low / 8; i <= hig / 8; ++i) {
@@ -858,6 +858,9 @@ static int __detect_input_group(fuzzy_ctx_t* ctx, Z3_ast node,
                     }
 
                     int prev_n = ig->n;
+#ifdef DEBUG_DETECT_GROUP
+                    printf("prev_n: %d\n", prev_n);
+#endif
 
                     // recursive call
                     res = __detect_input_group(ctx, subexpr, ig);
@@ -878,14 +881,14 @@ static int __detect_input_group(fuzzy_ctx_t* ctx, Z3_ast node,
 #endif
 
                     unsigned bv_width = next_n - prev_n;
-                    if (bv_width - 1 <= (hig / 8 - low / 8))
+                    if (bv_width <= hig / 8)
                         goto BVAND_EXIT;
 
                     // spill in tmp (little endian)
                     unsigned long* tmp = (unsigned long*)malloc(
                         sizeof(unsigned long) * bv_width);
                     for (i = 0; i < bv_width; ++i)
-                        tmp[i] = ig->indexes[bv_width - 1 - i - prev_n];
+                        tmp[i] = ig->indexes[next_n - i - 1];
 
                     // move tmp to: ig->indexes + prev_n
                     for (i = low / 8; i <= hig / 8; ++i) {
@@ -913,7 +916,7 @@ static int __detect_input_group(fuzzy_ctx_t* ctx, Z3_ast node,
                     printf("DETECT_GROUP [Z3_OP_BADD/Z3_OP_BOR]\n");
 #endif
 
-                    res = 0;
+                    res                            = 0;
                     unsigned long shift_mask       = 0;
                     int           op_without_shift = 0;
                     for (i = 0; i < num_fields; ++i) {
@@ -943,10 +946,12 @@ static int __detect_input_group(fuzzy_ctx_t* ctx, Z3_ast node,
                                     Z3_bool successGet = Z3_get_numeral_uint64(
                                         ctx->z3_ctx, child_1,
                                         (uint64_t*)&shift_val);
-                                    if (successGet == Z3_FALSE)
+                                    if (!successGet)
                                         res = 0; // constant is too big
-                                    else
+                                    else {
                                         subexpr = child_2;
+                                        res     = 1;
+                                    }
 
                                 } else if (Z3_get_ast_kind(ctx->z3_ctx,
                                                            child_2) ==
@@ -954,10 +959,12 @@ static int __detect_input_group(fuzzy_ctx_t* ctx, Z3_ast node,
                                     Z3_bool successGet = Z3_get_numeral_uint64(
                                         ctx->z3_ctx, child_2,
                                         (uint64_t*)&shift_val);
-                                    if (successGet == Z3_FALSE)
+                                    if (!successGet) {
                                         res = 0; // constant is too big
-                                    else
+                                    } else {
                                         subexpr = child_1;
+                                        res     = 1;
+                                    }
                                 } else
                                     res = 0;
 
@@ -1146,9 +1153,7 @@ static void __detect_input_to_state_query(fuzzy_ctx_t* ctx, Z3_ast node,
         Z3_ast child = Z3_get_app_arg(ctx->z3_ctx, node_app, i);
         if (Z3_get_ast_kind(ctx->z3_ctx, child) == Z3_NUMERAL_AST) {
             Z3_bool successGet = Z3_get_numeral_uint64(
-                ctx->z3_ctx, child,
-                (uint64_t*)&data->input_to_state_const
-            );
+                ctx->z3_ctx, child, (uint64_t*)&data->input_to_state_const);
             if (successGet == Z3_FALSE)
                 return; // constant is too big
             data->input_to_state_const += const_transformation;
@@ -1384,9 +1389,7 @@ static void __detect_early_constants(fuzzy_ctx_t* ctx, Z3_ast v,
                     if (Z3_get_ast_kind(ctx->z3_ctx, child1) ==
                         Z3_NUMERAL_AST) {
                         successGet = Z3_get_numeral_uint64(
-                            ctx->z3_ctx, child1,
-                            (uint64_t*)&tmp_const
-                        );
+                            ctx->z3_ctx, child1, (uint64_t*)&tmp_const);
                         assert(successGet == Z3_TRUE &&
                                "failed to get constant");
                         da_add_item__ulong(&data->values, tmp_const);
@@ -1395,9 +1398,7 @@ static void __detect_early_constants(fuzzy_ctx_t* ctx, Z3_ast v,
                     } else if (Z3_get_ast_kind(ctx->z3_ctx, child2) ==
                                Z3_NUMERAL_AST) {
                         successGet = Z3_get_numeral_uint64(
-                            ctx->z3_ctx, child2,
-                            (uint64_t*)&tmp_const
-                        );
+                            ctx->z3_ctx, child2, (uint64_t*)&tmp_const);
                         assert(successGet == Z3_TRUE &&
                                "failed to get constant");
                         da_add_item__ulong(&data->values, tmp_const);
@@ -1419,9 +1420,7 @@ static void __detect_early_constants(fuzzy_ctx_t* ctx, Z3_ast v,
                     if (Z3_get_ast_kind(ctx->z3_ctx, child1) ==
                         Z3_NUMERAL_AST) {
                         successGet = Z3_get_numeral_uint64(
-                            ctx->z3_ctx, child1,
-                            (uint64_t*)&tmp_const
-                        );
+                            ctx->z3_ctx, child1, (uint64_t*)&tmp_const);
                         assert(successGet == Z3_TRUE &&
                                "failed to get constant");
                         da_add_item__ulong(&data->values, tmp_const);
@@ -1430,9 +1429,7 @@ static void __detect_early_constants(fuzzy_ctx_t* ctx, Z3_ast v,
                     } else if (Z3_get_ast_kind(ctx->z3_ctx, child2) ==
                                Z3_NUMERAL_AST) {
                         successGet = Z3_get_numeral_uint64(
-                            ctx->z3_ctx, child2,
-                            (uint64_t*)&tmp_const
-                        );
+                            ctx->z3_ctx, child2, (uint64_t*)&tmp_const);
                         assert(successGet == Z3_TRUE &&
                                "failed to get constant");
                         da_add_item__ulong(&data->values, tmp_const);
@@ -3871,22 +3868,22 @@ unsigned long z3fuzz_evaluate_expression_z3(fuzzy_ctx_t* ctx, Z3_ast query,
 
     // build a model and assign an interpretation for the input symbols
     unsigned long res;
-    Z3_model z3_m = Z3_mk_model(ctx->z3_ctx);
+    Z3_model      z3_m = Z3_mk_model(ctx->z3_ctx);
     Z3_model_inc_ref(ctx->z3_ctx, z3_m);
     testcase_t* current_testcase = &ctx->testcases.data[0];
 
     unsigned i;
     for (i = 0; i < current_testcase->values_len; ++i) {
         unsigned int index = i;
-        Z3_sort sort =
+        Z3_sort      sort =
             Z3_mk_bv_sort(ctx->z3_ctx, current_testcase->value_sizes[i]);
-        Z3_symbol s = Z3_mk_int_symbol(ctx->z3_ctx, index);
+        Z3_symbol    s    = Z3_mk_int_symbol(ctx->z3_ctx, index);
         Z3_func_decl decl = Z3_mk_func_decl(ctx->z3_ctx, s, 0, NULL, sort);
         Z3_add_const_interp(ctx->z3_ctx, z3_m, decl, values[index]);
     }
 
     // evaluate the query in the model
-    Z3_ast solution;
+    Z3_ast  solution;
     Z3_bool successfulEval =
         Z3_model_eval(ctx->z3_ctx, z3_m, query, Z3_TRUE, &solution);
     assert(successfulEval && "Failed to evaluate model");
