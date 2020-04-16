@@ -20,7 +20,7 @@
 
 // #define PRINT_SAT
 // #define PRINT_NUM_EVALUATE
-// #define DEBUG_CHECK_LIGHT
+#define DEBUG_CHECK_LIGHT
 // #define DEBUG_DETECT_GROUP
 
 // #define USE_MD5_HASH
@@ -3501,10 +3501,18 @@ static int __query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
                 ast_data.is_input_to_state ? "true" : "false",
                 ast_data.linear_arithmetic_operations,
                 ast_data.nonlinear_arithmetic_operations);
-    if (ast_data.indexes.size == 0) // constant branch condition!
-        return __evaluate_branch_query(ctx, query, tmp_input,
-                                       current_testcase->value_sizes,
-                                       current_testcase->values_len);
+    if (ast_data.indexes.size == 0) { // constant branch condition!
+        if (__evaluate_branch_query(ctx, query, tmp_input,
+                                    current_testcase->value_sizes,
+                                    current_testcase->values_len)) {
+            __vals_long_to_char(tmp_input, tmp_proof,
+                                current_testcase->testcase_len);
+            *proof      = tmp_proof;
+            *proof_size = current_testcase->testcase_len;
+            return 1;
+        }
+        return 0;
+    }
 
 #ifdef DEBUG_CHECK_LIGHT
     print_index_and_value_queue(&ast_data);
