@@ -809,8 +809,10 @@ static int __detect_input_group(fuzzy_ctx_t* ctx, Z3_ast node,
 #endif
 
                     unsigned bv_width = next_n - prev_n;
-                    if (bv_width <= hig / 8)
+                    if (bv_width < hig / 8 + 1) {
+                        res = 0;
                         break;
+                    }
 
                     // spill in tmp (little endian)
                     unsigned long tmp[bv_width];
@@ -821,8 +823,8 @@ static int __detect_input_group(fuzzy_ctx_t* ctx, Z3_ast node,
                     for (i = low / 8; i <= hig / 8; ++i) {
                         assert(i < bv_width && "extract overflow");
                         ig->indexes[prev_n++] = tmp[i];
-                        ig->n--;
                     }
+                    ig->n = prev_n;
 
 #ifdef DEBUG_DETECT_GROUP
                     for (i = 0; i < ig->n; ++i)
@@ -898,8 +900,10 @@ static int __detect_input_group(fuzzy_ctx_t* ctx, Z3_ast node,
 #endif
 
                     unsigned bv_width = next_n - prev_n;
-                    if (bv_width <= hig / 8)
+                    if (bv_width < hig / 8 + 1) {
+                        res = 0;
                         goto BVAND_EXIT;
+                    }
 
                     // spill in tmp (little endian)
                     unsigned long* tmp = (unsigned long*)malloc(
@@ -911,8 +915,8 @@ static int __detect_input_group(fuzzy_ctx_t* ctx, Z3_ast node,
                     for (i = low / 8; i <= hig / 8; ++i) {
                         assert(i < bv_width && "extract overflow");
                         ig->indexes[prev_n++] = tmp[i];
-                        ig->n--;
                     }
+                    ig->n = prev_n;
 
 #ifdef DEBUG_DETECT_GROUP
                     for (i = 0; i < ig->n; ++i)
@@ -976,9 +980,9 @@ static int __detect_input_group(fuzzy_ctx_t* ctx, Z3_ast node,
                                     Z3_bool successGet = Z3_get_numeral_uint64(
                                         ctx->z3_ctx, child_2,
                                         (uint64_t*)&shift_val);
-                                    if (!successGet) {
+                                    if (!successGet)
                                         res = 0; // constant is too big
-                                    } else {
+                                    else {
                                         subexpr = child_1;
                                         res     = 1;
                                     }
