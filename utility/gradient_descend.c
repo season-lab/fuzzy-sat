@@ -373,7 +373,7 @@ static void           init_tmp_gradient(uint32_t n)
 int gd_descend_transf(uint64_t (*function)(uint64_t*), uint64_t* x0,
                       uint64_t* out_x, uint64_t* out_f, uint32_t n)
 {
-    // debug_dump_vector("x0 (desc)", x0, n);
+    debug_dump_vector("x0 (desc)", x0, n);
 
     init_tmp_gradient(n);
     gradient_el_t* gradient = __tmp_gradient;
@@ -388,7 +388,7 @@ int gd_descend_transf(uint64_t (*function)(uint64_t*), uint64_t* x0,
 
     descend(function, gradient, x0, f0, out_x, (int64_t*)out_f, n);
 
-    // debug_dump_vector("out_x (desc)", out_x, n);
+    debug_dump_vector("out_x (desc)", out_x, n);
     return 0;
 }
 

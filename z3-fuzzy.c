@@ -101,45 +101,104 @@ typedef ast_data_t* ast_data_ptr;
 static char* query_log_filename = "/tmp/fuzzy-log-info.csv";
 FILE*        query_log;
 
-static char  interesting8[]  = {-128, -1, 0, 1, 16, 32, 64, 100, 127};
-static short interesting16[] = {-32768, -129, 128,   255,  256, 512, 1000,
-                                1024,   4096, 32767, -128, -1,  0,   1,
-                                16,     32,   64,    100,  127};
-static int   interesting32[] = {
-    -2147483648, -100663046, -32769, 32768, 65535, 65536, 100663045,
-    2147483647,  -32768,     -129,   128,   255,   256,   512,
-    1000,        1024,       4096,   32767, -128,  -1,    0,
-    1,           16,         32,     64,    100,   127};
+static char interesting8[] = {
+    -128, // 0x80
+    -1,   // 0xff
+    0,    // 0x0
+    1,    // 0x1
+    16,   // 0x10
+    32,   // 0x20
+    64,   // 0x40
+    100,  // 0x64
+    127,  // 0x7f
+};
 
-static long interesting64[] = {-9223372036854775807,
-                               9223372036854775807,
-                               -2147483648,
-                               -100663046,
-                               -32769,
-                               32768,
-                               65535,
-                               65536,
-                               100663045,
-                               2147483647,
-                               -32768,
-                               -129,
-                               128,
-                               255,
-                               256,
-                               512,
-                               1000,
-                               1024,
-                               4096,
-                               32767,
-                               -128,
-                               -1,
-                               0,
-                               1,
-                               16,
-                               32,
-                               64,
-                               100,
-                               127};
+static short interesting16[] = {
+    -32768, // 0x8000
+    -129,   // 0xff7f
+    128,    // 0x80
+    255,    // 0xff
+    256,    // 0x100
+    512,    // 0x200
+    1000,   // 0x3e8
+    1024,   // 0x400
+    4096,   // 0x1000
+    32767,  // 0x7fff
+    44975,  // 0xafaf
+    -128,   // 0xff80
+    -1,     // 0xffff
+    0,      // 0x0
+    1,      // 0x1
+    16,     // 0x10
+    32,     // 0x20
+    64,     // 0x40
+    100,    // 0x64
+    127,    // 0x7f
+};
+
+static int interesting32[] = {
+    -2147483648, // 0x80000000
+    -100663046,  // 0xfa0000fa
+    -32769,      // 0xffff7fff
+    32768,       // 0x8000
+    65535,       // 0xffff
+    65536,       // 0x10000
+    16777215,    // 0xffffff
+    2147483647,  // 0x7fffffff
+    -32768,      // 0xffff8000
+    -129,        // 0xffffff7f
+    16711935,    // 0xff00ff
+    128,         // 0x80
+    255,         // 0xff
+    256,         // 0x100
+    512,         // 0x200
+    1000,        // 0x3e8
+    1024,        // 0x400
+    4096,        // 0x1000
+    32767,       // 0x7fff
+    -128,        // 0xffffff80
+    -1,          // 0xffffffff
+    0,           // 0x0
+    1,           // 0x1
+    16,          // 0x10
+    32,          // 0x20
+    64,          // 0x40
+    100,         // 0x64
+    127          // 0x7f
+};
+
+static long interesting64[] = {
+    -9223372036854775807, // 0x8000000000000001
+    9223372036854775807,  // 0x7fffffffffffffff
+    -2147483648,          // 0xffffffff80000000
+    -100663046,           // 0xfffffffffa0000fa
+    -32769,               // 0xffffffffffff7fff
+    32768,                // 0x8000
+    65535,                // 0xffff
+    65536,                // 0x10000
+    16777215,             // 0xffffff
+    2147483647,           // 0x7fffffff
+    -32768,               // 0xffffffffffff8000
+    -129,                 // 0xffffffffffffff7f
+    72057589759737855,    // 0xffffff00ffffff
+    128,                  // 0x80
+    255,                  // 0xff
+    256,                  // 0x100
+    512,                  // 0x200
+    1000,                 // 0x3e8
+    1024,                 // 0x400
+    4096,                 // 0x1000
+    32767,                // 0x7fff
+    -128,                 // 0xffffffffffffff80
+    -1,                   // 0xffffffffffffffff
+    0,                    // 0x0
+    1,                    // 0x1
+    16,                   // 0x10
+    32,                   // 0x20
+    64,                   // 0x40
+    100,                  // 0x64
+    127,                  // 0x7f
+};
 
 #define RESEED_RNG 10000
 static int             dev_urandom_fd = -1;
@@ -277,7 +336,7 @@ static int __gd_init_eval(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast expr,
     out_ctx->mapping =
         (mapping_el_t*)malloc(sizeof(mapping_el_t) * out_ctx->mapping_size);
     out_ctx->input =
-        (unsigned long*)malloc(sizeof(unsigned long) * out_ctx->mapping_size);
+        (unsigned long*)calloc(sizeof(unsigned long), out_ctx->mapping_size);
 
     unsigned       idx = 0;
     index_group_t* g;
@@ -2332,6 +2391,27 @@ SUBPHASE_afl_det_int16(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
             *proof_size = current_testcase->testcase_len;
             return 1;
         }
+#if 0
+        tmp_input[input_index_1] = (unsigned long)(interesting16[i]) & 0xffUL;
+        tmp_input[input_index_0] =
+            (unsigned long)(interesting16[i] >> 8) & 0xffUL;
+
+        if (__evaluate_branch_query(ctx, query, branch_condition, tmp_input,
+                                    current_testcase->value_sizes,
+                                    current_testcase->values_len)) {
+#ifdef PRINT_SAT
+            Z3FUZZ_LOG("[check light - int16] "
+                       "Query is SAT\n");
+#endif
+            ctx->stats.int16++;
+            ctx->stats.num_sat++;
+            __vals_long_to_char(tmp_input, tmp_proof,
+                                current_testcase->testcase_len);
+            *proof      = tmp_proof;
+            *proof_size = current_testcase->testcase_len;
+            return 1;
+        }
+#endif
     }
     return 0;
 }
@@ -2521,7 +2601,6 @@ SUBPHASE_afl_det_int32(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
             (unsigned long)(interesting32[i] >> 16) & 0xffU;
         tmp_input[input_index_3] =
             (unsigned long)(interesting32[i] >> 24) & 0xffU;
-
         if (__evaluate_branch_query(ctx, query, branch_condition, tmp_input,
                                     current_testcase->value_sizes,
                                     current_testcase->values_len)) {
@@ -2537,6 +2616,31 @@ SUBPHASE_afl_det_int32(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
             *proof_size = current_testcase->testcase_len;
             return 1;
         }
+
+#if 0
+        tmp_input[input_index_3] = (unsigned long)(interesting32[i]) & 0xffU;
+        tmp_input[input_index_2] =
+            (unsigned long)(interesting32[i] >> 8) & 0xffU;
+        tmp_input[input_index_1] =
+            (unsigned long)(interesting32[i] >> 16) & 0xffU;
+        tmp_input[input_index_0] =
+            (unsigned long)(interesting32[i] >> 24) & 0xffU;
+        if (__evaluate_branch_query(ctx, query, branch_condition, tmp_input,
+                                    current_testcase->value_sizes,
+                                    current_testcase->values_len)) {
+#ifdef PRINT_SAT
+            Z3FUZZ_LOG("[check light - int32] "
+                       "Query is SAT\n");
+#endif
+            ctx->stats.int32++;
+            ctx->stats.num_sat++;
+            __vals_long_to_char(tmp_input, tmp_proof,
+                                current_testcase->testcase_len);
+            *proof      = tmp_proof;
+            *proof_size = current_testcase->testcase_len;
+            return 1;
+        }
+#endif
     }
     return 0;
 }
@@ -2798,7 +2902,6 @@ SUBPHASE_afl_det_int64(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
             (unsigned long)(interesting64[i] >> 24) & 0xffU;
         tmp_input[input_index_7] =
             (unsigned long)(interesting64[i] >> 24) & 0xffU;
-
         if (__evaluate_branch_query(ctx, query, branch_condition, tmp_input,
                                     current_testcase->value_sizes,
                                     current_testcase->values_len)) {
@@ -2814,6 +2917,39 @@ SUBPHASE_afl_det_int64(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
             *proof_size = current_testcase->testcase_len;
             return 1;
         }
+
+#if 0
+        tmp_input[input_index_7] = (unsigned long)(interesting64[i]) & 0xffU;
+        tmp_input[input_index_6] =
+            (unsigned long)(interesting64[i] >> 8) & 0xffU;
+        tmp_input[input_index_5] =
+            (unsigned long)(interesting64[i] >> 16) & 0xffU;
+        tmp_input[input_index_4] =
+            (unsigned long)(interesting64[i] >> 24) & 0xffU;
+        tmp_input[input_index_3] =
+            (unsigned long)(interesting64[i] >> 24) & 0xffU;
+        tmp_input[input_index_2] =
+            (unsigned long)(interesting64[i] >> 24) & 0xffU;
+        tmp_input[input_index_1] =
+            (unsigned long)(interesting64[i] >> 24) & 0xffU;
+        tmp_input[input_index_0] =
+            (unsigned long)(interesting64[i] >> 24) & 0xffU;
+        if (__evaluate_branch_query(ctx, query, branch_condition, tmp_input,
+                                    current_testcase->value_sizes,
+                                    current_testcase->values_len)) {
+#ifdef PRINT_SAT
+            Z3FUZZ_LOG("[check light - int64] "
+                       "Query is SAT\n");
+#endif
+            ctx->stats.int64++;
+            ctx->stats.num_sat++;
+            __vals_long_to_char(tmp_input, tmp_proof,
+                                current_testcase->testcase_len);
+            *proof      = tmp_proof;
+            *proof_size = current_testcase->testcase_len;
+            return 1;
+        }
+#endif
     }
     return 0;
 }
@@ -2887,6 +3023,22 @@ static __always_inline int PHASE_afl_deterministic_groups(
                 if (ret)
                     return 1;
 
+                if (set_check__ulong(&ast_data.indexes, g->indexes[1] + 1) &&
+                    set_check__ulong(&ast_data.indexes, g->indexes[1] + 2)) {
+                    // interesting 32
+                    ret = SUBPHASE_afl_det_int32(
+                        ctx, query, branch_condition, proof, proof_size,
+                        g->indexes[0], g->indexes[1], g->indexes[1] + 1,
+                        g->indexes[1] + 2);
+                    if (ret)
+                        return 1;
+
+                    tmp_input[g->indexes[1] + 1] =
+                        current_testcase->values[g->indexes[1] + 1];
+                    tmp_input[g->indexes[1] + 2] =
+                        current_testcase->values[g->indexes[1] + 2];
+                }
+
                 tmp_input[g->indexes[0]] =
                     current_testcase->values[g->indexes[0]];
                 tmp_input[g->indexes[1]] =
@@ -2914,6 +3066,28 @@ static __always_inline int PHASE_afl_deterministic_groups(
                     g->indexes[0], g->indexes[1], g->indexes[2], g->indexes[3]);
                 if (ret)
                     return 1;
+
+                if (set_check__ulong(&ast_data.indexes, g->indexes[3] + 1) &&
+                    set_check__ulong(&ast_data.indexes, g->indexes[3] + 2) &&
+                    set_check__ulong(&ast_data.indexes, g->indexes[3] + 3) &&
+                    set_check__ulong(&ast_data.indexes, g->indexes[3] + 4)) {
+                    // interesting 64
+                    ret = SUBPHASE_afl_det_int64(
+                        ctx, query, branch_condition, proof, proof_size,
+                        g->indexes[0], g->indexes[1], g->indexes[2],
+                        g->indexes[3], g->indexes[3] + 1, g->indexes[3] + 2,
+                        g->indexes[3] + 3, g->indexes[3] + 4);
+                    if (ret)
+                        return 1;
+                    tmp_input[g->indexes[3] + 1] =
+                        current_testcase->values[g->indexes[3] + 1];
+                    tmp_input[g->indexes[3] + 2] =
+                        current_testcase->values[g->indexes[3] + 2];
+                    tmp_input[g->indexes[3] + 3] =
+                        current_testcase->values[g->indexes[3] + 3];
+                    tmp_input[g->indexes[3] + 4] =
+                        current_testcase->values[g->indexes[3] + 4];
+                }
 
                 tmp_input[g->indexes[0]] =
                     current_testcase->values[g->indexes[0]];
@@ -2988,8 +3162,78 @@ static __always_inline int PHASE_afl_deterministic_groups(
                     if (ret)
                         return 1;
 
+                    if (set_check__ulong(&ast_data.indexes,
+                                         g->indexes[0] + 1)) {
+                        // int 16
+                        ret = SUBPHASE_afl_det_int16(
+                            ctx, query, branch_condition, proof, proof_size,
+                            g->indexes[0], g->indexes[0] + 1);
+                        if (ret)
+                            return 1;
+#if 0
+                        if (set_check__ulong(&ast_data.indexes,
+                                             g->indexes[0] + 2) &&
+                            set_check__ulong(&ast_data.indexes,
+                                             g->indexes[0] + 3)) {
+
+                            // int 32
+                            ret = SUBPHASE_afl_det_int32(
+                                ctx, query, branch_condition, proof, proof_size,
+                                g->indexes[0], g->indexes[0] + 1,
+                                g->indexes[0] + 2, g->indexes[0] + 3);
+                            if (ret)
+                                return 1;
+
+                            if (set_check__ulong(&ast_data.indexes,
+                                                 g->indexes[0] + 4) &&
+                                set_check__ulong(&ast_data.indexes,
+                                                 g->indexes[0] + 5) &&
+                                set_check__ulong(&ast_data.indexes,
+                                                 g->indexes[0] + 6) &&
+                                set_check__ulong(&ast_data.indexes,
+                                                 g->indexes[0] + 7)) {
+
+                                // int 64
+                                ret = SUBPHASE_afl_det_int64(
+                                    ctx, query, branch_condition, proof,
+                                    proof_size, g->indexes[0],
+                                    g->indexes[0] + 1, g->indexes[0] + 2,
+                                    g->indexes[0] + 3, g->indexes[0] + 4,
+                                    g->indexes[0] + 5, g->indexes[0] + 6,
+                                    g->indexes[0] + 7);
+                                if (ret)
+                                    return 1;
+
+                                tmp_input[g->indexes[0] + 4] =
+                                    (unsigned long)current_testcase
+                                        ->values[g->indexes[0] + 4];
+                                tmp_input[g->indexes[0] + 5] =
+                                    (unsigned long)current_testcase
+                                        ->values[g->indexes[0] + 5];
+                                tmp_input[g->indexes[0] + 6] =
+                                    (unsigned long)current_testcase
+                                        ->values[g->indexes[0] + 6];
+                                tmp_input[g->indexes[0] + 7] =
+                                    (unsigned long)current_testcase
+                                        ->values[g->indexes[0] + 7];
+                            }
+
+                            tmp_input[g->indexes[0] + 2] =
+                                (unsigned long)
+                                    current_testcase->values[g->indexes[0] + 2];
+                            tmp_input[g->indexes[0] + 3] =
+                                (unsigned long)
+                                    current_testcase->values[g->indexes[0] + 3];
+                        }
+#endif
+
+                        tmp_input[g->indexes[0] + 1] =
+                            (unsigned long)
+                                current_testcase->values[g->indexes[0] + 1];
+                    }
+
                     tmp_input[g->indexes[0]] =
-                        (unsigned long)current_testcase->values[g->indexes[i]];
+                        (unsigned long)current_testcase->values[g->indexes[0]];
                 }
                 break;
             }
