@@ -2279,11 +2279,12 @@ SUBPHASE_afl_det_arith16(fuzzy_ctx_t* ctx, Z3_ast query,
     unsigned short input_word_LE = (input_byte_1 << 8) | input_byte_0;
     unsigned short input_word_BE = (input_byte_0 << 8) | input_byte_1;
 
-    unsigned i;
+    unsigned short tmp;
+    unsigned       i;
     for (i = 1; i < 35; ++i) {
-        tmp_input[input_index_0] = (unsigned long)(input_word_LE + i) & 0xffUL;
-        tmp_input[input_index_1] =
-            (unsigned long)((input_word_LE + i) >> 8) & 0xffUL;
+        tmp                      = input_word_LE + i;
+        tmp_input[input_index_0] = (unsigned long)(tmp & 0xffUL);
+        tmp_input[input_index_1] = (unsigned long)((tmp >> 8) & 0xffUL);
 
         if (__evaluate_branch_query(ctx, query, branch_condition, tmp_input,
                                     current_testcase->value_sizes,
@@ -2300,9 +2301,9 @@ SUBPHASE_afl_det_arith16(fuzzy_ctx_t* ctx, Z3_ast query,
             *proof_size = current_testcase->testcase_len;
             return 1;
         }
-        tmp_input[input_index_0] = (unsigned long)(input_word_LE - i) & 0xffUL;
-        tmp_input[input_index_1] =
-            (unsigned long)((input_word_LE - i) >> 8) & 0xffUL;
+        tmp                      = input_word_LE - i;
+        tmp_input[input_index_0] = (unsigned long)(tmp & 0xffUL);
+        tmp_input[input_index_1] = (unsigned long)((tmp >> 8) & 0xffUL);
 
         if (__evaluate_branch_query(ctx, query, branch_condition, tmp_input,
                                     current_testcase->value_sizes,
@@ -2319,9 +2320,9 @@ SUBPHASE_afl_det_arith16(fuzzy_ctx_t* ctx, Z3_ast query,
             *proof_size = current_testcase->testcase_len;
             return 1;
         }
-        tmp_input[input_index_0] = (unsigned long)(input_word_BE + i) & 0xffUL;
-        tmp_input[input_index_1] =
-            (unsigned long)((input_word_BE + i) >> 8) & 0xffUL;
+        tmp                      = input_word_BE + i;
+        tmp_input[input_index_1] = (unsigned long)(tmp & 0xffUL);
+        tmp_input[input_index_0] = (unsigned long)((tmp >> 8) & 0xffUL);
 
         if (__evaluate_branch_query(ctx, query, branch_condition, tmp_input,
                                     current_testcase->value_sizes,
@@ -2338,9 +2339,9 @@ SUBPHASE_afl_det_arith16(fuzzy_ctx_t* ctx, Z3_ast query,
             *proof_size = current_testcase->testcase_len;
             return 1;
         }
-        tmp_input[input_index_0] = (unsigned long)(input_word_BE - i) & 0xffUL;
-        tmp_input[input_index_1] =
-            (unsigned long)((input_word_BE - i) >> 8) & 0xffUL;
+        tmp                      = input_word_BE - i;
+        tmp_input[input_index_1] = (unsigned long)(tmp & 0xffUL);
+        tmp_input[input_index_0] = (unsigned long)((tmp >> 8) & 0xffUL);
 
         if (__evaluate_branch_query(ctx, query, branch_condition, tmp_input,
                                     current_testcase->value_sizes,
@@ -2483,15 +2484,13 @@ static __always_inline int SUBPHASE_afl_det_arith32(
     unsigned input_dword_BE = (input_byte_0 << 24) | (input_byte_1 << 16) |
                               (input_byte_2 << 8) | input_byte_3;
 
-    unsigned i;
+    unsigned i, tmp;
     for (i = 1; i < 35; ++i) {
-        tmp_input[input_index_0] = (unsigned long)(input_dword_LE + i) & 0xffUL;
-        tmp_input[input_index_1] =
-            (unsigned long)((input_dword_LE + i) >> 8) & 0xffUL;
-        tmp_input[input_index_2] =
-            (unsigned long)((input_dword_LE + i) >> 16) & 0xffUL;
-        tmp_input[input_index_3] =
-            (unsigned long)((input_dword_LE + i) >> 24) & 0xffUL;
+        tmp                      = input_dword_LE + i;
+        tmp_input[input_index_0] = (unsigned long)(tmp & 0xffUL);
+        tmp_input[input_index_1] = (unsigned long)((tmp >> 8) & 0xffUL);
+        tmp_input[input_index_2] = (unsigned long)((tmp >> 16) & 0xffUL);
+        tmp_input[input_index_3] = (unsigned long)((tmp >> 24) & 0xffUL);
 
         if (__evaluate_branch_query(ctx, query, branch_condition, tmp_input,
                                     current_testcase->value_sizes,
@@ -2508,13 +2507,11 @@ static __always_inline int SUBPHASE_afl_det_arith32(
             *proof_size = current_testcase->testcase_len;
             return 1;
         }
-        tmp_input[input_index_0] = (unsigned long)(input_dword_LE - i) & 0xffUL;
-        tmp_input[input_index_1] =
-            (unsigned long)((input_dword_LE - i) >> 8) & 0xffUL;
-        tmp_input[input_index_2] =
-            (unsigned long)((input_dword_LE - i) >> 16) & 0xffUL;
-        tmp_input[input_index_3] =
-            (unsigned long)((input_dword_LE - i) >> 24) & 0xffUL;
+        tmp                      = input_dword_LE - i;
+        tmp_input[input_index_0] = (unsigned long)(tmp & 0xffUL);
+        tmp_input[input_index_1] = (unsigned long)((tmp >> 8) & 0xffUL);
+        tmp_input[input_index_2] = (unsigned long)((tmp >> 16) & 0xffUL);
+        tmp_input[input_index_3] = (unsigned long)((tmp >> 24) & 0xffUL);
 
         if (__evaluate_branch_query(ctx, query, branch_condition, tmp_input,
                                     current_testcase->value_sizes,
@@ -2531,13 +2528,11 @@ static __always_inline int SUBPHASE_afl_det_arith32(
             *proof_size = current_testcase->testcase_len;
             return 1;
         }
-        tmp_input[input_index_0] = (unsigned long)(input_dword_BE + i) & 0xffUL;
-        tmp_input[input_index_1] =
-            (unsigned long)((input_dword_BE + i) >> 8) & 0xffUL;
-        tmp_input[input_index_2] =
-            (unsigned long)((input_dword_BE + i) >> 16) & 0xffUL;
-        tmp_input[input_index_3] =
-            (unsigned long)((input_dword_BE + i) >> 24) & 0xffUL;
+        tmp                      = input_dword_BE + i;
+        tmp_input[input_index_3] = (unsigned long)(tmp & 0xffUL);
+        tmp_input[input_index_2] = (unsigned long)((tmp >> 8) & 0xffUL);
+        tmp_input[input_index_1] = (unsigned long)((tmp >> 16) & 0xffUL);
+        tmp_input[input_index_0] = (unsigned long)((tmp >> 24) & 0xffUL);
 
         if (__evaluate_branch_query(ctx, query, branch_condition, tmp_input,
                                     current_testcase->value_sizes,
@@ -2554,13 +2549,11 @@ static __always_inline int SUBPHASE_afl_det_arith32(
             *proof_size = current_testcase->testcase_len;
             return 1;
         }
-        tmp_input[input_index_0] = (unsigned long)(input_dword_BE - i) & 0xffU;
-        tmp_input[input_index_1] =
-            (unsigned long)((input_dword_BE - i) >> 8) & 0xffU;
-        tmp_input[input_index_2] =
-            (unsigned long)((input_dword_BE - i) >> 16) & 0xffU;
-        tmp_input[input_index_3] =
-            (unsigned long)((input_dword_BE - i) >> 24) & 0xffU;
+        tmp                      = input_dword_BE - i;
+        tmp_input[input_index_3] = (unsigned long)(tmp & 0xffU);
+        tmp_input[input_index_2] = (unsigned long)((tmp >> 8) & 0xffU);
+        tmp_input[input_index_1] = (unsigned long)((tmp >> 16) & 0xffU);
+        tmp_input[input_index_0] = (unsigned long)((tmp >> 24) & 0xffU);
 
         if (__evaluate_branch_query(ctx, query, branch_condition, tmp_input,
                                     current_testcase->value_sizes,
@@ -2743,23 +2736,18 @@ static __always_inline int SUBPHASE_afl_det_arith64(
         ((ulong)input_byte_4 << 24) | ((ulong)input_byte_5 << 16) |
         ((ulong)input_byte_6 << 8) | (ulong)input_byte_7;
 
-    unsigned i;
+    unsigned long tmp;
+    unsigned      i;
     for (i = 1; i < 35; ++i) {
-        tmp_input[input_index_0] = (unsigned long)(input_qword_LE + i) & 0xffUL;
-        tmp_input[input_index_1] =
-            (unsigned long)((input_qword_LE + i) >> 8) & 0xffUL;
-        tmp_input[input_index_2] =
-            (unsigned long)((input_qword_LE + i) >> 16) & 0xffUL;
-        tmp_input[input_index_3] =
-            (unsigned long)((input_qword_LE + i) >> 24) & 0xffUL;
-        tmp_input[input_index_4] =
-            (unsigned long)((input_qword_LE + i) >> 32) & 0xffUL;
-        tmp_input[input_index_5] =
-            (unsigned long)((input_qword_LE + i) >> 40) & 0xffUL;
-        tmp_input[input_index_6] =
-            (unsigned long)((input_qword_LE + i) >> 48) & 0xffUL;
-        tmp_input[input_index_7] =
-            (unsigned long)((input_qword_LE + i) >> 56) & 0xffUL;
+        tmp                      = input_qword_LE + i;
+        tmp_input[input_index_0] = (unsigned long)(tmp & 0xffUL);
+        tmp_input[input_index_1] = (unsigned long)((tmp >> 8) & 0xffUL);
+        tmp_input[input_index_2] = (unsigned long)((tmp >> 16) & 0xffUL);
+        tmp_input[input_index_3] = (unsigned long)((tmp >> 24) & 0xffUL);
+        tmp_input[input_index_4] = (unsigned long)((tmp >> 32) & 0xffUL);
+        tmp_input[input_index_5] = (unsigned long)((tmp >> 40) & 0xffUL);
+        tmp_input[input_index_6] = (unsigned long)((tmp >> 48) & 0xffUL);
+        tmp_input[input_index_7] = (unsigned long)((tmp >> 56) & 0xffUL);
 
         if (__evaluate_branch_query(ctx, query, branch_condition, tmp_input,
                                     current_testcase->value_sizes,
@@ -2776,21 +2764,15 @@ static __always_inline int SUBPHASE_afl_det_arith64(
             *proof_size = current_testcase->testcase_len;
             return 1;
         }
-        tmp_input[input_index_0] = (unsigned long)(input_qword_LE + i) & 0xffUL;
-        tmp_input[input_index_1] =
-            (unsigned long)((input_qword_LE + i) >> 8) & 0xffUL;
-        tmp_input[input_index_2] =
-            (unsigned long)((input_qword_LE + i) >> 16) & 0xffUL;
-        tmp_input[input_index_3] =
-            (unsigned long)((input_qword_LE + i) >> 24) & 0xffUL;
-        tmp_input[input_index_4] =
-            (unsigned long)((input_qword_LE + i) >> 32) & 0xffUL;
-        tmp_input[input_index_5] =
-            (unsigned long)((input_qword_LE + i) >> 40) & 0xffUL;
-        tmp_input[input_index_6] =
-            (unsigned long)((input_qword_LE + i) >> 48) & 0xffUL;
-        tmp_input[input_index_7] =
-            (unsigned long)((input_qword_LE + i) >> 56) & 0xffUL;
+        tmp                      = input_qword_LE - i;
+        tmp_input[input_index_0] = (unsigned long)(tmp & 0xffUL);
+        tmp_input[input_index_1] = (unsigned long)((tmp >> 8) & 0xffUL);
+        tmp_input[input_index_2] = (unsigned long)((tmp >> 16) & 0xffUL);
+        tmp_input[input_index_3] = (unsigned long)((tmp >> 24) & 0xffUL);
+        tmp_input[input_index_4] = (unsigned long)((tmp >> 32) & 0xffUL);
+        tmp_input[input_index_5] = (unsigned long)((tmp >> 40) & 0xffUL);
+        tmp_input[input_index_6] = (unsigned long)((tmp >> 48) & 0xffUL);
+        tmp_input[input_index_7] = (unsigned long)((tmp >> 56) & 0xffUL);
         if (__evaluate_branch_query(ctx, query, branch_condition, tmp_input,
                                     current_testcase->value_sizes,
                                     current_testcase->values_len)) {
@@ -2806,21 +2788,15 @@ static __always_inline int SUBPHASE_afl_det_arith64(
             *proof_size = current_testcase->testcase_len;
             return 1;
         }
-        tmp_input[input_index_0] = (unsigned long)(input_qword_BE + i) & 0xffUL;
-        tmp_input[input_index_1] =
-            (unsigned long)((input_qword_BE + i) >> 8) & 0xffUL;
-        tmp_input[input_index_2] =
-            (unsigned long)((input_qword_BE + i) >> 16) & 0xffUL;
-        tmp_input[input_index_3] =
-            (unsigned long)((input_qword_BE + i) >> 24) & 0xffUL;
-        tmp_input[input_index_4] =
-            (unsigned long)((input_qword_BE + i) >> 32) & 0xffUL;
-        tmp_input[input_index_5] =
-            (unsigned long)((input_qword_BE + i) >> 40) & 0xffUL;
-        tmp_input[input_index_6] =
-            (unsigned long)((input_qword_BE + i) >> 48) & 0xffUL;
-        tmp_input[input_index_7] =
-            (unsigned long)((input_qword_BE + i) >> 56) & 0xffUL;
+        tmp                      = input_qword_BE + i;
+        tmp_input[input_index_7] = (unsigned long)(tmp & 0xffUL);
+        tmp_input[input_index_6] = (unsigned long)((tmp >> 8) & 0xffUL);
+        tmp_input[input_index_5] = (unsigned long)((tmp >> 16) & 0xffUL);
+        tmp_input[input_index_4] = (unsigned long)((tmp >> 24) & 0xffUL);
+        tmp_input[input_index_3] = (unsigned long)((tmp >> 32) & 0xffUL);
+        tmp_input[input_index_2] = (unsigned long)((tmp >> 40) & 0xffUL);
+        tmp_input[input_index_1] = (unsigned long)((tmp >> 48) & 0xffUL);
+        tmp_input[input_index_0] = (unsigned long)((tmp >> 56) & 0xffUL);
 
         if (__evaluate_branch_query(ctx, query, branch_condition, tmp_input,
                                     current_testcase->value_sizes,
@@ -2837,21 +2813,15 @@ static __always_inline int SUBPHASE_afl_det_arith64(
             *proof_size = current_testcase->testcase_len;
             return 1;
         }
-        tmp_input[input_index_0] = (unsigned long)(input_qword_BE + i) & 0xffUL;
-        tmp_input[input_index_1] =
-            (unsigned long)((input_qword_BE + i) >> 8) & 0xffUL;
-        tmp_input[input_index_2] =
-            (unsigned long)((input_qword_BE + i) >> 16) & 0xffUL;
-        tmp_input[input_index_3] =
-            (unsigned long)((input_qword_BE + i) >> 24) & 0xffUL;
-        tmp_input[input_index_4] =
-            (unsigned long)((input_qword_BE + i) >> 32) & 0xffUL;
-        tmp_input[input_index_5] =
-            (unsigned long)((input_qword_BE + i) >> 40) & 0xffUL;
-        tmp_input[input_index_6] =
-            (unsigned long)((input_qword_BE + i) >> 48) & 0xffUL;
-        tmp_input[input_index_7] =
-            (unsigned long)((input_qword_BE + i) >> 56) & 0xffUL;
+        tmp                      = input_qword_BE - i;
+        tmp_input[input_index_7] = (unsigned long)(tmp & 0xffUL);
+        tmp_input[input_index_6] = (unsigned long)((tmp >> 8) & 0xffUL);
+        tmp_input[input_index_5] = (unsigned long)((tmp >> 16) & 0xffUL);
+        tmp_input[input_index_4] = (unsigned long)((tmp >> 24) & 0xffUL);
+        tmp_input[input_index_3] = (unsigned long)((tmp >> 32) & 0xffUL);
+        tmp_input[input_index_2] = (unsigned long)((tmp >> 40) & 0xffUL);
+        tmp_input[input_index_1] = (unsigned long)((tmp >> 48) & 0xffUL);
+        tmp_input[input_index_0] = (unsigned long)((tmp >> 56) & 0xffUL);
 
         if (__evaluate_branch_query(ctx, query, branch_condition, tmp_input,
                                     current_testcase->value_sizes,
@@ -3384,6 +3354,10 @@ static __always_inline int PHASE_afl_havoc(fuzzy_ctx_t* ctx, Z3_ast query,
     if (skip_afl_havoc)
         return 0;
 
+#ifdef DEBUG_CHECK_LIGHT
+    Z3FUZZ_LOG("Trying AFL Havoc\n");
+#endif
+
     int             havoc_res;
     index_group_t*  random_group;
     unsigned long   random_index;
@@ -3447,15 +3421,14 @@ static __always_inline int PHASE_afl_havoc(fuzzy_ctx_t* ctx, Z3_ast query,
             case 8:
                 ig_64[ig_64_size++] = group;
                 break;
-            default:
-                assert(0 && "unexpected group size");
         }
     }
 
     havoc_res     = 0;
     mutation_pool = 5 + (ig_64_size + ig_32_size + ig_16_size > 0 ? 3 : 0) +
                     (ig_64_size + ig_32_size > 0 ? 3 : 0);
-    score = 1000; // TODO
+    score = ast_data.indexes.size * 2;   // 2 mutations per input (mean)
+    score = score > 1000 ? 1000 : score; // no more than 1000 mutations
     for (i = 0; i < score; ++i) {
         switch (UR(mutation_pool)) {
             case 0: {
