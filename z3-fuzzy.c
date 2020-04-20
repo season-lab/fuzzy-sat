@@ -3133,77 +3133,77 @@ static __always_inline int PHASE_afl_deterministic_groups(
                         return 1;
 
                     if (set_check__ulong(&ast_data.indexes,
-                                         g->indexes[0] + 1)) {
+                                         g->indexes[i] + 1)) {
                         // int 16
                         ret = SUBPHASE_afl_det_int16(
                             ctx, query, branch_condition, proof, proof_size,
-                            g->indexes[0], g->indexes[0] + 1);
+                            g->indexes[i], g->indexes[i] + 1);
                         if (ret)
                             return 1;
 #if 0
                         if (set_check__ulong(&ast_data.indexes,
-                                             g->indexes[0] + 2) &&
+                                             g->indexes[i] + 2) &&
                             set_check__ulong(&ast_data.indexes,
-                                             g->indexes[0] + 3)) {
+                                             g->indexes[i] + 3)) {
 
                             // int 32
                             ret = SUBPHASE_afl_det_int32(
                                 ctx, query, branch_condition, proof, proof_size,
-                                g->indexes[0], g->indexes[0] + 1,
-                                g->indexes[0] + 2, g->indexes[0] + 3);
+                                g->indexes[i], g->indexes[i] + 1,
+                                g->indexes[i] + 2, g->indexes[i] + 3);
                             if (ret)
                                 return 1;
 
                             if (set_check__ulong(&ast_data.indexes,
-                                                 g->indexes[0] + 4) &&
+                                                 g->indexes[i] + 4) &&
                                 set_check__ulong(&ast_data.indexes,
-                                                 g->indexes[0] + 5) &&
+                                                 g->indexes[i] + 5) &&
                                 set_check__ulong(&ast_data.indexes,
-                                                 g->indexes[0] + 6) &&
+                                                 g->indexes[i] + 6) &&
                                 set_check__ulong(&ast_data.indexes,
-                                                 g->indexes[0] + 7)) {
+                                                 g->indexes[i] + 7)) {
 
                                 // int 64
                                 ret = SUBPHASE_afl_det_int64(
                                     ctx, query, branch_condition, proof,
-                                    proof_size, g->indexes[0],
-                                    g->indexes[0] + 1, g->indexes[0] + 2,
-                                    g->indexes[0] + 3, g->indexes[0] + 4,
-                                    g->indexes[0] + 5, g->indexes[0] + 6,
-                                    g->indexes[0] + 7);
+                                    proof_size, g->indexes[i],
+                                    g->indexes[i] + 1, g->indexes[i] + 2,
+                                    g->indexes[i] + 3, g->indexes[i] + 4,
+                                    g->indexes[i] + 5, g->indexes[i] + 6,
+                                    g->indexes[i] + 7);
                                 if (ret)
                                     return 1;
 
-                                tmp_input[g->indexes[0] + 4] =
+                                tmp_input[g->indexes[i] + 4] =
                                     (unsigned long)current_testcase
-                                        ->values[g->indexes[0] + 4];
-                                tmp_input[g->indexes[0] + 5] =
+                                        ->values[g->indexes[i] + 4];
+                                tmp_input[g->indexes[i] + 5] =
                                     (unsigned long)current_testcase
-                                        ->values[g->indexes[0] + 5];
-                                tmp_input[g->indexes[0] + 6] =
+                                        ->values[g->indexes[i] + 5];
+                                tmp_input[g->indexes[i] + 6] =
                                     (unsigned long)current_testcase
-                                        ->values[g->indexes[0] + 6];
-                                tmp_input[g->indexes[0] + 7] =
+                                        ->values[g->indexes[i] + 6];
+                                tmp_input[g->indexes[i] + 7] =
                                     (unsigned long)current_testcase
-                                        ->values[g->indexes[0] + 7];
+                                        ->values[g->indexes[i] + 7];
                             }
 
-                            tmp_input[g->indexes[0] + 2] =
+                            tmp_input[g->indexes[i] + 2] =
                                 (unsigned long)
-                                    current_testcase->values[g->indexes[0] + 2];
-                            tmp_input[g->indexes[0] + 3] =
+                                    current_testcase->values[g->indexes[i] + 2];
+                            tmp_input[g->indexes[i] + 3] =
                                 (unsigned long)
-                                    current_testcase->values[g->indexes[0] + 3];
+                                    current_testcase->values[g->indexes[i] + 3];
                         }
 #endif
 
-                        tmp_input[g->indexes[0] + 1] =
+                        tmp_input[g->indexes[i] + 1] =
                             (unsigned long)
-                                current_testcase->values[g->indexes[0] + 1];
+                                current_testcase->values[g->indexes[i] + 1];
                     }
 
-                    tmp_input[g->indexes[0]] =
-                        (unsigned long)current_testcase->values[g->indexes[0]];
+                    tmp_input[g->indexes[i]] =
+                        (unsigned long)current_testcase->values[g->indexes[i]];
                 }
                 break;
             }
