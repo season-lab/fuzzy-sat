@@ -1343,10 +1343,10 @@ static void __detect_involved_inputs(fuzzy_ctx_t* ctx, Z3_ast v,
             Z3_decl_kind decl_kind  = Z3_get_decl_kind(ctx->z3_ctx, decl);
 
             switch (decl_kind) {
+                case Z3_OP_EXTRACT:
                 case Z3_OP_BAND:
                 case Z3_OP_BADD:
                 case Z3_OP_BOR:
-                case Z3_OP_EXTRACT:
                 case Z3_OP_CONCAT: {
                     index_group_t group = {0};
                     if (__detect_input_group(ctx, v, &group) && group.n > 0) {
@@ -1369,6 +1369,11 @@ static void __detect_involved_inputs(fuzzy_ctx_t* ctx, Z3_ast v,
                                                group.indexes[i]);
                         }
                         return;
+                    } else {
+                        if (decl_kind == Z3_OP_EXTRACT ||
+                            decl_kind == Z3_OP_BAND)
+                            // extract op not within a group. Take note
+                            data->input_extract_ops++;
                     }
                     break;
                 }
@@ -1395,6 +1400,15 @@ static void __detect_involved_inputs(fuzzy_ctx_t* ctx, Z3_ast v,
                         set_add__ulong(&data->indexes, symbol_index);
                     }
                     return;
+                }
+                case Z3_OP_BLSHR:
+                case Z3_OP_BASHR:
+                case Z3_OP_BUREM:
+                case Z3_OP_BUREM_I:
+                case Z3_OP_BSREM:
+                case Z3_OP_BSREM_I:
+                case Z3_OP_BSMOD: {
+                    data->input_extract_ops++;
                 }
                 default: {
                     break;
