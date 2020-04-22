@@ -135,7 +135,7 @@ static inline void glue(dict_remove_all__,
             for (j = 0; j < bucket->size; ++j)
                 free_el(&bucket->data[j].el);
         }
-        glue(da_remove_all__, DICT_EL)(bucket);
+        glue(da_remove_all__, DICT_EL)(bucket, NULL);
     }
 
     dict->filled_buckets_i = 0;

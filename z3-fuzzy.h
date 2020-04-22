@@ -38,7 +38,12 @@ typedef struct fuzzy_stats_t {
     unsigned long arith64_sub_BE;
     unsigned long int64;
     unsigned long havoc;
+    unsigned long multigoal;
     unsigned long num_univocally_defined;
+    unsigned long num_conflicting;
+    unsigned long conflicting_fallbacks;
+    unsigned long conflicting_fallbacks_same_inputs;
+    unsigned long conflicting_fallbacks_no_true;
     unsigned long ast_info_cache_hits;
 } fuzzy_stats_t;
 
@@ -57,6 +62,8 @@ typedef struct fuzzy_ctx_t {
     void* univocally_defined_inputs;
     void* assignment_inputs_cache;
     void* ast_info_cache;
+    void* processed_constraints;
+    void* conflicting_asts;
 } fuzzy_ctx_t;
 
 void z3fuzz_init(fuzzy_ctx_t* fctx, Z3_context ctx, char* seed_filename,

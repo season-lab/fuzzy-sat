@@ -50,9 +50,15 @@ static inline void glue(da_free__, DA_DATA_T)(glue(da__, DA_DATA_T) * da,
     da->size     = 0;
 }
 
-static inline void glue(da_remove_all__, DA_DATA_T)(glue(da__, DA_DATA_T) * da)
+static inline void glue(da_remove_all__, DA_DATA_T)(glue(da__, DA_DATA_T) * da,
+                                                    void (*el_free)(DA_DATA_T*))
 {
     // memset((void*)da->data, 0, da->size * sizeof(DA_DATA_T));
+    if (el_free != NULL) {
+        unsigned long i;
+        for (i = 0; i < da->size; ++i)
+            el_free(&da->data[i]);
+    }
     da->data =
         da->max_size > DA_INIT_SIZE
             ? (DA_DATA_T*)realloc(da->data, DA_INIT_SIZE * sizeof(DA_DATA_T))

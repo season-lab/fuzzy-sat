@@ -5,6 +5,7 @@ tests/
 debug-eval
 eval-driver
 fuzzy-solver
+fuzzy-solver-notify
 maxmin-driver
 solver
 libZ3Fuzzy.a

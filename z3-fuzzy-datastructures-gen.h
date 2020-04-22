@@ -72,3 +72,55 @@ unsigned int digest_equals(digest_t* el1, digest_t* el2)
 
 typedef set__digest_t processed_set_t;
 // ********* end evaluate set ************
+// ********* conflicting dict ************
+typedef struct ast_ptr {
+    Z3_context ctx;
+    Z3_ast     ast;
+} ast_ptr;
+#define SET_DATA_T ast_ptr
+#include <set.h>
+
+typedef set__ast_ptr* conflicting_ptr;
+#define DICT_DATA_T conflicting_ptr
+#include <dict.h>
+
+static void          ast_ptr_free(ast_ptr* el) { Z3_dec_ref(el->ctx, el->ast); }
+static unsigned long ast_ptr_hash(ast_ptr* el)
+{
+    return Z3_get_ast_id(el->ctx, el->ast);
+}
+static unsigned int ast_ptr_equals(ast_ptr* el1, ast_ptr* el2)
+{
+    return Z3_get_ast_id(el1->ctx, el1->ast) ==
+           Z3_get_ast_id(el2->ctx, el2->ast);
+}
+
+static inline void conflicting_init(conflicting_ptr ptr)
+{
+    set_init__ast_ptr(ptr, &ast_ptr_hash, &ast_ptr_equals);
+}
+
+static inline void conflicting_ptr_free(conflicting_ptr* ptr)
+{
+    set_free__ast_ptr(*ptr, ast_ptr_free);
+    free(*ptr);
+}
+
+static inline void add_item_to_conflicting(dict__conflicting_ptr* dict,
+                                           Z3_ast expr, unsigned long idx,
+                                           Z3_context ctx)
+{
+    conflicting_ptr  el;
+    conflicting_ptr* match = dict_get_ref__conflicting_ptr(dict, idx);
+    if (match == NULL) {
+        el = (conflicting_ptr)malloc(sizeof(set__ast_ptr));
+        conflicting_init(el);
+        dict_set__conflicting_ptr(dict, idx, el);
+    } else
+        el = *match;
+
+    Z3_inc_ref(ctx, expr);
+    ast_ptr v = {.ctx = ctx, .ast = expr};
+    set_add__ast_ptr(el, v);
+}
+// ******** end conflicting dict *********
