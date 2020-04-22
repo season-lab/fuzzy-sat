@@ -1,7 +1,7 @@
 #ifndef Z3_FUZZY_H
 #define Z3_FUZZY_H
+// header with testcases as opaque field (no need to include testcase.h)
 
-#include "testcase-list.h"
 #include <z3.h>
 
 typedef struct fuzzy_stats_t {
@@ -51,9 +51,11 @@ typedef struct fuzzy_ctx_t {
     Z3_ast*       assignments;
     unsigned      size_assignments;
     uint64_t (*model_eval)(Z3_context, Z3_ast, uint64_t*, uint8_t*, size_t);
-    testcase_list_t testcases;
 
     // opaque fields
+    void* testcases_a;
+    void* testcases_b;
+    void* testcases_c;
     void* univocally_defined_inputs;
     void* assignment_inputs_cache;
     void* ast_info_cache;

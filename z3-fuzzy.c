@@ -69,34 +69,39 @@ static int check_unnecessary_eval = 0;
 uint64_t Z3_API Z3_custom_eval(Z3_context c, Z3_ast e, uint64_t* data,
                                uint8_t* data_sizes, size_t data_size);
 
+typedef struct ast_info_t {
+    unsigned      linear_arithmetic_operations;
+    unsigned      nonlinear_arithmetic_operations;
+    unsigned      input_extract_ops;
+    unsigned long query_size;
+
+    index_groups_t index_groups;
+    indexes_t      indexes;
+} ast_info_t;
+
 typedef struct ast_data_t {
     // structure used to pass information during a single fuzzy sat execution
-    unsigned linear_arithmetic_operations;
-    unsigned nonlinear_arithmetic_operations;
-    unsigned input_extract_ops;
     unsigned n_useless_eval;
 
     unsigned      is_input_to_state;
     unsigned      op_input_to_state;
     index_group_t input_to_state_group;
     unsigned long input_to_state_const;
-    unsigned long query_size;
 
     processed_set_t processed_set;
-    index_groups_t  index_groups;
-    indexes_t       indexes;
     values_t        values;
+    ast_info_t*     inputs;
 } ast_data_t;
+
+typedef ast_info_t* ast_info_ptr;
+#define DICT_DATA_T ast_info_ptr
+#include <dict.h>
 
 static unsigned long* tmp_input     = NULL;
 static unsigned char* tmp_proof     = NULL;
 static unsigned char* tmp_opt_proof = NULL;
 static int            opt_found     = 0;
 static ast_data_t     ast_data      = {0};
-
-typedef ast_data_t* ast_data_ptr;
-#define DICT_DATA_T ast_data_ptr
-#include <dict.h>
 
 static char* query_log_filename = "/tmp/fuzzy-log-info.csv";
 FILE*        query_log;
@@ -124,7 +129,7 @@ static short interesting16[] = {
     1024,   // 0x400
     4096,   // 0x1000
     32767,  // 0x7fff
-    44975,  // 0xafaf
+    -20561, // 0xafaf
     -128,   // 0xff80
     -1,     // 0xffff
     0,      // 0x0
@@ -215,10 +220,41 @@ static inline unsigned UR(unsigned limit)
     return random() % limit;
 }
 
+static inline void ast_info_ptr_free(ast_info_ptr* ptr)
+{
+    set_free__index_group_t(&(*ptr)->index_groups);
+    set_free__ulong(&(*ptr)->indexes);
+    free(*ptr);
+}
+
+static inline void ast_info_init(ast_info_ptr ptr)
+{
+    set_init__index_group_t(&ptr->index_groups, &index_group_hash,
+                            &index_group_equals);
+    set_init__ulong(&ptr->indexes, &index_hash, &index_equals);
+    ptr->linear_arithmetic_operations    = 0;
+    ptr->nonlinear_arithmetic_operations = 0;
+    ptr->input_extract_ops               = 0;
+    ptr->query_size                      = 0;
+}
+
+static inline void ast_data_init(ast_data_t* ast_data)
+{
+    set_init__digest_t(&ast_data->processed_set, &digest_64bit_hash,
+                       &digest_equals);
+    da_init__ulong(&ast_data->values);
+}
+
+static inline void ast_data_free(ast_data_t* ast_data)
+{
+    set_free__digest_t(&ast_data->processed_set);
+    da_free__ulong(&ast_data->values, NULL);
+}
+
 // ********* gradient stuff *********
 static void __reset_ast_data();
 static void detect_involved_inputs_wrapper(fuzzy_ctx_t* ctx, Z3_ast v,
-                                           ast_data_t* data);
+                                           ast_info_ptr* data);
 
 typedef struct mapping_subel_t {
     unsigned      idx;
@@ -326,13 +362,13 @@ static int __gd_init_eval(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast expr,
 
     if (must_initialize_ast) {
         __reset_ast_data();
-        detect_involved_inputs_wrapper(ctx, expr, &ast_data);
+        detect_involved_inputs_wrapper(ctx, expr, &ast_data.inputs);
 
-        if (ast_data.indexes.size == 0)
+        if (ast_data.inputs->indexes.size == 0)
             return 0; // no index!
     }
 
-    out_ctx->mapping_size = ast_data.index_groups.size;
+    out_ctx->mapping_size = ast_data.inputs->index_groups.size;
     out_ctx->mapping =
         (mapping_el_t*)malloc(sizeof(mapping_el_t) * out_ctx->mapping_size);
     out_ctx->input =
@@ -340,8 +376,9 @@ static int __gd_init_eval(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast expr,
 
     unsigned       idx = 0;
     index_group_t* g;
-    set_reset_iter__index_group_t(&ast_data.index_groups, 0);
-    while (set_iter_next__index_group_t(&ast_data.index_groups, 0, &g)) {
+    set_reset_iter__index_group_t(&ast_data.inputs->index_groups, 0);
+    while (
+        set_iter_next__index_group_t(&ast_data.inputs->index_groups, 0, &g)) {
         int i;
         out_ctx->mapping[idx].n = g->n;
         for (i = 0; i < g->n; ++i) {
@@ -520,38 +557,11 @@ PRE_SWITCH:
 }
 // **********************************
 
-static void __init_ast_data(ast_data_t* ast_data)
-{
-    set_init__digest_t(&ast_data->processed_set, &digest_64bit_hash,
-                       &digest_equals);
-    set_init__index_group_t(&ast_data->index_groups, &index_group_hash,
-                            &index_group_equals);
-    set_init__ulong(&ast_data->indexes, &index_hash, &index_equals);
-    da_init__ulong(&ast_data->values);
-}
-
-static void __free_ast_data(ast_data_t* ast_data)
-{
-    set_free__digest_t(&ast_data->processed_set);
-    set_free__index_group_t(&ast_data->index_groups);
-    set_free__ulong(&ast_data->indexes);
-    da_free__ulong(&ast_data->values, NULL);
-}
-
-static void __free_ast_data_ptr(ast_data_ptr* ast_data)
-{
-    __free_ast_data(*ast_data);
-    free(*ast_data);
-}
-
-static inline void print_index_and_value_queue(ast_data_t* data)
+static inline void print_index_queue(ast_info_ptr data)
 {
     index_group_t* group;
     fprintf(stderr, "----- QUEUE -----\n");
     unsigned int i, j;
-    for (i = 0; i < data->values.size; ++i)
-        fprintf(stderr, "value: 0x%lx\n", data->values.data[i]);
-
     i = 0;
     set_reset_iter__index_group_t(&data->index_groups, 1);
     while (set_iter_next__index_group_t(&data->index_groups, 1, &group)) {
@@ -688,13 +698,16 @@ void z3fuzz_init(fuzzy_ctx_t* fctx, Z3_context ctx, char* seed_filename,
     set_init__ulong((set__ulong*)fctx->univocally_defined_inputs, &index_hash,
                     &index_equals);
 
-    __init_ast_data(&ast_data);
+    ast_data_init(&ast_data);
 
-    fctx->assignment_inputs_cache = malloc(sizeof(dict__ast_data_ptr));
-    dict__ast_data_ptr* assignment_inputs_cache =
-        (dict__ast_data_ptr*)fctx->assignment_inputs_cache;
-    dict_init__ast_data_ptr(assignment_inputs_cache);
-
+    fctx->assignment_inputs_cache = malloc(sizeof(dict__ast_info_ptr));
+    dict__ast_info_ptr* assignment_inputs_cache =
+        (dict__ast_info_ptr*)fctx->assignment_inputs_cache;
+    dict_init__ast_info_ptr(assignment_inputs_cache);
+    fctx->ast_info_cache = malloc(sizeof(dict__ast_info_ptr));
+    dict__ast_info_ptr* ast_info_cache =
+        (dict__ast_info_ptr*)fctx->ast_info_cache;
+    dict_init__ast_info_ptr(ast_info_cache);
     gd_init();
 }
 
@@ -726,12 +739,16 @@ void z3fuzz_free(fuzzy_ctx_t* ctx)
     ctx->assignments      = NULL;
     ctx->size_assignments = 0;
 
-    __free_ast_data(&ast_data);
+    ast_data_free(&ast_data);
 
-    dict__ast_data_ptr* assignment_inputs_cache =
-        (dict__ast_data_ptr*)ctx->assignment_inputs_cache;
-    dict_free__ast_data_ptr(assignment_inputs_cache, __free_ast_data_ptr);
+    dict__ast_info_ptr* assignment_inputs_cache =
+        (dict__ast_info_ptr*)ctx->assignment_inputs_cache;
+    dict_free__ast_info_ptr(assignment_inputs_cache, ast_info_ptr_free);
     free(ctx->assignment_inputs_cache);
+    dict__ast_info_ptr* ast_info_cache =
+        (dict__ast_info_ptr*)ctx->ast_info_cache;
+    dict_free__ast_info_ptr(ast_info_cache, ast_info_ptr_free);
+    free(ctx->ast_info_cache);
 
     set_free__ulong((set__ulong*)ctx->univocally_defined_inputs);
     free(ctx->univocally_defined_inputs);
@@ -1277,7 +1294,7 @@ static void __detect_input_to_state_query(fuzzy_ctx_t* ctx, Z3_ast node,
     return;
 }
 
-static void __union_indexes(ast_data_t* dst, ast_data_t* src)
+static void __union_ast_info(ast_info_ptr dst, ast_info_ptr src)
 {
     index_group_t* group;
     set_reset_iter__index_group_t(&src->index_groups, 0);
@@ -1290,52 +1307,65 @@ static void __union_indexes(ast_data_t* dst, ast_data_t* src)
     while (set_iter_next__ulong(&src->indexes, 0, &p)) {
         set_add__ulong(&dst->indexes, *p);
     }
+
+    dst->input_extract_ops += src->input_extract_ops;
+    dst->linear_arithmetic_operations += src->linear_arithmetic_operations;
+    dst->nonlinear_arithmetic_operations +=
+        src->nonlinear_arithmetic_operations;
+    dst->query_size += src->query_size;
 }
 
 static void __detect_assignment_involved_inputs(fuzzy_ctx_t* ctx,
                                                 unsigned     assignment_idx,
-                                                ast_data_t*  data)
+                                                ast_info_ptr data)
 {
-    dict__ast_data_ptr* assignment_inputs_cache =
-        (dict__ast_data_ptr*)ctx->assignment_inputs_cache;
+    dict__ast_info_ptr* assignment_inputs_cache =
+        (dict__ast_info_ptr*)ctx->assignment_inputs_cache;
 
-    ast_data_ptr  cached_el;
-    ast_data_ptr* cached_el_ptr = dict_get_ref__ast_data_ptr(
+    ast_info_ptr  cached_el;
+    ast_info_ptr* cached_el_ptr = dict_get_ref__ast_info_ptr(
         assignment_inputs_cache, (unsigned long)assignment_idx);
     if (cached_el_ptr != NULL) {
         cached_el = *cached_el_ptr;
     } else {
-        cached_el = (ast_data_ptr)malloc(sizeof(ast_data_t));
-        __init_ast_data(cached_el);
+        cached_el = (ast_info_ptr)malloc(sizeof(ast_info_t));
+        ast_info_init(cached_el);
         detect_involved_inputs_wrapper(ctx, ctx->assignments[assignment_idx],
-                                       cached_el);
-        dict_set__ast_data_ptr(assignment_inputs_cache,
+                                       &cached_el);
+        dict_set__ast_info_ptr(assignment_inputs_cache,
                                (unsigned long)assignment_idx, cached_el);
     }
-    __union_indexes(data, cached_el);
+    __union_ast_info(data, cached_el);
 }
 
-static void __detect_involved_inputs(fuzzy_ctx_t* ctx, Z3_ast v,
-                                     ast_data_t* data,
-                                     set__ulong* visited_subtrees)
+static inline void __detect_involved_inputs(fuzzy_ctx_t* ctx, Z3_ast v,
+                                            ast_info_ptr* data)
 {
     // visit the AST and collect some data
     // 1. Find "groups" of inputs involved in the AST and store them in
     // 'index_queue'
     // 2. Populate global 'indexes' with encountered indexes
 
-    ulong hash = Z3_get_ast_id(ctx->z3_ctx, v);
-    if (set_check__ulong(visited_subtrees, hash))
+    unsigned long       ast_hash = Z3_get_ast_id(ctx->z3_ctx, v);
+    dict__ast_info_ptr* ast_info_cache =
+        (dict__ast_info_ptr*)ctx->ast_info_cache;
+    ast_info_ptr* cached_el;
+    if ((cached_el = dict_get_ref__ast_info_ptr(ast_info_cache, ast_hash)) !=
+        NULL) {
+        ctx->stats.ast_info_cache_hits++;
+        *data = *cached_el;
         return;
-    set_add__ulong(visited_subtrees, hash);
+    }
+    ast_info_ptr new_el = (ast_info_ptr)malloc(sizeof(ast_info_t));
+    ast_info_init(new_el);
 
     switch (Z3_get_ast_kind(ctx->z3_ctx, v)) {
         case Z3_NUMERAL_AST: {
-            data->query_size++;
+            new_el->query_size++;
             break;
         }
         case Z3_APP_AST: {
-            data->query_size++;
+            new_el->query_size++;
             unsigned     i;
             Z3_app       app        = Z3_to_app(ctx->z3_ctx, v);
             unsigned     num_fields = Z3_get_app_num_args(ctx->z3_ctx, app);
@@ -1352,7 +1382,7 @@ static void __detect_involved_inputs(fuzzy_ctx_t* ctx, Z3_ast v,
                     if (__detect_input_group(ctx, v, &group) && group.n > 0) {
                         // concat chain. commit
                         set_add__index_group_t(
-                            &data->index_groups,
+                            &new_el->index_groups,
                             group); // i'm not checking whether the elements
                                     // of the input group are univocally
                                     // defined. This because it can be that
@@ -1365,15 +1395,15 @@ static void __detect_involved_inputs(fuzzy_ctx_t* ctx, Z3_ast v,
                             if (!set_check__ulong(
                                     (set__ulong*)ctx->univocally_defined_inputs,
                                     group.indexes[i]))
-                                set_add__ulong(&data->indexes,
+                                set_add__ulong(&new_el->indexes,
                                                group.indexes[i]);
                         }
-                        return;
+                        goto FUN_END;
                     } else {
                         if (decl_kind == Z3_OP_EXTRACT ||
                             decl_kind == Z3_OP_BAND)
                             // extract op not within a group. Take note
-                            data->input_extract_ops++;
+                            new_el->input_extract_ops++;
                     }
                     break;
                 }
@@ -1387,7 +1417,7 @@ static void __detect_involved_inputs(fuzzy_ctx_t* ctx, Z3_ast v,
                         // assignment
 
                         __detect_assignment_involved_inputs(ctx, symbol_index,
-                                                            data);
+                                                            new_el);
                         break;
                     }
 
@@ -1396,10 +1426,10 @@ static void __detect_involved_inputs(fuzzy_ctx_t* ctx, Z3_ast v,
                     if (!set_check__ulong(
                             (set__ulong*)ctx->univocally_defined_inputs,
                             symbol_index)) {
-                        set_add__index_group_t(&data->index_groups, group);
-                        set_add__ulong(&data->indexes, symbol_index);
+                        set_add__index_group_t(&new_el->index_groups, group);
+                        set_add__ulong(&new_el->indexes, symbol_index);
                     }
-                    return;
+                    goto FUN_END;
                 }
                 case Z3_OP_BLSHR:
                 case Z3_OP_BASHR:
@@ -1408,7 +1438,7 @@ static void __detect_involved_inputs(fuzzy_ctx_t* ctx, Z3_ast v,
                 case Z3_OP_BSREM:
                 case Z3_OP_BSREM_I:
                 case Z3_OP_BSMOD: {
-                    data->input_extract_ops++;
+                    new_el->input_extract_ops++;
                 }
                 default: {
                     break;
@@ -1416,9 +1446,10 @@ static void __detect_involved_inputs(fuzzy_ctx_t* ctx, Z3_ast v,
             }
             if (num_fields > 0) {
                 for (i = 0; i < num_fields; i++) {
+                    ast_info_ptr tmp;
                     __detect_involved_inputs(
-                        ctx, Z3_get_app_arg(ctx->z3_ctx, app, i), data,
-                        visited_subtrees);
+                        ctx, Z3_get_app_arg(ctx->z3_ctx, app, i), &tmp);
+                    __union_ast_info(new_el, tmp);
                 }
             }
             break;
@@ -1429,15 +1460,16 @@ static void __detect_involved_inputs(fuzzy_ctx_t* ctx, Z3_ast v,
         default:
             assert(0 && "__main_ast_visit() unknown ast kind\n");
     }
+
+FUN_END:
+    dict_set__ast_info_ptr(ast_info_cache, ast_hash, new_el);
+    *data = new_el;
 }
 
 static void detect_involved_inputs_wrapper(fuzzy_ctx_t* ctx, Z3_ast v,
-                                           ast_data_t* data)
+                                           ast_info_ptr* data)
 {
-    set__ulong visited_subtrees;
-    set_init__ulong(&visited_subtrees, &index_hash, &index_equals);
-    __detect_involved_inputs(ctx, v, data, &visited_subtrees);
-    set_free__ulong(&visited_subtrees);
+    __detect_involved_inputs(ctx, v, data);
 }
 
 static void __detect_early_constants(fuzzy_ctx_t* ctx, Z3_ast v,
@@ -1546,7 +1578,7 @@ static void __detect_early_constants(fuzzy_ctx_t* ctx, Z3_ast v,
 }
 
 static inline int __check_univocally_defined(fuzzy_ctx_t* ctx, Z3_ast expr,
-                                             ast_data_t* data)
+                                             ast_info_ptr data)
 {
     Z3_ast_kind kind = Z3_get_ast_kind(ctx->z3_ctx, expr);
     if (kind != Z3_APP_AST)
@@ -1559,10 +1591,10 @@ static inline int __check_univocally_defined(fuzzy_ctx_t* ctx, Z3_ast expr,
     if (decl_kind != Z3_OP_EQ)
         return 0;
 
-    set_remove_all__index_group_t(&ast_data.index_groups);
-    ast_data.input_extract_ops = 0;
-    detect_involved_inputs_wrapper(ctx, expr, &ast_data);
-    if (ast_data.input_extract_ops > 0)
+    set_remove_all__index_group_t(&data->index_groups);
+    data->input_extract_ops = 0;
+    detect_involved_inputs_wrapper(ctx, expr, &data);
+    if (data->input_extract_ops > 0)
         return 0; // it is not safe to add to univocally defined
 
     if (data->index_groups.size != 1)
@@ -1723,16 +1755,11 @@ static inline int __detect_strcmp_pattern(fuzzy_ctx_t* ctx, Z3_ast ast,
 static inline void __reset_ast_data()
 {
     set_remove_all__digest_t(&ast_data.processed_set);
-    set_remove_all__index_group_t(&ast_data.index_groups);
-    set_remove_all__ulong(&ast_data.indexes);
     da_remove_all__ulong(&ast_data.values);
 
-    ast_data.linear_arithmetic_operations    = 0;
-    ast_data.nonlinear_arithmetic_operations = 0;
-    ast_data.input_to_state_group.n          = 0;
-    ast_data.query_size                      = 0;
-    ast_data.input_extract_ops               = 0;
-    ast_data.n_useless_eval                  = 0;
+    ast_data.inputs                 = NULL;
+    ast_data.input_to_state_group.n = 0;
+    ast_data.n_useless_eval         = 0;
 }
 
 static inline void __init_global_data(fuzzy_ctx_t* ctx, Z3_ast query,
@@ -1744,7 +1771,7 @@ static inline void __init_global_data(fuzzy_ctx_t* ctx, Z3_ast query,
     __reset_ast_data();
 
     __detect_input_to_state_query(ctx, branch_condition, &ast_data);
-    detect_involved_inputs_wrapper(ctx, branch_condition, &ast_data);
+    detect_involved_inputs_wrapper(ctx, branch_condition, &ast_data.inputs);
     __detect_early_constants(ctx, branch_condition, &ast_data);
 
     testcase_t* current_testcase = &ctx->testcases.data[0];
@@ -1870,9 +1897,9 @@ static __always_inline int PHASE_input_to_state_extended(
     unsigned       k;
 
     for (i = 0; i < ast_data.values.size; ++i) {
-        set_reset_iter__index_group_t(&ast_data.index_groups, 0);
-        while (
-            set_iter_next__index_group_t(&ast_data.index_groups, 0, &group)) {
+        set_reset_iter__index_group_t(&ast_data.inputs->index_groups, 0);
+        while (set_iter_next__index_group_t(&ast_data.inputs->index_groups, 0,
+                                            &group)) {
             for (k = 0; k < group->n; ++k) {
                 unsigned int  index = group->indexes[group->n - k - 1];
                 unsigned char b =
@@ -1928,8 +1955,8 @@ static __always_inline int PHASE_brute_force(fuzzy_ctx_t* ctx, Z3_ast query,
 #endif
 
     uniq_index = NULL;
-    set_reset_iter__ulong(&ast_data.indexes, 0);
-    set_iter_next__ulong(&ast_data.indexes, 0, &uniq_index);
+    set_reset_iter__ulong(&ast_data.inputs->indexes, 0);
+    set_iter_next__ulong(&ast_data.inputs->indexes, 0, &uniq_index);
 
     for (i = 0; i < 256; ++i) {
         tmp_input[*uniq_index] = i;
@@ -2953,8 +2980,9 @@ static __always_inline int PHASE_afl_deterministic_groups(
     Z3FUZZ_LOG("Trying AFL Deterministic (groups)\n");
 #endif
 
-    set_reset_iter__index_group_t(&ast_data.index_groups, 1);
-    while (set_iter_next__index_group_t(&ast_data.index_groups, 1, &g)) {
+    set_reset_iter__index_group_t(&ast_data.inputs->index_groups, 1);
+    while (
+        set_iter_next__index_group_t(&ast_data.inputs->index_groups, 1, &g)) {
         unsigned i;
         // flip 1/2/4 int8 -> do for every group type
         for (i = 0; i < g->n; ++i) {
@@ -3007,8 +3035,10 @@ static __always_inline int PHASE_afl_deterministic_groups(
                 if (ret)
                     return 1;
 
-                if (set_check__ulong(&ast_data.indexes, g->indexes[1] + 1) &&
-                    set_check__ulong(&ast_data.indexes, g->indexes[1] + 2)) {
+                if (set_check__ulong(&ast_data.inputs->indexes,
+                                     g->indexes[1] + 1) &&
+                    set_check__ulong(&ast_data.inputs->indexes,
+                                     g->indexes[1] + 2)) {
                     // interesting 32
                     ret = SUBPHASE_afl_det_int32(
                         ctx, query, branch_condition, proof, proof_size,
@@ -3051,10 +3081,14 @@ static __always_inline int PHASE_afl_deterministic_groups(
                 if (ret)
                     return 1;
 
-                if (set_check__ulong(&ast_data.indexes, g->indexes[3] + 1) &&
-                    set_check__ulong(&ast_data.indexes, g->indexes[3] + 2) &&
-                    set_check__ulong(&ast_data.indexes, g->indexes[3] + 3) &&
-                    set_check__ulong(&ast_data.indexes, g->indexes[3] + 4)) {
+                if (set_check__ulong(&ast_data.inputs->indexes,
+                                     g->indexes[3] + 1) &&
+                    set_check__ulong(&ast_data.inputs->indexes,
+                                     g->indexes[3] + 2) &&
+                    set_check__ulong(&ast_data.inputs->indexes,
+                                     g->indexes[3] + 3) &&
+                    set_check__ulong(&ast_data.inputs->indexes,
+                                     g->indexes[3] + 4)) {
                     // interesting 64
                     ret = SUBPHASE_afl_det_int64(
                         ctx, query, branch_condition, proof, proof_size,
@@ -3146,7 +3180,7 @@ static __always_inline int PHASE_afl_deterministic_groups(
                     if (ret)
                         return 1;
 
-                    if (set_check__ulong(&ast_data.indexes,
+                    if (set_check__ulong(&ast_data.inputs->indexes,
                                          g->indexes[i] + 1)) {
                         // int 16
                         ret = SUBPHASE_afl_det_int16(
@@ -3243,8 +3277,8 @@ PHASE_afl_deterministic(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
     unsigned long input_index_0, input_index_1, input_index_2, input_index_3;
     int           ret;
 
-    set_reset_iter__ulong(&ast_data.indexes, 1);
-    while (set_iter_next__ulong(&ast_data.indexes, 1, &p)) {
+    set_reset_iter__ulong(&ast_data.inputs->indexes, 1);
+    while (set_iter_next__ulong(&ast_data.inputs->indexes, 1, &p)) {
         input_index_0 = *p;
         // ****************
         // ***** byte *****
@@ -3288,7 +3322,7 @@ PHASE_afl_deterministic(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
 
         tmp_input[input_index_0] =
             (unsigned long)current_testcase->values[input_index_0];
-        if (!set_check__ulong(&ast_data.indexes, input_index_0 + 1))
+        if (!set_check__ulong(&ast_data.inputs->indexes, input_index_0 + 1))
             continue; // only one byte. Skip
 
         // ****************
@@ -3319,8 +3353,8 @@ PHASE_afl_deterministic(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
         tmp_input[input_index_0] = current_testcase->values[input_index_0];
         tmp_input[input_index_1] = current_testcase->values[input_index_1];
 
-        if (!set_check__ulong(&ast_data.indexes, input_index_0 + 2) ||
-            !set_check__ulong(&ast_data.indexes, input_index_0 + 3))
+        if (!set_check__ulong(&ast_data.inputs->indexes, input_index_0 + 2) ||
+            !set_check__ulong(&ast_data.inputs->indexes, input_index_0 + 3))
             continue; // not enough bytes. Skip
 
         // ***************
@@ -3402,27 +3436,28 @@ static __always_inline int PHASE_afl_havoc(fuzzy_ctx_t* ctx, Z3_ast query,
     ulong*   p;
 
     // initialize list input
-    indexes =
-        (unsigned long*)malloc(ast_data.indexes.size * sizeof(unsigned long));
-    indexes_size = ast_data.indexes.size;
+    indexes      = (unsigned long*)malloc(ast_data.inputs->indexes.size *
+                                     sizeof(unsigned long));
+    indexes_size = ast_data.inputs->indexes.size;
     // initialize groups input
-    ig_16      = (index_group_t**)malloc(ast_data.index_groups.size *
+    ig_16      = (index_group_t**)malloc(ast_data.inputs->index_groups.size *
                                     sizeof(index_group_t*));
     ig_16_size = 0;
-    ig_32      = (index_group_t**)malloc(ast_data.index_groups.size *
+    ig_32      = (index_group_t**)malloc(ast_data.inputs->index_groups.size *
                                     sizeof(index_group_t*));
     ig_32_size = 0;
-    ig_64      = (index_group_t**)malloc(ast_data.index_groups.size *
+    ig_64      = (index_group_t**)malloc(ast_data.inputs->index_groups.size *
                                     sizeof(index_group_t*));
     ig_64_size = 0;
 
     i = 0;
-    set_reset_iter__ulong(&ast_data.indexes, 1);
-    while (set_iter_next__ulong(&ast_data.indexes, 1, &p)) {
+    set_reset_iter__ulong(&ast_data.inputs->indexes, 1);
+    while (set_iter_next__ulong(&ast_data.inputs->indexes, 1, &p)) {
         indexes[i++] = *p;
     }
-    set_reset_iter__index_group_t(&ast_data.index_groups, 1);
-    while (set_iter_next__index_group_t(&ast_data.index_groups, 1, &group)) {
+    set_reset_iter__index_group_t(&ast_data.inputs->index_groups, 1);
+    while (set_iter_next__index_group_t(&ast_data.inputs->index_groups, 1,
+                                        &group)) {
         switch (group->n) {
             case 1:
                 break;
@@ -3441,8 +3476,8 @@ static __always_inline int PHASE_afl_havoc(fuzzy_ctx_t* ctx, Z3_ast query,
     havoc_res     = 0;
     mutation_pool = 5 + (ig_64_size + ig_32_size + ig_16_size > 0 ? 3 : 0) +
                     (ig_64_size + ig_32_size > 0 ? 3 : 0);
-    score = ast_data.indexes.size * 2;   // 2 mutations per input (mean)
-    score = score > 1000 ? 1000 : score; // no more than 1000 mutations
+    score = ast_data.inputs->indexes.size * 2; // 2 mutations per input (mean)
+    score = score > 1000 ? 1000 : score;       // no more than 1000 mutations
     for (i = 0; i < score; ++i) {
         switch (UR(mutation_pool)) {
             case 0: {
@@ -3750,12 +3785,13 @@ static int __query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
     // common code, this must be executed for the subsequent levels to work
     __init_global_data(ctx, query, branch_condition);
     if (log_query_stats)
-        fprintf(query_log, "\n%lu;%lu;%lu;%s;%u;%u", ast_data.query_size,
-                ast_data.indexes.size, ast_data.index_groups.size,
+        fprintf(query_log, "\n%lu;%lu;%lu;%s;%u;%u",
+                ast_data.inputs->query_size, ast_data.inputs->indexes.size,
+                ast_data.inputs->index_groups.size,
                 ast_data.is_input_to_state ? "true" : "false",
-                ast_data.linear_arithmetic_operations,
-                ast_data.nonlinear_arithmetic_operations);
-    if (ast_data.indexes.size == 0) { // constant branch condition!
+                ast_data.inputs->linear_arithmetic_operations,
+                ast_data.inputs->nonlinear_arithmetic_operations);
+    if (ast_data.inputs->indexes.size == 0) { // constant branch condition!
         if (__evaluate_branch_query(ctx, query, branch_condition, tmp_input,
                                     current_testcase->value_sizes,
                                     current_testcase->values_len)) {
@@ -3791,7 +3827,7 @@ static int __query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
     }
 
     // Pure Brute Force - Only One Byte is Involved
-    if (ast_data.indexes.size == 1) {
+    if (ast_data.inputs->indexes.size == 1) {
         // if the fase fails, we exit -> the query is UNSAT
         res =
             PHASE_brute_force(ctx, query, branch_condition, proof, proof_size);
@@ -3921,7 +3957,7 @@ static inline unsigned long __minimize_maximize_inner_greedy(
     unsigned char const** out_values, unsigned is_max)
 {
     __reset_ast_data();
-    detect_involved_inputs_wrapper(ctx, to_maximize_minimize, &ast_data);
+    detect_involved_inputs_wrapper(ctx, to_maximize_minimize, &ast_data.inputs);
 
     testcase_t*   current_testcase = &ctx->testcases.data[0];
     unsigned long max_min          = ctx->model_eval(
@@ -3930,12 +3966,12 @@ static inline unsigned long __minimize_maximize_inner_greedy(
     unsigned long tmp;
     unsigned long original_byte, max_min_byte, i, j;
     ulong*        p;
-    unsigned long num_indexes = ast_data.indexes.size;
+    unsigned long num_indexes = ast_data.inputs->indexes.size;
     unsigned long indexes_array[num_indexes];
 
     i = 0;
-    set_reset_iter__ulong(&ast_data.indexes, 0);
-    while (set_iter_next__ulong(&ast_data.indexes, 0, &p))
+    set_reset_iter__ulong(&ast_data.inputs->indexes, 0);
+    while (set_iter_next__ulong(&ast_data.inputs->indexes, 0, &p))
         indexes_array[i++] = *p;
     qsort(indexes_array, num_indexes, sizeof(unsigned long), compare_ulong);
 
@@ -4094,7 +4130,7 @@ void z3fuzz_notify_constraint(fuzzy_ctx_t* ctx, Z3_ast constraint)
         return;
 
     ctx->stats.num_univocally_defined +=
-        __check_univocally_defined(ctx, constraint, &ast_data);
+        __check_univocally_defined(ctx, constraint, ast_data.inputs);
 }
 
 int z3fuzz_get_optimistic_sol(fuzzy_ctx_t* ctx, unsigned char const** proof,
