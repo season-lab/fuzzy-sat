@@ -717,18 +717,18 @@ void z3fuzz_init(fuzzy_ctx_t* fctx, Z3_context ctx, char* seed_filename,
     fctx->assignment_inputs_cache = malloc(sizeof(dict__ast_info_ptr));
     dict__ast_info_ptr* assignment_inputs_cache =
         (dict__ast_info_ptr*)fctx->assignment_inputs_cache;
-    dict_init__ast_info_ptr(assignment_inputs_cache);
+    dict_init__ast_info_ptr(assignment_inputs_cache, ast_info_ptr_free);
 
     fctx->ast_info_cache = malloc(sizeof(dict__ast_info_ptr));
     dict__ast_info_ptr* ast_info_cache =
         (dict__ast_info_ptr*)fctx->ast_info_cache;
-    dict_init__ast_info_ptr(ast_info_cache);
+    dict_init__ast_info_ptr(ast_info_cache, ast_info_ptr_free);
 
     fctx->conflicting_asts =
         (dict__conflicting_ptr*)malloc(sizeof(dict__conflicting_ptr));
     dict__conflicting_ptr* conflicting_asts =
         (dict__conflicting_ptr*)fctx->conflicting_asts;
-    dict_init__conflicting_ptr(conflicting_asts);
+    dict_init__conflicting_ptr(conflicting_asts, conflicting_ptr_free);
 
     fctx->processed_constraints = (set__ulong*)malloc(sizeof(set__ulong));
     set__ulong* processed_constraints =
@@ -772,17 +772,17 @@ void z3fuzz_free(fuzzy_ctx_t* ctx)
 
     dict__ast_info_ptr* assignment_inputs_cache =
         (dict__ast_info_ptr*)ctx->assignment_inputs_cache;
-    dict_free__ast_info_ptr(assignment_inputs_cache, ast_info_ptr_free);
+    dict_free__ast_info_ptr(assignment_inputs_cache);
     free(ctx->assignment_inputs_cache);
 
     dict__ast_info_ptr* ast_info_cache =
         (dict__ast_info_ptr*)ctx->ast_info_cache;
-    dict_free__ast_info_ptr(ast_info_cache, ast_info_ptr_free);
+    dict_free__ast_info_ptr(ast_info_cache);
     free(ctx->ast_info_cache);
 
     dict__conflicting_ptr* conflicting_asts =
         (dict__conflicting_ptr*)ctx->conflicting_asts;
-    dict_free__conflicting_ptr(conflicting_asts, conflicting_ptr_free);
+    dict_free__conflicting_ptr(conflicting_asts);
     free(conflicting_asts);
 
     set__ulong* processed_constraints = (set__ulong*)ctx->processed_constraints;
@@ -4403,7 +4403,7 @@ void z3fuzz_notify_constraint(fuzzy_ctx_t* ctx, Z3_ast constraint)
         // invalidate ast_info_cache
         dict__ast_info_ptr* ast_info_cache =
             (dict__ast_info_ptr*)ctx->ast_info_cache;
-        dict_remove_all__ast_info_ptr(ast_info_cache, ast_info_ptr_free);
+        dict_remove_all__ast_info_ptr(ast_info_cache);
     } else
         ctx->stats.num_conflicting +=
             __check_conflicting_constraint(ctx, constraint);

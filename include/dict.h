@@ -37,12 +37,15 @@ typedef struct glue(dict__, DICT_DATA_T)
     unsigned long  size;
     unsigned long* filled_buckets;
     unsigned long  filled_buckets_i;
+    void (*free_el)(DICT_DATA_T*);
 }
 glue(dict__, DICT_DATA_T);
 
 static inline void glue(dict_init__,
-                        DICT_DATA_T)(glue(dict__, DICT_DATA_T) * dict)
+                        DICT_DATA_T)(glue(dict__, DICT_DATA_T) * dict,
+                                     void (*free_el)(DICT_DATA_T*))
 {
+    dict->free_el          = free_el;
     dict->filled_buckets_i = 0;
     dict->size             = 0;
     dict->buckets = (glue(da__, DICT_EL)*)malloc(sizeof(glue(da__, DICT_EL)) *
@@ -88,6 +91,8 @@ static inline void glue(dict_set__,
         for (i = 0; i < bucket->size; ++i) {
             DICT_EL* tmp = glue(da_get_ref_item__, DICT_EL)(bucket, i);
             if (tmp->key == key) {
+                if (dict->free_el != 0)
+                    dict->free_el(&tmp->el);
                 tmp->el    = el;
                 is_present = 1;
                 break;
@@ -124,16 +129,15 @@ static inline DICT_DATA_T* glue(dict_get_ref__,
 }
 
 static inline void glue(dict_remove_all__,
-                        DICT_DATA_T)(glue(dict__, DICT_DATA_T) * dict,
-                                     void (*free_el)(DICT_DATA_T*))
+                        DICT_DATA_T)(glue(dict__, DICT_DATA_T) * dict)
 {
     unsigned long i;
     for (i = 0; i < dict->filled_buckets_i; ++i) {
         glue(da__, DICT_EL)* bucket = &dict->buckets[dict->filled_buckets[i]];
-        if (free_el != 0) {
+        if (dict->free_el != 0) {
             unsigned long j;
             for (j = 0; j < bucket->size; ++j)
-                free_el(&bucket->data[j].el);
+                dict->free_el(&bucket->data[j].el);
         }
         glue(da_remove_all__, DICT_EL)(bucket, NULL);
     }
@@ -142,18 +146,17 @@ static inline void glue(dict_remove_all__,
 }
 
 static inline void glue(dict_free__,
-                        DICT_DATA_T)(glue(dict__, DICT_DATA_T) * dict,
-                                     void (*free_el)(DICT_DATA_T*))
+                        DICT_DATA_T)(glue(dict__, DICT_DATA_T) * dict)
 {
     unsigned long i;
     for (i = 0; i < DICT_N_BUCKETS; ++i) {
         glue(da__, DICT_EL)* bucket = &dict->buckets[i];
         if (bucket->data == 0)
             continue;
-        if (free_el != 0) {
+        if (dict->free_el != 0) {
             unsigned long j;
             for (j = 0; j < bucket->size; ++j)
-                free_el(&bucket->data[j].el);
+                dict->free_el(&bucket->data[j].el);
         }
         glue(da_free__, DICT_EL)(bucket, 0);
     }
