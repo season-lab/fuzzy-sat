@@ -18,6 +18,8 @@
 #define rightmost_set_bit(x) ((x) != 0 ? __builtin_ctzl(x) : -1)
 #define leftmost_set_bit(x) ((x) != 0 ? (63 - __builtin_clzl(x)) : -1)
 
+#define Z3_UNIQUE Z3_get_ast_hash // Z3_get_ast_id
+
 // #define PRINT_SAT
 // #define PRINT_NUM_EVALUATE
 // #define DEBUG_CHECK_LIGHT
@@ -1417,7 +1419,7 @@ static inline void __detect_involved_inputs(fuzzy_ctx_t* ctx, Z3_ast v,
     // 'index_queue'
     // 2. Populate global 'indexes' with encountered indexes
 
-    unsigned long       ast_hash = Z3_get_ast_id(ctx->z3_ctx, v);
+    unsigned long       ast_hash = Z3_UNIQUE(ctx->z3_ctx, v);
     dict__ast_info_ptr* ast_info_cache =
         (dict__ast_info_ptr*)ctx->ast_info_cache;
     ast_info_ptr* cached_el;
@@ -4371,7 +4373,7 @@ void z3fuzz_notify_constraint(fuzzy_ctx_t* ctx, Z3_ast constraint)
     if (unlikely(skip_notify))
         return;
 
-    unsigned long hash                = Z3_get_ast_id(ctx->z3_ctx, constraint);
+    unsigned long hash                = Z3_UNIQUE(ctx->z3_ctx, constraint);
     set__ulong* processed_constraints = (set__ulong*)ctx->processed_constraints;
     if (set_check__ulong(processed_constraints, hash))
         return;
