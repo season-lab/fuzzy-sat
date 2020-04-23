@@ -33,7 +33,7 @@ fuzzy-lib:
 	rm z3-fuzzy.o testcase-list.o gradient_descend.o md5.o
 
 clean:
-	rm -f libZ3Fuzzy.a fuzzy-solver solver eval-driver maxmin-driver debug-eval
+	rm -f libZ3Fuzzy.a fuzzy-solver fuzzy-solver-notify solver eval-driver maxmin-driver debug-eval
 
 clean-tests:
 	rm tests/*

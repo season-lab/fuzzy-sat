@@ -914,8 +914,10 @@ static int __detect_input_group(fuzzy_ctx_t* ctx, Z3_ast node,
                         *approx = 1;
 
                     // recursive call
-                    res = __detect_input_group(
-                        ctx, Z3_get_app_arg(ctx->z3_ctx, app, 0), ig, approx);
+                    Z3_ast child = Z3_get_app_arg(ctx->z3_ctx, app, 0);
+                    Z3_inc_ref(ctx->z3_ctx, child);
+                    res = __detect_input_group(ctx, child, ig, approx);
+                    Z3_dec_ref(ctx->z3_ctx, child);
                     if (res == 0)
                         break;
 
@@ -1164,9 +1166,10 @@ static int __detect_input_group(fuzzy_ctx_t* ctx, Z3_ast node,
                     // recursive call
                     res = 0;
                     for (i = 0; i < num_fields; ++i) {
-                        res = __detect_input_group(
-                            ctx, Z3_get_app_arg(ctx->z3_ctx, app, i), ig,
-                            approx);
+                        Z3_ast child = Z3_get_app_arg(ctx->z3_ctx, app, i);
+                        Z3_inc_ref(ctx->z3_ctx, child);
+                        res = __detect_input_group(ctx, child, ig, approx);
+                        Z3_dec_ref(ctx->z3_ctx, child);
                         if (res == 0)
                             break;
                     }
@@ -1522,10 +1525,12 @@ static inline void __detect_involved_inputs(fuzzy_ctx_t* ctx, Z3_ast v,
             }
             if (num_fields > 0) {
                 for (i = 0; i < num_fields; i++) {
+                    Z3_ast child = Z3_get_app_arg(ctx->z3_ctx, app, i);
+                    Z3_inc_ref(ctx->z3_ctx, child);
                     ast_info_ptr tmp;
-                    __detect_involved_inputs(
-                        ctx, Z3_get_app_arg(ctx->z3_ctx, app, i), &tmp);
+                    __detect_involved_inputs(ctx, child, &tmp);
                     __union_ast_info(new_el, tmp);
+                    Z3_dec_ref(ctx->z3_ctx, child);
                 }
             }
             break;
@@ -1571,9 +1576,14 @@ static void __detect_early_constants(fuzzy_ctx_t* ctx, Z3_ast v,
                 }
                 case Z3_OP_CONCAT: {
                     child1 = Z3_get_app_arg(ctx->z3_ctx, app, 0);
+                    Z3_inc_ref(ctx->z3_ctx, child1);
                     child2 = Z3_get_app_arg(ctx->z3_ctx, app, 1);
+                    Z3_inc_ref(ctx->z3_ctx, child2);
+
                     __detect_early_constants(ctx, child1, data);
+                    Z3_dec_ref(ctx->z3_ctx, child1);
                     __detect_early_constants(ctx, child2, data);
+                    Z3_dec_ref(ctx->z3_ctx, child2);
                     break;
                 }
                 case Z3_OP_EQ:
@@ -1586,7 +1596,9 @@ static void __detect_early_constants(fuzzy_ctx_t* ctx, Z3_ast v,
                 case Z3_OP_SLT:
                 case Z3_OP_SLEQ: {
                     child1 = Z3_get_app_arg(ctx->z3_ctx, app, 0);
+                    Z3_inc_ref(ctx->z3_ctx, child1);
                     child2 = Z3_get_app_arg(ctx->z3_ctx, app, 1);
+                    Z3_inc_ref(ctx->z3_ctx, child2);
 
                     if (Z3_get_ast_kind(ctx->z3_ctx, child1) ==
                         Z3_NUMERAL_AST) {
@@ -1610,14 +1622,18 @@ static void __detect_early_constants(fuzzy_ctx_t* ctx, Z3_ast v,
 
                     // binary forward
                     __detect_early_constants(ctx, child1, data);
+                    Z3_dec_ref(ctx->z3_ctx, child1);
                     __detect_early_constants(ctx, child2, data);
+                    Z3_dec_ref(ctx->z3_ctx, child2);
                     break;
                 }
                 case Z3_OP_BSUB:
                 case Z3_OP_BAND: {
                     // look for constant
                     child1 = Z3_get_app_arg(ctx->z3_ctx, app, 0);
+                    Z3_inc_ref(ctx->z3_ctx, child1);
                     child2 = Z3_get_app_arg(ctx->z3_ctx, app, 1);
+                    Z3_inc_ref(ctx->z3_ctx, child2);
 
                     if (Z3_get_ast_kind(ctx->z3_ctx, child1) ==
                         Z3_NUMERAL_AST) {
@@ -1638,6 +1654,8 @@ static void __detect_early_constants(fuzzy_ctx_t* ctx, Z3_ast v,
                         da_add_item__ulong(&data->values, tmp_const + 1);
                         da_add_item__ulong(&data->values, tmp_const - 1);
                     }
+                    Z3_dec_ref(ctx->z3_ctx, child1);
+                    Z3_dec_ref(ctx->z3_ctx, child2);
                     break;
                 }
                 default: {
