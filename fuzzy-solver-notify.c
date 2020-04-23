@@ -97,19 +97,20 @@ static inline void print_status(unsigned long current_query,
     pp_printf(32, 1, "int64:               %ld", fctx.stats.int64);
     pp_printf(33, 1, "havoc:               %ld", fctx.stats.havoc);
     pp_printf(34, 1, "multigoal:           %ld", fctx.stats.multigoal);
-    pp_printf(35, 1, "ast_info_cache_hits: %ld",
+    pp_printf(35, 1, "sat_in_seed:         %ld", fctx.stats.sat_in_seed);
+    pp_printf(36, 1, "ast_info_cache_hits: %ld",
               fctx.stats.ast_info_cache_hits);
-    pp_printf(36, 1, "num_univ_defined:    %ld",
+    pp_printf(37, 1, "num_univ_defined:    %ld",
               fctx.stats.num_univocally_defined);
-    pp_printf(37, 1, "num_conflicting:     %ld", fctx.stats.num_conflicting);
-    pp_printf(38, 1, "confl_fallbacks:     %ld",
+    pp_printf(38, 1, "num_conflicting:     %ld", fctx.stats.num_conflicting);
+    pp_printf(39, 1, "confl_fallbacks:     %ld",
               fctx.stats.conflicting_fallbacks);
-    pp_printf(39, 1, "confl_fall_noinp:    %ld",
+    pp_printf(40, 1, "confl_fall_noinp:    %ld",
               fctx.stats.conflicting_fallbacks_same_inputs);
-    pp_printf(40, 1, "confl_fall_notrue:   %ld",
+    pp_printf(41, 1, "confl_fall_notrue:   %ld",
               fctx.stats.conflicting_fallbacks_no_true);
     pp_set_col(0);
-    pp_set_line(41);
+    pp_set_line(43);
 }
 
 static inline void usage(char* filename)
@@ -180,6 +181,11 @@ int main(int argc, char* argv[])
             sat_queries += 1;
             gettimeofday(&stop, NULL);
             elapsed_time_fast_sat += compute_time_msec(&start, &stop);
+#ifdef DUMP_PROOFS
+            n = snprintf(var_name, sizeof(var_name), "tests/test_%02u", i);
+            assert(n > 0 && n < sizeof(var_name) && "test case name too long");
+            z3fuzz_dump_proof(&fctx, var_name, proof, proof_size);
+#endif
         } else
             gettimeofday(&stop, NULL);
 

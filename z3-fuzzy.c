@@ -3888,6 +3888,18 @@ static int __query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
     testcase_t* current_testcase = &ctx->testcases.data[0];
     int         res;
 
+    // check if sat in seed
+    if (__evaluate_branch_query(ctx, query, branch_condition, tmp_input,
+                                current_testcase->value_sizes,
+                                current_testcase->values_len)) {
+        ctx->stats.sat_in_seed++;
+        __vals_long_to_char(tmp_input, tmp_proof,
+                            current_testcase->testcase_len);
+        *proof      = tmp_proof;
+        *proof_size = current_testcase->testcase_len;
+        return 1;
+    }
+
     // L0 -- REUSE PHASE
     if (ctx->testcases.size > 1) {
         res = PHASE_reuse(ctx, query, branch_condition, proof, proof_size);
@@ -3976,9 +3988,11 @@ int z3fuzz_query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
     Z3_inc_ref(ctx->z3_ctx, query);
     Z3_inc_ref(ctx->z3_ctx, branch_condition);
 
+    int         res;
+    testcase_t* curr_t = &ctx->testcases.data[0];
+
     __init_global_data(ctx, query, branch_condition);
-    int res =
-        __query_check_light(ctx, query, branch_condition, proof, proof_size);
+    res = __query_check_light(ctx, query, branch_condition, proof, proof_size);
 
     if (res || opt_found == 0)
         // the query is SAT or we were not able to flip the branch condition
@@ -4010,7 +4024,6 @@ int z3fuzz_query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
         // no conflicting AST
         goto END_FUN_1;
 
-    testcase_t* curr_t = &ctx->testcases.data[0];
     // set tmp_input to the input that made the branch condition true
     memcpy(tmp_input, tmp_opt_input,
            curr_t->values_len * sizeof(unsigned long));
@@ -4070,12 +4083,18 @@ int z3fuzz_query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
                 // > make tmp_opt_input as new input
                 // > update black_indexes
                 // > continue the loop
-                memcpy(tmp_input, tmp_opt_input, curr_t->values_len);
+                memcpy(tmp_input, tmp_opt_input,
+                       curr_t->values_len * sizeof(unsigned long));
                 while (set_iter_next__ulong(&ast_info->indexes, 0, &p))
                     set_add__ulong(&black_indexes, *p);
             } else {
                 // we are not able to make this AST true, quit
                 ctx->stats.conflicting_fallbacks_no_true++;
+
+                // if we are here, we populated 'opt_proof' at least one time,
+                // we do not want to prevent the user to ask for the optimistic
+                // solution
+                opt_found = 1;
                 break;
             }
         } else

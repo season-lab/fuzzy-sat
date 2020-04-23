@@ -39,6 +39,7 @@ typedef struct fuzzy_stats_t {
     unsigned long int64;
     unsigned long havoc;
     unsigned long multigoal;
+    unsigned long sat_in_seed;
     unsigned long num_univocally_defined;
     unsigned long num_conflicting;
     unsigned long conflicting_fallbacks;
