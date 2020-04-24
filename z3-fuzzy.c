@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include "utility/gradient_descend.h"
+#include "utility/interval.h"
 #include "z3-fuzzy.h"
 
 #ifndef likely
@@ -209,6 +210,8 @@ static long interesting64[] = {
     127,                  // 0x7f
 };
 
+#include "z3-fuzzy-debug-utils.h"
+
 #define RESEED_RNG 10000
 static int             dev_urandom_fd = -1;
 static unsigned        rand_cnt       = 1;
@@ -233,6 +236,7 @@ static inline void ast_info_init(ast_info_ptr ptr)
     ptr->nonlinear_arithmetic_operations = 0;
     ptr->input_extract_ops               = 0;
     ptr->query_size                      = 0;
+    ptr->approximated_groups             = 0;
 }
 
 static inline void ast_info_ptr_free(ast_info_ptr* ptr)
@@ -561,29 +565,6 @@ PRE_SWITCH:
 }
 // **********************************
 
-static inline void print_index_queue(ast_info_ptr data)
-{
-    index_group_t* group;
-    fprintf(stderr, "----- QUEUE -----\n");
-    unsigned int i, j;
-    i = 0;
-    set_reset_iter__index_group_t(&data->index_groups, 1);
-    while (set_iter_next__index_group_t(&data->index_groups, 1, &group)) {
-        for (j = 0; j < group->n; ++j)
-            fprintf(stderr, "group: %d. index: 0x%lx\n", i, group->indexes[j]);
-        i++;
-    }
-
-    fprintf(stderr, "\n\n");
-
-    ulong* p;
-    set_reset_iter__ulong(&data->indexes, 1);
-    while (set_iter_next__ulong(&data->indexes, 1, &p))
-        fprintf(stderr, "index: 0x%lx\n", *p);
-
-    fprintf(stderr, "-----------------\n");
-}
-
 static inline void __symbol_init(fuzzy_ctx_t* ctx, unsigned long n_values)
 {
     if (ctx->n_symbols >= n_values)
@@ -711,8 +692,15 @@ void z3fuzz_init(fuzzy_ctx_t* fctx, Z3_context ctx, char* seed_filename,
     ast_data_init(&ast_data);
 
     fctx->univocally_defined_inputs = (void*)malloc(sizeof(set__ulong));
-    set_init__ulong((set__ulong*)fctx->univocally_defined_inputs, &index_hash,
-                    &index_equals);
+    set__ulong* univocally_defined_inputs =
+        (set__ulong*)fctx->univocally_defined_inputs;
+    set_init__ulong(univocally_defined_inputs, &index_hash, &index_equals);
+
+    fctx->group_intervals = (void*)malloc(sizeof(set__interval_group_t));
+    set__interval_group_t* group_intervals =
+        (set__interval_group_t*)fctx->group_intervals;
+    set_init__interval_group_t(group_intervals, &interval_group_hash,
+                               &interval_group_equals);
 
     fctx->assignment_inputs_cache = malloc(sizeof(dict__ast_info_ptr));
     dict__ast_info_ptr* assignment_inputs_cache =
@@ -789,8 +777,15 @@ void z3fuzz_free(fuzzy_ctx_t* ctx)
     set_free__ulong(processed_constraints, NULL);
     free(ctx->processed_constraints);
 
-    set_free__ulong((set__ulong*)ctx->univocally_defined_inputs, NULL);
+    set__ulong* univocally_defined_inputs =
+        (set__ulong*)ctx->univocally_defined_inputs;
+    set_free__ulong(univocally_defined_inputs, NULL);
     free(ctx->univocally_defined_inputs);
+
+    set__interval_group_t* group_intervals =
+        (set__interval_group_t*)ctx->group_intervals;
+    set_free__interval_group_t(group_intervals, NULL);
+    free(ctx->group_intervals);
 
     gd_free();
 
@@ -1364,6 +1359,7 @@ static void __union_ast_info(ast_info_ptr dst, ast_info_ptr src)
     dst->nonlinear_arithmetic_operations +=
         src->nonlinear_arithmetic_operations;
     dst->query_size += src->query_size;
+    dst->approximated_groups += src->approximated_groups;
 }
 
 static void ast_info_populate_with_blacklist(ast_info_ptr dst, ast_info_ptr src,
@@ -1388,6 +1384,16 @@ static void ast_info_populate_with_blacklist(ast_info_ptr dst, ast_info_ptr src,
 
         if (is_ok)
             set_add__index_group_t(&dst->index_groups, *group);
+        else {
+            // add indexes as individual groups
+            index_group_t g;
+            for (i = 0; i < group->n; ++i)
+                if (!set_check__ulong(blacklist, group->indexes[i])) {
+                    g.n          = 1;
+                    g.indexes[0] = group->indexes[i];
+                    set_add__index_group_t(&dst->index_groups, g);
+                }
+        }
     }
 }
 
@@ -1604,8 +1610,8 @@ static void __detect_early_constants(fuzzy_ctx_t* ctx, Z3_ast v,
                         Z3_NUMERAL_AST) {
                         successGet = Z3_get_numeral_uint64(
                             ctx->z3_ctx, child1, (uint64_t*)&tmp_const);
-                        assert(successGet == Z3_TRUE &&
-                               "failed to get constant");
+                        if (successGet == Z3_FALSE)
+                            break; // constant bigger than 64
                         da_add_item__ulong(&data->values, tmp_const);
                         da_add_item__ulong(&data->values, tmp_const + 1);
                         da_add_item__ulong(&data->values, tmp_const - 1);
@@ -1613,8 +1619,8 @@ static void __detect_early_constants(fuzzy_ctx_t* ctx, Z3_ast v,
                                Z3_NUMERAL_AST) {
                         successGet = Z3_get_numeral_uint64(
                             ctx->z3_ctx, child2, (uint64_t*)&tmp_const);
-                        assert(successGet == Z3_TRUE &&
-                               "failed to get constant");
+                        if (successGet == Z3_FALSE)
+                            break; // constant bigger than 64
                         da_add_item__ulong(&data->values, tmp_const);
                         da_add_item__ulong(&data->values, tmp_const + 1);
                         da_add_item__ulong(&data->values, tmp_const - 1);
@@ -1686,28 +1692,210 @@ static inline int __check_conflicting_constraint(fuzzy_ctx_t* ctx, Z3_ast expr)
 
     ast_info_ptr inputs;
     detect_involved_inputs_wrapper(ctx, expr, &inputs);
-    if (inputs->index_groups.size != 2)
+    if (inputs->index_groups.size != 1 && inputs->index_groups.size != 2)
         return 0;
 
-    // we have (= f(INPUT1, INPUT2)) in the branch condition
-    // this can be a possible conflicting contraint. Take note
-    index_group_t* ig_1 = NULL;
-    index_group_t* ig_2 = NULL;
-    set_reset_iter__index_group_t(&inputs->index_groups, 0);
-    set_iter_next__index_group_t(&inputs->index_groups, 0, &ig_1);
-    set_iter_next__index_group_t(&inputs->index_groups, 0, &ig_2);
-
+    // Take note of groups
     dict__conflicting_ptr* conflicting_asts =
         (dict__conflicting_ptr*)ctx->conflicting_asts;
 
-    unsigned i;
-    for (i = 0; i < ig_1->n; ++i)
-        add_item_to_conflicting(conflicting_asts, expr, ig_1->indexes[i],
-                                ctx->z3_ctx);
-    for (i = 0; i < ig_2->n; ++i)
-        add_item_to_conflicting(conflicting_asts, expr, ig_2->indexes[i],
-                                ctx->z3_ctx);
+    index_group_t* ig = NULL;
+    set_reset_iter__index_group_t(&inputs->index_groups, 0);
+    while (set_iter_next__index_group_t(&inputs->index_groups, 0, &ig)) {
+        unsigned i;
+        for (i = 0; i < ig->n; ++i)
+            add_item_to_conflicting(conflicting_asts, expr, ig->indexes[i],
+                                    ctx->z3_ctx);
+    }
     return 1;
+}
+
+static inline optype __find_optype(Z3_decl_kind dk, unsigned is_const_at_right)
+{
+    switch (dk) {
+        case Z3_OP_SLEQ:
+            if (is_const_at_right)
+                return OP_SLE;
+            else
+                return OP_SGT;
+        case Z3_OP_ULEQ:
+            if (is_const_at_right)
+                return OP_ULE;
+            else
+                return OP_UGT;
+        case Z3_OP_SLT:
+            if (is_const_at_right)
+                return OP_SLT;
+            else
+                return OP_SGE;
+        case Z3_OP_ULT:
+            if (is_const_at_right)
+                return OP_ULT;
+            else
+                return OP_UGE;
+        case Z3_OP_SGEQ:
+            if (is_const_at_right)
+                return OP_SGE;
+            else
+                return OP_SLT;
+        case Z3_OP_UGEQ:
+            if (is_const_at_right)
+                return OP_UGE;
+            else
+                return OP_ULT;
+        case Z3_OP_SGT:
+            if (is_const_at_right)
+                return OP_SGT;
+            else
+                return OP_SLE;
+        case Z3_OP_UGT:
+            if (is_const_at_right)
+                return OP_UGT;
+            else
+                return OP_ULE;
+        default:
+            assert(0 && "__find_optype() unexpected Z3_decl_kind");
+    }
+}
+
+static inline int __find_child_constant(Z3_context ctx, Z3_app app,
+                                        uint64_t* constant,
+                                        unsigned* const_operand)
+{
+    int      condition_ok = 0;
+    unsigned num_fields   = Z3_get_app_num_args(ctx, app);
+
+    unsigned i;
+    for (i = 0; i < num_fields; ++i) {
+        Z3_ast child = Z3_get_app_arg(ctx, app, i);
+        if (Z3_get_ast_kind(ctx, child) == Z3_NUMERAL_AST) {
+            Z3_bool successGet =
+                Z3_get_numeral_uint64(ctx, child, (uint64_t*)constant);
+            if (successGet == Z3_FALSE)
+                return 0; // constant is too big
+            condition_ok   = 1;
+            *const_operand = i;
+            break;
+        }
+    }
+    return condition_ok;
+}
+
+static inline int __check_range_contraint(fuzzy_ctx_t* ctx, Z3_ast expr)
+{
+    int         res  = 0;
+    Z3_ast_kind kind = Z3_get_ast_kind(ctx->z3_ctx, expr);
+    if (kind != Z3_APP_AST)
+        goto END_FUN_1;
+
+    Z3_app       app       = Z3_to_app(ctx->z3_ctx, expr);
+    Z3_func_decl decl      = Z3_get_app_decl(ctx->z3_ctx, app);
+    Z3_decl_kind decl_kind = Z3_get_decl_kind(ctx->z3_ctx, decl);
+
+    // it is a range query
+    if (decl_kind != Z3_OP_SLEQ && decl_kind != Z3_OP_ULEQ &&
+        decl_kind != Z3_OP_SLT && decl_kind != Z3_OP_ULT &&
+        decl_kind != Z3_OP_SGEQ && decl_kind != Z3_OP_UGEQ &&
+        decl_kind != Z3_OP_SGT && decl_kind != Z3_OP_UGT)
+        goto END_FUN_1;
+
+    // should be always the case
+    if (Z3_get_app_num_args(ctx->z3_ctx, app) != 2)
+        goto END_FUN_1;
+
+    // one of the two child is a constant
+    uint64_t constant;
+    unsigned const_operand;
+    if (!__find_child_constant(ctx->z3_ctx, app, &constant, &const_operand))
+        goto END_FUN_1;
+
+    // the other operand is a group (possibly with an add/sub with a constant)
+    Z3_ast non_const_operand =
+        Z3_get_app_arg(ctx->z3_ctx, app, const_operand ^ 1);
+    if (Z3_get_ast_kind(ctx->z3_ctx, non_const_operand) != Z3_APP_AST)
+        goto END_FUN_1;
+    if (Z3_get_sort_kind(ctx->z3_ctx,
+                         Z3_get_sort(ctx->z3_ctx, non_const_operand)) !=
+        Z3_BV_SORT)
+        goto END_FUN_1;
+
+    Z3_inc_ref(ctx->z3_ctx, non_const_operand);
+
+    Z3_app       nonconst_op_app = Z3_to_app(ctx->z3_ctx, non_const_operand);
+    Z3_func_decl nonconst_op_decl =
+        Z3_get_app_decl(ctx->z3_ctx, nonconst_op_app);
+    Z3_decl_kind nonconst_op_decl_kind =
+        Z3_get_decl_kind(ctx->z3_ctx, nonconst_op_decl);
+
+    if (nonconst_op_decl_kind == Z3_OP_BADD ||
+        nonconst_op_decl_kind == Z3_OP_BSUB) {
+
+        if (Z3_get_app_num_args(ctx->z3_ctx, nonconst_op_app) != 2)
+            goto END_FUN_1;
+
+        uint64_t constant_2;
+        unsigned const_operand_2;
+        if (!__find_child_constant(ctx->z3_ctx, nonconst_op_app, &constant_2,
+                                   &const_operand_2))
+            goto END_FUN_2;
+
+        if (nonconst_op_decl_kind == Z3_OP_BADD)
+            constant = constant - constant_2;
+        else
+            constant = constant + constant_2;
+
+        constant &= (2 << (Z3_get_bv_sort_size(
+                               ctx->z3_ctx,
+                               Z3_get_sort(ctx->z3_ctx, non_const_operand)) -
+                           1)) -
+                    1;
+        Z3_ast non_const_operand2 =
+            Z3_get_app_arg(ctx->z3_ctx, app, const_operand_2 ^ 1);
+        Z3_inc_ref(ctx->z3_ctx, non_const_operand2);
+        Z3_dec_ref(ctx->z3_ctx, non_const_operand);
+
+        non_const_operand     = non_const_operand2;
+        nonconst_op_app       = Z3_to_app(ctx->z3_ctx, non_const_operand);
+        nonconst_op_decl      = Z3_get_app_decl(ctx->z3_ctx, nonconst_op_app);
+        nonconst_op_decl_kind = Z3_get_decl_kind(ctx->z3_ctx, nonconst_op_decl);
+    }
+
+    // only one group in the non_const_operand
+    ast_info_ptr inputs;
+    detect_involved_inputs_wrapper(ctx, non_const_operand, &inputs);
+    if (inputs->input_extract_ops > 0 || inputs->approximated_groups > 0)
+        // approximated group
+        goto END_FUN_2;
+    if (inputs->index_groups.size != 1)
+        goto END_FUN_2;
+
+    // it is a range query!
+    index_group_t* ig = NULL;
+    set_reset_iter__index_group_t(&inputs->index_groups, 0);
+    set_iter_next__index_group_t(&inputs->index_groups, 0, &ig);
+
+    optype op = __find_optype(decl_kind, const_operand);
+
+    interval_group_t igt;
+    init_interval_group(&igt, ig);
+
+    set__interval_group_t* group_intervals =
+        (set__interval_group_t*)ctx->group_intervals;
+
+    interval_group_t* igt_ref;
+    if ((igt_ref = set_find_el__interval_group_t(group_intervals, &igt)) !=
+        NULL)
+        update_interval(&igt_ref->interval, constant, op);
+    else {
+        update_interval(&igt.interval, constant, op);
+        set_add__interval_group_t(group_intervals, igt);
+    }
+
+    res = 1;
+END_FUN_2:
+    Z3_dec_ref(ctx->z3_ctx, non_const_operand);
+END_FUN_1:
+    return res;
 }
 
 static inline int __check_univocally_defined(fuzzy_ctx_t* ctx, Z3_ast expr)
@@ -4008,6 +4196,8 @@ int z3fuzz_query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
     Z3_inc_ref(ctx->z3_ctx, query);
     Z3_inc_ref(ctx->z3_ctx, branch_condition);
 
+    // print_interval_groups(ctx);
+
     int         res;
     testcase_t* curr_t = &ctx->testcases.data[0];
 
@@ -4404,9 +4594,13 @@ void z3fuzz_notify_constraint(fuzzy_ctx_t* ctx, Z3_ast constraint)
         dict__ast_info_ptr* ast_info_cache =
             (dict__ast_info_ptr*)ctx->ast_info_cache;
         dict_remove_all__ast_info_ptr(ast_info_cache);
-    } else
+    } else {
         ctx->stats.num_conflicting +=
             __check_conflicting_constraint(ctx, constraint);
+
+        ctx->stats.num_range_constraints +=
+            __check_range_contraint(ctx, constraint);
+    }
 }
 
 int z3fuzz_get_optimistic_sol(fuzzy_ctx_t* ctx, unsigned char const** proof,

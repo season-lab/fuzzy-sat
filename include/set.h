@@ -88,7 +88,8 @@ static inline void glue(set_add__, SET_DATA_T)(glue(set__, SET_DATA_T) * set,
         unsigned i, is_present = 0;
         for (i = 0; i < bucket->size; ++i) {
             SET_DATA_T* tmp = glue(da_get_ref_item__, SET_DATA_T)(bucket, i);
-            if (set->equals((SET_DATA_T*)tmp, (SET_DATA_T*)&el)) {
+            if (set->hash((SET_DATA_T*)tmp) == el_hash &&
+                set->equals((SET_DATA_T*)tmp, (SET_DATA_T*)&el)) {
                 is_present = 1;
                 break;
             }
@@ -155,6 +156,28 @@ static inline int glue(set_iter_next__,
     return 1;
 }
 
+static inline SET_DATA_T* glue(set_find_el__,
+                               SET_DATA_T)(glue(set__, SET_DATA_T) * set,
+                                           SET_DATA_T* el)
+{
+    unsigned long el_hash   = set->hash(el);
+    unsigned long bucket_id = el_hash % SET_N_BUCKETS;
+
+    glue(da__, SET_DATA_T)* bucket = &set->buckets[bucket_id];
+
+    if (bucket->data == 0) {
+        return 0;
+    }
+    unsigned i;
+    for (i = 0; i < bucket->size; ++i) {
+        SET_DATA_T* tmp = glue(da_get_ref_item__, SET_DATA_T)(bucket, i);
+        if (set->hash((SET_DATA_T*)tmp) == el_hash &&
+            set->equals((SET_DATA_T*)tmp, (SET_DATA_T*)el))
+            return tmp;
+    }
+    return 0;
+}
+
 // TODO I should implement a _get_free_iter_ and _release_iter_
 
 static inline void glue(set_remove_all__,
@@ -174,10 +197,9 @@ static inline void glue(set_free__, SET_DATA_T)(glue(set__, SET_DATA_T) * set,
                                                 void (*el_free)(SET_DATA_T*))
 {
     unsigned long i;
-    for (i = 0; i < SET_N_BUCKETS; ++i) {
-        // uninitialized free its fine -> free(0)
-        glue(da_free__, SET_DATA_T)(&set->buckets[i], el_free);
-    }
+    for (i = 0; i < set->filled_buckets_i; ++i)
+        glue(da_free__, SET_DATA_T)(&set->buckets[set->filled_buckets[i]],
+                                    el_free);
     free(set->buckets);
     free(set->filled_buckets);
     set->buckets        = NULL;

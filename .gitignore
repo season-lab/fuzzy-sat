@@ -8,4 +8,5 @@ fuzzy-solver
 fuzzy-solver-notify
 maxmin-driver
 solver
+interval_test
 libZ3Fuzzy.a

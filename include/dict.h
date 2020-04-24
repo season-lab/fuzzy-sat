@@ -142,6 +142,7 @@ static inline void glue(dict_remove_all__,
         glue(da_remove_all__, DICT_EL)(bucket, NULL);
     }
 
+    dict->size             = 0;
     dict->filled_buckets_i = 0;
 }
 
@@ -164,6 +165,7 @@ static inline void glue(dict_free__,
     free(dict->filled_buckets);
     dict->buckets        = 0;
     dict->filled_buckets = 0;
+    dict->size           = 0;
 }
 
 #undef DICT_DATA_T
