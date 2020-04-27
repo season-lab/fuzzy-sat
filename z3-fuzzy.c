@@ -457,7 +457,12 @@ static int __gradient_transf_init(Z3_context ctx, Z3_ast expr, Z3_ast* out_exp)
     if (Z3_get_sort_kind(ctx, arg_sort) != Z3_BV_SORT)
         return 0;
     unsigned sort_size = Z3_get_bv_sort_size(ctx, arg_sort);
-    assert(sort_size > 1 && "__gradient_transf_init unexpected sort size");
+    if (sort_size < 2) {
+        // 1 bit bv
+        Z3_dec_ref(ctx, arg1);
+        Z3_dec_ref(ctx, arg2);
+        return 0;
+    }
 
     if (sort_size < 64) {
         int is_unsigned = 0;
@@ -560,6 +565,8 @@ PRE_SWITCH:
             assert(0 && "__gradient_transf_init unknown decl kind");
     }
 
+    Z3_dec_ref(ctx, arg1);
+    Z3_dec_ref(ctx, arg2);
     Z3_inc_ref(ctx, res);
     *out_exp = res;
     return 1;
