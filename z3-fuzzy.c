@@ -101,12 +101,13 @@ typedef ast_info_t* ast_info_ptr;
 #define DICT_DATA_T ast_info_ptr
 #include <dict.h>
 
-static unsigned long* tmp_input     = NULL;
-static unsigned long* tmp_opt_input = NULL;
-static unsigned char* tmp_proof     = NULL;
-static unsigned char* tmp_opt_proof = NULL;
-static int            opt_found     = 0;
-static ast_data_t     ast_data      = {0};
+static unsigned long*                   tmp_input     = NULL;
+static unsigned long*                   tmp_opt_input = NULL;
+static unsigned char*                   tmp_proof     = NULL;
+static unsigned char*                   tmp_opt_proof = NULL;
+static int                              opt_found     = 0;
+__attribute__((unused)) static unsigned opt_num_sat   = 0;
+static ast_data_t                       ast_data      = {0};
 
 static char* query_log_filename = "/tmp/fuzzy-log-info.csv";
 FILE*        query_log;
@@ -842,6 +843,39 @@ static int __check_or_add_digest(set__digest_t* set, unsigned char* values,
     return 0;
 }
 
+__attribute__((unused)) static __always_inline int
+evaluate_pi(fuzzy_ctx_t* ctx, Z3_ast pi, unsigned long* values,
+            unsigned char* value_sizes, unsigned long n_values,
+            unsigned* num_sat)
+{
+    *num_sat = 0;
+    if (Z3_get_ast_kind(ctx->z3_ctx, pi) != Z3_APP_AST)
+        return 1; // only branch condition
+
+    Z3_app     app        = Z3_to_app(ctx->z3_ctx, pi);
+    unsigned   num_fields = Z3_get_app_num_args(ctx->z3_ctx, app);
+    set__ulong processed_asts;
+    set_init__ulong(&processed_asts, index_hash, index_equals);
+
+    unsigned num_skipped = 0;
+    unsigned i;
+    for (i = 0; i < num_fields; ++i) {
+        Z3_ast        child = Z3_get_app_arg(ctx->z3_ctx, app, i);
+        unsigned long hash  = Z3_get_ast_id(ctx->z3_ctx, child);
+        if (set_check__ulong(&processed_asts, hash)) {
+            num_skipped++;
+            continue;
+        }
+        set_add__ulong(&processed_asts, hash);
+
+        if (ctx->model_eval(ctx->z3_ctx, child, values, value_sizes, n_values))
+            *num_sat += 1;
+    }
+
+    set_free__ulong(&processed_asts, NULL);
+    return *num_sat == num_fields - num_skipped;
+}
+
 static inline int __evaluate_branch_query(fuzzy_ctx_t* ctx, Z3_ast query,
                                           Z3_ast         branch_condition,
                                           unsigned long* values,
@@ -861,6 +895,18 @@ static inline int __evaluate_branch_query(fuzzy_ctx_t* ctx, Z3_ast query,
     res = (int)ctx->model_eval(ctx->z3_ctx, branch_condition, values,
                                value_sizes, n_values);
     if (res) {
+#if 0
+        unsigned num_sat;
+        res = evaluate_pi(ctx, query, values, value_sizes, n_values, &num_sat);
+        if (!opt_found || num_sat > opt_num_sat) {
+            testcase_t* t = &ctx->testcases.data[0];
+            opt_found     = 1;
+            opt_num_sat   = num_sat;
+            memcpy(tmp_opt_input, values,
+                   t->values_len * sizeof(unsigned long));
+            __vals_long_to_char(values, tmp_opt_proof, t->testcase_len);
+        }
+#else
         if (!opt_found) {
             testcase_t* t = &ctx->testcases.data[0];
             opt_found     = 1;
@@ -870,6 +916,7 @@ static inline int __evaluate_branch_query(fuzzy_ctx_t* ctx, Z3_ast query,
         }
         res = (int)ctx->model_eval(ctx->z3_ctx, query, values, value_sizes,
                                    n_values);
+#endif
     }
     return res;
 }
@@ -1518,6 +1565,12 @@ static inline void __detect_involved_inputs(fuzzy_ctx_t* ctx, Z3_ast v,
                 }
                 case Z3_OP_BLSHR:
                 case Z3_OP_BASHR:
+                case Z3_OP_BUDIV0:
+                case Z3_OP_BUDIV:
+                case Z3_OP_BUDIV_I:
+                case Z3_OP_BSDIV0:
+                case Z3_OP_BSDIV:
+                case Z3_OP_BSDIV_I:
                 case Z3_OP_BUREM:
                 case Z3_OP_BUREM_I:
                 case Z3_OP_BSREM:
@@ -1686,9 +1739,27 @@ static inline int __check_conflicting_constraint(fuzzy_ctx_t* ctx, Z3_ast expr)
     Z3_app       app       = Z3_to_app(ctx->z3_ctx, expr);
     Z3_func_decl decl      = Z3_get_app_decl(ctx->z3_ctx, app);
     Z3_decl_kind decl_kind = Z3_get_decl_kind(ctx->z3_ctx, decl);
+    Z3_ast       old_expr  = expr;
 
-    if (decl_kind != Z3_OP_EQ)
+    // exclude initial NOT
+    int is_not = 0;
+    while (decl_kind == Z3_OP_NOT) {
+        expr      = Z3_get_app_arg(ctx->z3_ctx, app, 0);
+        app       = Z3_to_app(ctx->z3_ctx, expr);
+        decl      = Z3_get_app_decl(ctx->z3_ctx, app);
+        decl_kind = Z3_get_decl_kind(ctx->z3_ctx, decl);
+        is_not    = !is_not;
+    }
+
+    if (decl_kind != Z3_OP_EQ && decl_kind != Z3_OP_SLEQ &&
+        decl_kind != Z3_OP_ULEQ && decl_kind != Z3_OP_SLT &&
+        decl_kind != Z3_OP_ULT && decl_kind != Z3_OP_SGEQ &&
+        decl_kind != Z3_OP_UGEQ && decl_kind != Z3_OP_SGT &&
+        decl_kind != Z3_OP_UGT)
         return 0;
+
+    if (is_not)
+        expr = old_expr;
 
     ast_info_ptr inputs;
     detect_involved_inputs_wrapper(ctx, expr, &inputs);
@@ -1781,6 +1852,30 @@ static inline int __find_child_constant(Z3_context ctx, Z3_app app,
     return condition_ok;
 }
 
+static inline Z3_decl_kind get_opposite_decl_kind(Z3_decl_kind kind)
+{
+    switch (kind) {
+        case Z3_OP_SLEQ:
+            return Z3_OP_SGT;
+        case Z3_OP_ULEQ:
+            return Z3_OP_UGT;
+        case Z3_OP_SLT:
+            return Z3_OP_SGEQ;
+        case Z3_OP_ULT:
+            return Z3_OP_UGEQ;
+        case Z3_OP_SGEQ:
+            return Z3_OP_SLT;
+        case Z3_OP_UGEQ:
+            return Z3_OP_ULT;
+        case Z3_OP_SGT:
+            return Z3_OP_SLEQ;
+        case Z3_OP_UGT:
+            return Z3_OP_ULEQ;
+        default:
+            assert(0 && "get_opposite_decl_kind() - unexpected decl kind");
+    }
+}
+
 static inline int __check_range_contraint(fuzzy_ctx_t* ctx, Z3_ast expr)
 {
     int         res  = 0;
@@ -1792,12 +1887,24 @@ static inline int __check_range_contraint(fuzzy_ctx_t* ctx, Z3_ast expr)
     Z3_func_decl decl      = Z3_get_app_decl(ctx->z3_ctx, app);
     Z3_decl_kind decl_kind = Z3_get_decl_kind(ctx->z3_ctx, decl);
 
+    // exclude initial NOT
+    int is_not = 0;
+    while (decl_kind == Z3_OP_NOT) {
+        expr      = Z3_get_app_arg(ctx->z3_ctx, app, 0);
+        app       = Z3_to_app(ctx->z3_ctx, expr);
+        decl      = Z3_get_app_decl(ctx->z3_ctx, app);
+        decl_kind = Z3_get_decl_kind(ctx->z3_ctx, decl);
+        is_not    = !is_not;
+    }
+
     // it is a range query
     if (decl_kind != Z3_OP_SLEQ && decl_kind != Z3_OP_ULEQ &&
         decl_kind != Z3_OP_SLT && decl_kind != Z3_OP_ULT &&
         decl_kind != Z3_OP_SGEQ && decl_kind != Z3_OP_UGEQ &&
         decl_kind != Z3_OP_SGT && decl_kind != Z3_OP_UGT)
         goto END_FUN_1;
+    if (is_not)
+        decl_kind = get_opposite_decl_kind(decl_kind);
 
     // should be always the case
     if (Z3_get_app_num_args(ctx->z3_ctx, app) != 2)
@@ -1850,7 +1957,7 @@ static inline int __check_range_contraint(fuzzy_ctx_t* ctx, Z3_ast expr)
                            1)) -
                     1;
         Z3_ast non_const_operand2 =
-            Z3_get_app_arg(ctx->z3_ctx, app, const_operand_2 ^ 1);
+            Z3_get_app_arg(ctx->z3_ctx, nonconst_op_app, const_operand_2 ^ 1);
         Z3_inc_ref(ctx->z3_ctx, non_const_operand2);
         Z3_dec_ref(ctx->z3_ctx, non_const_operand);
 
@@ -1861,23 +1968,19 @@ static inline int __check_range_contraint(fuzzy_ctx_t* ctx, Z3_ast expr)
     }
 
     // only one group in the non_const_operand
-    ast_info_ptr inputs;
-    detect_involved_inputs_wrapper(ctx, non_const_operand, &inputs);
-    if (inputs->input_extract_ops > 0 || inputs->approximated_groups > 0)
-        // approximated group
-        goto END_FUN_2;
-    if (inputs->index_groups.size != 1)
+    index_group_t ig     = {0};
+    char          approx = 0;
+    int           input_group_ok =
+        __detect_input_group(ctx, non_const_operand, &ig, &approx);
+    if (!input_group_ok || approx)
+        // no input group or approximated group
         goto END_FUN_2;
 
     // it is a range query!
-    index_group_t* ig = NULL;
-    set_reset_iter__index_group_t(&inputs->index_groups, 0);
-    set_iter_next__index_group_t(&inputs->index_groups, 0, &ig);
-
     optype op = __find_optype(decl_kind, const_operand);
 
     interval_group_t igt;
-    init_interval_group(&igt, ig);
+    init_interval_group(&igt, &ig);
 
     set__interval_group_t* group_intervals =
         (set__interval_group_t*)ctx->group_intervals;
@@ -4081,6 +4184,106 @@ static __always_inline int PHASE_afl_havoc(fuzzy_ctx_t* ctx, Z3_ast query,
     return havoc_res;
 }
 
+static inline void set_tmp_input_group_to_value(index_group_t* group,
+                                                uint64_t       v)
+{
+    unsigned char k;
+    for (k = 0; k < group->n; ++k) {
+        unsigned long index = group->indexes[group->n - k - 1];
+        unsigned char b     = __extract_from_long(v, k);
+        tmp_input[index]    = b;
+    }
+}
+
+static inline void restore_tmp_input_group(index_group_t* group,
+                                           unsigned long* vals)
+{
+    unsigned char k;
+    for (k = 0; k < group->n; ++k) {
+        unsigned long index = group->indexes[group->n - k - 1];
+        tmp_input[index]    = vals[index];
+    }
+}
+
+static __always_inline int
+PHASE_range_bruteforce(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
+                       unsigned char const** proof, unsigned long* proof_size)
+{
+    set__interval_group_t* group_intervals =
+        (set__interval_group_t*)ctx->group_intervals;
+    testcase_t* current_testcase = &ctx->testcases.data[0];
+
+    if (ast_data.inputs->index_groups.size != 1)
+        return 0; // more than one group or no groups
+
+    interval_group_t igt = {0};
+    index_group_t*   ig  = NULL;
+    set_reset_iter__index_group_t(&ast_data.inputs->index_groups, 0);
+    set_iter_next__index_group_t(&ast_data.inputs->index_groups, 0, &ig);
+    igt.ig = *ig;
+
+    interval_group_t* interval_group_match =
+        set_find_el__interval_group_t(group_intervals, &igt);
+
+    if (interval_group_match == NULL)
+        return 0; // no interval for group in cache
+
+    if (get_range(&interval_group_match->interval) > 256)
+        return 0; // range too wide
+
+    // brute-force it
+    if (is_signed(&interval_group_match->interval)) {
+        int64_t min = get_signed_min(&interval_group_match->interval);
+        int64_t max = get_signed_max(&interval_group_match->interval);
+
+        int64_t i;
+        for (i = min; i <= max; ++i) {
+            set_tmp_input_group_to_value(&interval_group_match->ig,
+                                         (uint64_t)i);
+
+            if (__evaluate_branch_query(ctx, query, branch_condition, tmp_input,
+                                        current_testcase->value_sizes,
+                                        current_testcase->values_len)) {
+#ifdef PRINT_SAT
+                Z3FUZZ_LOG("[check light - range bruteforce] Query is SAT\n");
+#endif
+                ctx->stats.range_brute_force++;
+                ctx->stats.num_sat++;
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                *proof      = tmp_proof;
+                *proof_size = current_testcase->testcase_len;
+                return 1;
+            }
+        }
+    } else {
+        uint64_t min = get_unsigned_min(&interval_group_match->interval);
+        uint64_t max = get_unsigned_max(&interval_group_match->interval);
+
+        uint64_t i;
+        for (i = min; i <= max; ++i) {
+            set_tmp_input_group_to_value(&interval_group_match->ig, i);
+
+            if (__evaluate_branch_query(ctx, query, branch_condition, tmp_input,
+                                        current_testcase->value_sizes,
+                                        current_testcase->values_len)) {
+#ifdef PRINT_SAT
+                Z3FUZZ_LOG("[check light - range bruteforce] Query is SAT\n");
+#endif
+                ctx->stats.range_brute_force++;
+                ctx->stats.num_sat++;
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                *proof      = tmp_proof;
+                *proof_size = current_testcase->testcase_len;
+                return 1;
+            }
+        }
+    }
+    // the query is unsat
+    return 2;
+}
+
 static int __query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
                                Z3_ast                branch_condition,
                                unsigned char const** proof,
@@ -4092,6 +4295,7 @@ static int __query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
     Z3FUZZ_LOG("branch condition: \n%s\n\n",
                Z3_ast_to_string(ctx->z3_ctx, branch_condition));
     print_index_queue(ast_data.inputs);
+    print_interval_groups(ctx);
 #endif
     testcase_t* current_testcase = &ctx->testcases.data[0];
     int         res;
@@ -4108,7 +4312,7 @@ static int __query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
         return 1;
     }
 
-    // L0 -- REUSE PHASE
+    // Reuse Phase
     if (ctx->testcases.size > 1) {
         res = PHASE_reuse(ctx, query, branch_condition, proof, proof_size);
         if (res)
@@ -4134,6 +4338,13 @@ static int __query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
         }
         return 0;
     }
+
+    res =
+        PHASE_range_bruteforce(ctx, query, branch_condition, proof, proof_size);
+    if (res == 2)
+        return 0;
+    if (res == 1)
+        return 1;
 
     // Input to State
     if (ast_data.is_input_to_state) {
@@ -4196,13 +4407,24 @@ int z3fuzz_query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
     Z3_inc_ref(ctx->z3_ctx, query);
     Z3_inc_ref(ctx->z3_ctx, branch_condition);
 
-    // print_interval_groups(ctx);
-
     int         res;
     testcase_t* curr_t = &ctx->testcases.data[0];
 
     __init_global_data(ctx, query, branch_condition);
     res = __query_check_light(ctx, query, branch_condition, proof, proof_size);
+
+#if 0
+    Z3_app   __app = Z3_to_app(ctx->z3_ctx, query);
+    unsigned i;
+    for (i = 0; i < Z3_get_app_num_args(ctx->z3_ctx, __app); ++i) {
+        if (!ctx->model_eval(ctx->z3_ctx, Z3_get_app_arg(ctx->z3_ctx, __app, i),
+                             tmp_opt_input, curr_t->value_sizes,
+                             curr_t->values_len)) {
+            puts("this is UNSAT");
+            z3fuzz_print_expr(ctx, Z3_get_app_arg(ctx->z3_ctx, __app, i));
+        }
+    }
+#endif
 
     if (res || opt_found == 0)
         // the query is SAT or we were not able to flip the branch condition
@@ -4293,6 +4515,20 @@ int z3fuzz_query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
                 // > make tmp_opt_input as new input
                 // > update black_indexes
                 // > continue the loop
+#if 0
+                puts("continue the loop!");
+                z3fuzz_print_expr(ctx, *ast);
+                Z3_app   __app = Z3_to_app(ctx->z3_ctx, query);
+                unsigned i;
+                for (i = 0; i < Z3_get_app_num_args(ctx->z3_ctx, __app); ++i) {
+                    if (!ctx->model_eval(ctx->z3_ctx, Z3_get_app_arg(ctx->z3_ctx, __app, i),
+                                        tmp_opt_input, curr_t->value_sizes,
+                                        curr_t->values_len)) {
+                        puts("this is UNSAT");
+                        z3fuzz_print_expr(ctx, Z3_get_app_arg(ctx->z3_ctx, __app, i));
+                    }
+                }
+#endif
                 memcpy(tmp_input, tmp_opt_input,
                        curr_t->values_len * sizeof(unsigned long));
                 while (set_iter_next__ulong(&ast_info->indexes, 0, &p))
