@@ -838,10 +838,18 @@ static int __check_or_add_digest(set__digest_t* set, unsigned char* values,
     d.digest[1]       = (xxd.high64 >> 8) & 0xff;
     d.digest[2]       = (xxd.high64 >> 16) & 0xff;
     d.digest[3]       = (xxd.high64 >> 24) & 0xff;
-    d.digest[4]       = xxd.low64 & 0xff;
-    d.digest[5]       = (xxd.low64 >> 8) & 0xff;
-    d.digest[6]       = (xxd.low64 >> 16) & 0xff;
-    d.digest[7]       = (xxd.low64 >> 24) & 0xff;
+    d.digest[4]       = (xxd.high64 >> 32) & 0xff;
+    d.digest[5]       = (xxd.high64 >> 40) & 0xff;
+    d.digest[6]       = (xxd.high64 >> 48) & 0xff;
+    d.digest[7]       = (xxd.high64 >> 56) & 0xff;
+    d.digest[8]       = xxd.low64 & 0xff;
+    d.digest[9]       = (xxd.low64 >> 8) & 0xff;
+    d.digest[10]      = (xxd.low64 >> 16) & 0xff;
+    d.digest[11]      = (xxd.low64 >> 24) & 0xff;
+    d.digest[12]      = (xxd.low64 >> 32) & 0xff;
+    d.digest[13]      = (xxd.low64 >> 40) & 0xff;
+    d.digest[14]      = (xxd.low64 >> 48) & 0xff;
+    d.digest[15]      = (xxd.low64 >> 56) & 0xff;
 #endif
 
     if (set_check__digest_t(set, d))
