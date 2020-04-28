@@ -1040,6 +1040,9 @@ static int __detect_input_group(fuzzy_ctx_t* ctx, Z3_ast node,
                             goto BVAND_EXIT;
                         }
                         subexpr = child_1;
+                    } else {
+                        res = 0;
+                        goto BVAND_EXIT;
                     }
                     if (mask == 0) {
                         res = 1; // and with 0 -> no group, it is always 0
