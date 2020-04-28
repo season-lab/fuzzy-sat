@@ -110,8 +110,10 @@ static inline void print_status(unsigned long current_query,
               fctx.stats.conflicting_fallbacks_same_inputs);
     pp_printf(42, 1, "confl_fall_notrue:   %ld",
               fctx.stats.conflicting_fallbacks_no_true);
+    pp_printf(43, 1, "num_timeouts:        %ld",
+              fctx.stats.num_timeouts);
     pp_set_col(0);
-    pp_set_line(44);
+    pp_set_line(45);
 }
 
 static inline void usage(char* filename)

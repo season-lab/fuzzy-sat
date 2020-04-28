@@ -4,7 +4,10 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <sys/time.h>
 #include "gradient_descend.h"
+
+static struct timeval start, stop;
 
 #define DEBUG_GRADIENT 0
 #define DEBUG_PARTIAL_DERIVATIVE 0
@@ -29,6 +32,16 @@
 #define STATIONARY 0
 #define ASCENDING 1
 #define DESCENDING 2
+
+#define MAX_TIME_TRANSFORM_MSEC 500
+
+static inline unsigned long compute_time_msec(struct timeval* start,
+                                              struct timeval* end)
+{
+    return ((end->tv_sec - start->tv_sec) * 1000000 + end->tv_usec -
+            start->tv_usec) /
+           1000;
+}
 
 static inline uint8_t saturating_add8(uint8_t a, uint8_t b)
 {
@@ -374,6 +387,7 @@ int gd_descend_transf(uint64_t (*function)(uint64_t*), uint64_t* x0,
                       uint64_t* out_x, uint64_t* out_f, uint32_t n)
 {
     // debug_dump_vector("x0 (desc)", x0, n);
+    gettimeofday(&start, 0);
 
     init_tmp_gradient(n);
     gradient_el_t* gradient = __tmp_gradient;
@@ -387,6 +401,10 @@ int gd_descend_transf(uint64_t (*function)(uint64_t*), uint64_t* x0,
     normalize_gradient(gradient, n);
 
     descend(function, gradient, x0, f0, out_x, (int64_t*)out_f, n);
+
+    gettimeofday(&stop, 0);
+    if (compute_time_msec(&start, &stop) > MAX_TIME_TRANSFORM_MSEC)
+        return 2;
 
     // debug_dump_vector("out_x (desc)", out_x, n);
     return 0;
