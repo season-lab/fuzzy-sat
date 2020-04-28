@@ -20,9 +20,12 @@ typedef struct interval_t {
     uint32_t   size;
 } interval_t;
 
-interval_t init_interval(unsigned size);
-int        update_interval(interval_t* src, __int128_t c, optype op);
-void       print_interval(interval_t* interval);
+interval_t  init_interval(unsigned size);
+interval_t  init_signed_interval(unsigned size);
+interval_t  init_unsigned_interval(unsigned size);
+int         update_interval(interval_t* src, __int128_t c, optype op);
+void        print_interval(interval_t* interval);
+const char* op_to_string(optype op);
 
 int      is_signed(interval_t* interval);
 int64_t  get_signed_min(interval_t* interval);

@@ -32,4 +32,10 @@ int main()
     assert(update_interval(&iu64, 51, OP_ULT) == 1);
     assert(update_interval(&iu64, 10, OP_ULT) == 0);
     print_interval(&iu64);
+
+    is64 = init_interval(64);
+    int64_t    sc   = -3;
+    uint64_t   c    = (uint64_t)sc;
+    assert(update_interval(&is64, (__int128_t)c, OP_ULT) == 1);
+    print_interval(&is64);
 }

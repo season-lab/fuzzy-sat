@@ -37,16 +37,36 @@ static inline void print_index_group(index_group_t* ig)
 static inline void print_interval_groups(fuzzy_ctx_t* ctx)
 {
     fprintf(stderr, "----- INTERVAL GROUPS -----\n");
-    set__interval_group_t* group_intervals =
-        (set__interval_group_t*)ctx->group_intervals;
+    dict__interval_group_t* group_intervals =
+        (dict__interval_group_t*)ctx->group_intervals;
 
     interval_group_t* ig;
-    set_reset_iter__interval_group_t(group_intervals, 0);
-    while (set_iter_next__interval_group_t(group_intervals, 0, &ig)) {
-        fprintf(stderr, "***************************\n");
-        print_index_group(&ig->ig);
-        print_interval(&ig->interval);
-        fprintf(stderr, "***************************\n");
+    unsigned          i = 0;
+    for (i = 0; i < ctx->testcases.data[0].testcase_len; ++i) {
+        if ((ig = dict_get_ref__interval_group_t(group_intervals, i))) {
+            fprintf(stderr, "***************************\n");
+            fprintf(stderr, "{ %u } \n", i);
+            print_interval(&ig->interval8);
+            print_interval(&ig->interval16);
+            print_interval(&ig->interval32);
+            print_interval(&ig->interval64);
+            fprintf(stderr, "***************************\n");
+        }
     }
     fprintf(stderr, "---------------------------\n");
+}
+
+static inline void print_univocally_defined(fuzzy_ctx_t* ctx)
+{
+    fprintf(stderr, "----- UNIVOCALLY DEFINED -----\n");
+    set__ulong* univocally_defined_inputs =
+        (set__ulong*)ctx->univocally_defined_inputs;
+
+    ulong* p;
+    set_reset_iter__ulong(univocally_defined_inputs, 0);
+    while (set_iter_next__ulong(univocally_defined_inputs, 0, &p)) {
+        fprintf(stderr, "> 0x%lx\n", *p);
+    }
+
+    fprintf(stderr, "------------------------------\n");
 }

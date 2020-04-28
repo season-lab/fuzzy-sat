@@ -16,6 +16,26 @@ interval_t init_interval(unsigned size)
     return res;
 }
 
+interval_t init_signed_interval(unsigned size)
+{
+    assert(size <= 64 && "INTERVAL_H init_interval() - invalid size");
+
+    __int128_t mask = 2;
+    mask            = (mask << (size - 2)) - 1;
+    interval_t res  = {.min = -(mask + 1), .max = mask, .size = size};
+    return res;
+}
+
+interval_t init_unsigned_interval(unsigned size)
+{
+    assert(size <= 64 && "INTERVAL_H init_interval() - invalid size");
+
+    __int128_t mask = 2;
+    mask            = (mask << (size - 1)) - 1;
+    interval_t res  = {.min = 0, .max = mask, .size = size};
+    return res;
+}
+
 static int is_signed_op(optype op)
 {
     return !(op == OP_ULT || op == OP_ULE || op == OP_UGT || op == OP_UGE);
@@ -121,6 +141,31 @@ uint64_t get_range(interval_t* interval)
 {
     __int128_t range = interval->max - interval->min;
     return (uint64_t)range;
+}
+
+const char* op_to_string(optype op)
+{
+    switch (op) {
+        case OP_UGT:
+            return "OP_UGT";
+        case OP_UGE:
+            return "OP_UGE";
+        case OP_SGT:
+            return "OP_SGT";
+        case OP_SGE:
+            return "OP_SGE";
+        case OP_ULT:
+            return "OP_ULT";
+        case OP_ULE:
+            return "OP_ULE";
+        case OP_SLT:
+            return "OP_SLT";
+        case OP_SLE:
+            return "OP_SLE";
+
+        default:
+            assert(0 && "op_to_string() - unexpected optype");
+    }
 }
 
 void print_interval(interval_t* interval)

@@ -126,27 +126,12 @@ static inline void add_item_to_conflicting(dict__conflicting_ptr* dict,
 // ******** end conflicting dict *********
 // ********** interval group *************
 typedef struct interval_group_t {
-    index_group_t ig;
-    interval_t    interval;
+    interval_t interval8;
+    interval_t interval16;
+    interval_t interval32;
+    interval_t interval64;
 } interval_group_t;
 
-#define SET_DATA_T interval_group_t
-#include <set.h>
-
-static inline unsigned long interval_group_hash(interval_group_t* igt)
-{
-    return index_group_hash(&igt->ig);
-}
-
-static inline unsigned int interval_group_equals(interval_group_t* igt1,
-                                         interval_group_t* igt2)
-{
-    return index_group_equals(&igt1->ig, &igt2->ig);
-}
-
-static inline void init_interval_group(interval_group_t* igt, index_group_t* ig)
-{
-    igt->ig       = *ig;
-    igt->interval = init_interval(ig->n * 8);
-}
+#define DICT_DATA_T interval_group_t
+#include <dict.h>
 // ******* end interval group *************
