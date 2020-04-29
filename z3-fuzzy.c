@@ -256,6 +256,15 @@ static inline unsigned UR(unsigned limit)
     return random() % limit;
 }
 
+static inline int check_sum_wrap(uint64_t v1, uint64_t v2, unsigned size)
+{
+    __uint128_t v1_ext   = (__uint128_t)v1;
+    __uint128_t v2_ext   = (__uint128_t)v2;
+    __uint128_t max_size = 2;
+    max_size             = (max_size << (size - 1)) - 1;
+    return v1_ext + v2_ext > max_size;
+}
+
 static inline void ast_info_init(ast_info_ptr ptr)
 {
     set_init__index_group_t(&ptr->index_groups, &index_group_hash,
@@ -2110,12 +2119,14 @@ static inline int __check_range_contraint(fuzzy_ctx_t* ctx, Z3_ast expr)
     Z3_decl_kind nonconst_op_decl_kind =
         Z3_get_decl_kind(ctx->z3_ctx, nonconst_op_decl);
 
+    index_group_t ig = {0};
     if (nonconst_op_decl_kind == Z3_OP_BADD ||
         nonconst_op_decl_kind == Z3_OP_BSUB) {
 
         if (Z3_get_app_num_args(ctx->z3_ctx, nonconst_op_app) != 2)
             goto END_FUN_1;
 
+        uint64_t new_constant;
         uint64_t constant_2;
         unsigned const_operand_2;
         if (!__find_child_constant(ctx->z3_ctx, nonconst_op_app, &constant_2,
@@ -2125,38 +2136,55 @@ static inline int __check_range_contraint(fuzzy_ctx_t* ctx, Z3_ast expr)
         if (nonconst_op_decl_kind == Z3_OP_BADD) {
             if (!is_signed_op(__find_optype(decl_kind, const_operand)) &&
                 constant_2 > constant)
-                // unsigned op, and constant_2 > constant => nothing to add
+                // unsigned op, and constant_2 > constant => unsafe to add
                 goto END_FUN_2;
-            constant = constant - constant_2;
+            new_constant = constant - constant_2;
         } else
-            constant = constant + constant_2;
+            new_constant = constant + constant_2;
 
-        constant &= (2 << (Z3_get_bv_sort_size(
-                               ctx->z3_ctx,
-                               Z3_get_sort(ctx->z3_ctx, non_const_operand)) -
-                           1)) -
-                    1;
+        unsigned non_const_op_size = Z3_get_bv_sort_size(
+            ctx->z3_ctx, Z3_get_sort(ctx->z3_ctx, non_const_operand));
+        new_constant &= (2 << (non_const_op_size - 1)) - 1;
+
         Z3_ast non_const_operand2 =
             Z3_get_app_arg(ctx->z3_ctx, nonconst_op_app, const_operand_2 ^ 1);
         Z3_inc_ref(ctx->z3_ctx, non_const_operand2);
         Z3_dec_ref(ctx->z3_ctx, non_const_operand);
 
-        non_const_operand     = non_const_operand2;
-        nonconst_op_app       = Z3_to_app(ctx->z3_ctx, non_const_operand);
-        nonconst_op_decl      = Z3_get_app_decl(ctx->z3_ctx, nonconst_op_app);
-        nonconst_op_decl_kind = Z3_get_decl_kind(ctx->z3_ctx, nonconst_op_decl);
-    }
+        char approx = 0;
+        int  input_group_ok =
+            __detect_input_group(ctx, non_const_operand2, &ig, &approx);
+        if (!input_group_ok || approx)
+            // no input group or approximated group
+            goto END_FUN_2;
+        assert(ig.n > 0 && "__check_range_contraint() - size of group is zero. "
+                           "It shouldn't happen");
 
-    // only one group in the non_const_operand
-    index_group_t ig     = {0};
-    char          approx = 0;
-    int           input_group_ok =
-        __detect_input_group(ctx, non_const_operand, &ig, &approx);
-    if (!input_group_ok || approx)
-        // no input group or approximated group
-        goto END_FUN_2;
-    assert(ig.n > 0 && "__check_range_contraint() - size of group is zero. "
-                       "It shouldn't happen");
+        unsigned long input_maxval = (2 << ((ig.n * 8) - 1)) - 1;
+        if (!is_signed_op(__find_optype(decl_kind, const_operand)) &&
+            nonconst_op_decl_kind == Z3_OP_BADD &&
+            check_sum_wrap(input_maxval, constant_2, non_const_op_size))
+            // unsigned OP and C2 + inp can wrap => unsafe to add
+            goto END_FUN_2;
+        else if (!is_signed_op(__find_optype(decl_kind, const_operand)) &&
+                 nonconst_op_decl_kind == Z3_OP_BSUB &&
+                 input_maxval > constant_2)
+            // unsigned OP and C2 - inp can wrap => unsafe to add
+            goto END_FUN_2;
+
+        constant          = new_constant;
+        non_const_operand = non_const_operand2;
+    } else {
+        // only one group in the non_const_operand
+        char approx = 0;
+        int  input_group_ok =
+            __detect_input_group(ctx, non_const_operand, &ig, &approx);
+        if (!input_group_ok || approx)
+            // no input group or approximated group
+            goto END_FUN_2;
+        assert(ig.n > 0 && "__check_range_contraint() - size of group is zero. "
+                           "It shouldn't happen");
+    }
 
     // it is a range query!
     optype   op                = __find_optype(decl_kind, const_operand);
@@ -2613,7 +2641,7 @@ PHASE_gradient_descend(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
     if (!valid_for_gd)
         return 0;
 
-    int res = 0;
+    int               res = 0;
     eval_wapper_ctx_t ew;
 
     int valid_eval = __gd_init_eval(ctx, query, out_ast, 0, 0, &ew);
@@ -2645,7 +2673,7 @@ PHASE_gradient_descend(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
                                 current_testcase->testcase_len);
             *proof      = tmp_proof;
             *proof_size = current_testcase->testcase_len;
-            res = 1;
+            res         = 1;
             goto OUT;
         } else if (unlikely(eval_v == TIMEOUT_V)) {
             res = TIMEOUT_V;
@@ -5101,6 +5129,7 @@ unsigned long z3fuzz_maximize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_maximize,
 
     eval_set_ctx(&ew);
 
+    timer_start_wrapper(ctx);
     unsigned long max_val;
     int           gd_exit =
         gd_minimize(__gd_eval, ew.input, ew.input, &max_val, ew.mapping_size);
@@ -5165,6 +5194,7 @@ unsigned long z3fuzz_minimize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_minimize,
     }
     eval_set_ctx(&ew);
 
+    timer_start_wrapper(ctx);
     unsigned long min_val;
     int           gd_exit =
         gd_minimize(__gd_eval, ew.input, ew.input, &min_val, ew.mapping_size);

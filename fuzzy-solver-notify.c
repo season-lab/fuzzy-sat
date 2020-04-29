@@ -6,9 +6,11 @@
 
 #define PRINT_STATUS
 // #define DUMP_PROOFS
+// #define DUMP_SAT_QUERIES
 #define TIMEOUT 1000
 
 fuzzy_ctx_t fctx;
+const char* sat_queries_filename = "query_db/SAT/fuzzy-sat-queries.smt2";
 
 static inline unsigned long compute_time_msec(struct timeval* start,
                                               struct timeval* end)
@@ -111,8 +113,7 @@ static inline void print_status(unsigned long current_query,
               fctx.stats.conflicting_fallbacks_same_inputs);
     pp_printf(42, 1, "confl_fall_notrue:   %ld",
               fctx.stats.conflicting_fallbacks_no_true);
-    pp_printf(43, 1, "num_timeouts:        %ld",
-              fctx.stats.num_timeouts);
+    pp_printf(43, 1, "num_timeouts:        %ld", fctx.stats.num_timeouts);
     pp_set_col(0);
     pp_set_line(45);
 }
@@ -145,6 +146,10 @@ int main(int argc, char* argv[])
     int                  n;
 
     z3fuzz_init(&fctx, ctx, seed_filename, tests_dir, NULL, TIMEOUT);
+#ifdef DUMP_SAT_QUERIES
+    FILE* sat_queries_file = fopen(sat_queries_filename, "w");
+    setvbuf(sat_queries_file, NULL, _IONBF, 0);
+#endif
 
 #ifdef PRINT_STATUS
     pp_init();
@@ -190,6 +195,10 @@ int main(int argc, char* argv[])
             assert(n > 0 && n < sizeof(var_name) && "test case name too long");
             z3fuzz_dump_proof(&fctx, var_name, proof, proof_size);
 #endif
+#ifdef DUMP_SAT_QUERIES
+            fprintf(sat_queries_file, "(assert\n%s\n)\n",
+                    Z3_ast_to_string(ctx, query));
+#endif
         } else
             gettimeofday(&stop, NULL);
 
@@ -213,6 +222,8 @@ int main(int argc, char* argv[])
     free(str_symbols);
     z3fuzz_free(&fctx);
     Z3_del_config(cfg);
-
+#ifdef DUMP_SAT_QUERIES
+    fclose(sat_queries_file);
+#endif
     return 0;
 }
