@@ -5,6 +5,7 @@
 #include "utility/pretty-print.h"
 
 #define NUM_ITERATIONS 1000
+#define TIMEOUT 1000
 
 static unsigned char* inputs;
 fuzzy_ctx_t           fctx;
@@ -50,7 +51,7 @@ int main(int argc, char* argv[])
     int            n;
 
     pp_init();
-    z3fuzz_init(&fctx, ctx, seed_filename, NULL, NULL);
+    z3fuzz_init(&fctx, ctx, seed_filename, NULL, NULL, TIMEOUT);
 
     str_symbols = (Z3_ast*)malloc(sizeof(Z3_ast) * fctx.n_symbols);
     for (i = 0; i < fctx.n_symbols; ++i) {

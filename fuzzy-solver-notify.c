@@ -6,6 +6,7 @@
 
 #define PRINT_STATUS
 // #define DUMP_PROOFS
+#define TIMEOUT 1000
 
 fuzzy_ctx_t fctx;
 
@@ -110,8 +111,10 @@ static inline void print_status(unsigned long current_query,
               fctx.stats.conflicting_fallbacks_same_inputs);
     pp_printf(42, 1, "confl_fall_notrue:   %ld",
               fctx.stats.conflicting_fallbacks_no_true);
+    pp_printf(43, 1, "num_timeouts:        %ld",
+              fctx.stats.num_timeouts);
     pp_set_col(0);
-    pp_set_line(44);
+    pp_set_line(45);
 }
 
 static inline void usage(char* filename)
@@ -141,7 +144,7 @@ int main(int argc, char* argv[])
     unsigned int         i;
     int                  n;
 
-    z3fuzz_init(&fctx, ctx, seed_filename, tests_dir, NULL);
+    z3fuzz_init(&fctx, ctx, seed_filename, tests_dir, NULL, TIMEOUT);
 
 #ifdef PRINT_STATUS
     pp_init();

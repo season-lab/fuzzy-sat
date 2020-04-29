@@ -14,6 +14,7 @@
 // #define DUMP_PROOFS
 // #define EVAL_ONLY_BRANCH
 // #define Z3_FALLTHROUGH
+#define TIMEOUT 1000
 
 fuzzy_ctx_t fctx;
 const char* sat_queries_filename         = "fuzzy-sat-queries.smt2";
@@ -194,7 +195,7 @@ int main(int argc, char* argv[])
     FILE* sat_queries_file = fopen(sat_queries_filename, "w");
     setvbuf(sat_queries_file, NULL, _IONBF, 0);
 #endif
-    z3fuzz_init(&fctx, ctx, seed_filename, tests_dir, NULL);
+    z3fuzz_init(&fctx, ctx, seed_filename, tests_dir, NULL, TIMEOUT);
 
 #ifdef PRINT_STATUS
     pp_init();
