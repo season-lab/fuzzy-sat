@@ -69,12 +69,14 @@ typedef struct fuzzy_ctx_t {
     void* processed_constraints;
     void* conflicting_asts;
     void* group_intervals;
+    void* timer;
 } fuzzy_ctx_t;
 
 void z3fuzz_init(fuzzy_ctx_t* fctx, Z3_context ctx, char* seed_filename,
                  char* testcase_path,
                  uint64_t (*model_eval)(Z3_context, Z3_ast, uint64_t*, uint8_t*,
-                                        size_t));
+                                        size_t),
+                 unsigned timeout);
 void z3fuzz_free(fuzzy_ctx_t* ctx);
 void z3fuzz_print_expr(fuzzy_ctx_t* ctx, Z3_ast e);
 

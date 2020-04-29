@@ -102,7 +102,6 @@ typedef ast_info_t* ast_info_ptr;
 #define DICT_DATA_T ast_info_ptr
 #include <dict.h>
 
-static simple_timer_t                   timer;
 static unsigned long*                   tmp_input     = NULL;
 static unsigned long*                   tmp_opt_input = NULL;
 static unsigned char*                   tmp_proof     = NULL;
@@ -216,7 +215,30 @@ static long interesting64[] = {
 #include "z3-fuzzy-debug-utils.h"
 
 #define TIMEOUT_V 0xffff
-#define TIME_MAX_MSEC 1000
+
+static inline int timer_check_wrapper(fuzzy_ctx_t* ctx)
+{
+    if (ctx->timer == NULL)
+        return 0;
+    static int i = 0;
+    if (unlikely(++i & 64)) {
+        i = 0;
+        return check_timer(ctx->timer);
+    }
+    return 0;
+}
+
+static inline void timer_init_wrapper(fuzzy_ctx_t* ctx, unsigned time_max_msec)
+{
+    init_timer(ctx->timer, time_max_msec);
+}
+
+static inline void timer_start_wrapper(fuzzy_ctx_t* ctx)
+{
+    if (ctx->timer == NULL)
+        return;
+    start_timer(ctx->timer);
+}
 
 #define RESEED_RNG 10000
 static int             dev_urandom_fd = -1;
@@ -328,8 +350,15 @@ static void __gd_restore_tmp_input(testcase_t* t)
     }
 }
 
-static unsigned long __gd_eval(unsigned long* x)
+static unsigned long __gd_eval(unsigned long* x, int* should_exit)
 {
+    *should_exit = 0;
+    if (timer_check_wrapper(eval_ctx->fctx)) {
+        eval_ctx->fctx->stats.num_timeouts++;
+        *should_exit = 1;
+        return 0;
+    }
+
     testcase_t* seed_testcase = &eval_ctx->fctx->testcases.data[0];
     __gd_fix_tmp_input(x);
 
@@ -347,14 +376,6 @@ static unsigned long __gd_eval(unsigned long* x)
         seed_testcase->value_sizes, seed_testcase->values_len);
     eval_ctx->fctx->stats.num_evaluate++;
     return res;
-}
-
-__attribute__((unused)) static unsigned long __multi_eval(unsigned long* x,
-                                                          unsigned       i)
-{
-    assert(i < multi_eval_n && "eval multi overflow");
-    eval_set_ctx(&multi_eval_ctx[i]);
-    return __gd_eval(x);
 }
 
 static int __gd_init_eval(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast expr,
@@ -657,12 +678,17 @@ static void init_config_params()
 void z3fuzz_init(fuzzy_ctx_t* fctx, Z3_context ctx, char* seed_filename,
                  char* testcase_path,
                  uint64_t (*model_eval)(Z3_context, Z3_ast, uint64_t*, uint8_t*,
-                                        size_t))
+                                        size_t),
+                 unsigned timeout)
 {
     init_config_params();
     memset((void*)&fctx->stats, 0, sizeof(fuzzy_stats_t));
 
-    init_timer(&timer, TIME_MAX_MSEC);
+    if (timeout != 0) {
+        fctx->timer = (void*)malloc(sizeof(simple_timer_t));
+        timer_init_wrapper(fctx, timeout);
+    } else
+        fctx->timer = NULL;
 
     Z3_set_ast_print_mode(ctx, Z3_PRINT_SMTLIB2_COMPLIANT);
 
@@ -744,6 +770,8 @@ void z3fuzz_init(fuzzy_ctx_t* fctx, Z3_context ctx, char* seed_filename,
 void z3fuzz_free(fuzzy_ctx_t* ctx)
 {
     close(dev_urandom_fd);
+
+    free(ctx->timer);
 
 #ifdef LOG_QUERY_STATS
     fclose(query_log);
@@ -904,7 +932,7 @@ static inline int __evaluate_branch_query(fuzzy_ctx_t* ctx, Z3_ast query,
                                           unsigned char* value_sizes,
                                           unsigned long  n_values)
 {
-    if (unlikely(check_timer(&timer))) {
+    if (timer_check_wrapper(ctx)) {
         ctx->stats.num_timeouts++;
         return TIMEOUT_V;
     }
@@ -2461,6 +2489,7 @@ PHASE_gradient_descend(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
     if (!valid_for_gd)
         return 0;
 
+    int res = 0;
     eval_wapper_ctx_t ew;
 
     int valid_eval = __gd_init_eval(ctx, query, out_ast, 0, 0, &ew);
@@ -2492,21 +2521,24 @@ PHASE_gradient_descend(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
                                 current_testcase->testcase_len);
             *proof      = tmp_proof;
             *proof_size = current_testcase->testcase_len;
-            set_free__digest_t(&digest_set, NULL);
-            __gd_free_eval(&ew);
-            Z3_dec_ref(ctx->z3_ctx, out_ast);
-            return 1;
-        } else if (unlikely(eval_v == TIMEOUT_V))
-            return TIMEOUT_V;
+            res = 1;
+            goto OUT;
+        } else if (unlikely(eval_v == TIMEOUT_V)) {
+            res = TIMEOUT_V;
+            goto OUT;
+        }
     }
-    if (unlikely(gd_ret == 2))
-        ctx->stats.num_timeouts++;
+    if (unlikely(gd_ret == TIMEOUT_V)) {
+        res = TIMEOUT_V;
+        goto OUT;
+    }
 
+    __gd_restore_tmp_input(current_testcase);
+OUT:
     Z3_dec_ref(ctx->z3_ctx, out_ast);
     set_free__digest_t(&digest_set, NULL);
-    __gd_restore_tmp_input(current_testcase);
     __gd_free_eval(&ew);
-    return 0;
+    return res;
 }
 
 static __always_inline int SUBPHASE_afl_det_single_waliking_bit(
@@ -4602,7 +4634,7 @@ int z3fuzz_query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
     int         res;
     testcase_t* curr_t = &ctx->testcases.data[0];
 
-    start_timer(&timer);
+    timer_start_wrapper(ctx);
     __init_global_data(ctx, query, branch_condition);
     res = __query_check_light(ctx, query, branch_condition, proof, proof_size);
     if (unlikely(res == TIMEOUT_V))
@@ -4940,7 +4972,17 @@ unsigned long z3fuzz_maximize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_maximize,
     eval_set_ctx(&ew);
 
     unsigned long max_val;
-    gd_minimize(__gd_eval, ew.input, ew.input, &max_val, ew.mapping_size);
+    int           gd_exit =
+        gd_minimize(__gd_eval, ew.input, ew.input, &max_val, ew.mapping_size);
+    if (unlikely(gd_exit == TIMEOUT_V)) {
+        unsigned long res = ctx->model_eval(
+            ctx->z3_ctx, original_to_maximize, tmp_input,
+            current_testcase->value_sizes, current_testcase->values_len);
+        __vals_long_to_char(tmp_input, tmp_proof,
+                            current_testcase->testcase_len);
+        *out_values = tmp_proof;
+        return res;
+    }
 
     __gd_fix_tmp_input(ew.input);
     max_val = ctx->model_eval(ctx->z3_ctx, original_to_maximize, tmp_input,
@@ -4994,7 +5036,17 @@ unsigned long z3fuzz_minimize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_minimize,
     eval_set_ctx(&ew);
 
     unsigned long min_val;
-    gd_minimize(__gd_eval, ew.input, ew.input, &min_val, ew.mapping_size);
+    int           gd_exit =
+        gd_minimize(__gd_eval, ew.input, ew.input, &min_val, ew.mapping_size);
+    if (unlikely(gd_exit == TIMEOUT_V)) {
+        unsigned long res = ctx->model_eval(ctx->z3_ctx, to_minimize, tmp_input,
+                                            current_testcase->value_sizes,
+                                            current_testcase->values_len);
+        __vals_long_to_char(tmp_input, tmp_proof,
+                            current_testcase->testcase_len);
+        *out_values = tmp_proof;
+        return res;
+    }
 
     __gd_fix_tmp_input(ew.input);
     __vals_long_to_char(tmp_input, tmp_proof, *out_len);

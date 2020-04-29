@@ -7,7 +7,12 @@
 #include <sys/time.h>
 #include "gradient_descend.h"
 
-static struct timeval start, stop;
+#ifndef likely
+#define likely(x) __builtin_expect(!!(x), 1)
+#endif
+#ifndef unlikely
+#define unlikely(x) __builtin_expect(!!(x), 0)
+#endif
 
 #define DEBUG_GRADIENT 0
 #define DEBUG_PARTIAL_DERIVATIVE 0
@@ -33,15 +38,8 @@ static struct timeval start, stop;
 #define ASCENDING 1
 #define DESCENDING 2
 
-#define MAX_TIME_TRANSFORM_MSEC 500
-
-static inline unsigned long compute_time_msec(struct timeval* start,
-                                              struct timeval* end)
-{
-    return ((end->tv_sec - start->tv_sec) * 1000000 + end->tv_usec -
-            start->tv_usec) /
-           1000;
-}
+#define EXIT_ERROR 0xffff
+#define EXIT_OK 1
 
 static inline uint8_t saturating_add8(uint8_t a, uint8_t b)
 {
@@ -85,16 +83,21 @@ static __attribute__((unused)) void debug_dump_vector(char* name, uint64_t* v,
     fprintf(stderr, "*** end %s ***\n", name);
 }
 
-static void partial_derivative(gradient_el_t* out_grad_el,
-                               uint64_t (*function)(uint64_t*), int64_t f0,
-                               uint64_t* x0, uint32_t i)
+static int partial_derivative(gradient_el_t* out_grad_el,
+                              uint64_t (*function)(uint64_t*, int*), int64_t f0,
+                              uint64_t* x0, uint32_t i)
 {
+    int      should_exit;
     uint64_t original_val = x0[i];
     x0[i]                 = original_val + 1;
-    int64_t f_plus        = (int64_t)function(x0);
-    x0[i]                 = original_val - 1;
-    int64_t f_minus       = (int64_t)function(x0);
-    x0[i]                 = original_val;
+    int64_t f_plus        = (int64_t)function(x0, &should_exit);
+    if (unlikely(should_exit))
+        return EXIT_ERROR;
+    x0[i]           = original_val - 1;
+    int64_t f_minus = (int64_t)function(x0, &should_exit);
+    if (unlikely(should_exit))
+        return EXIT_ERROR;
+    x0[i] = original_val;
 
 #if DEBUG_PARTIAL_DERIVATIVE
     fprintf(stderr, ">>> PARTIAL DERIVATIVE\n");
@@ -111,40 +114,43 @@ static void partial_derivative(gradient_el_t* out_grad_el,
     if (f0 <= f_minus && f0 <= f_plus) {
         out_grad_el->value     = 0;
         out_grad_el->direction = STATIONARY;
-        return; // no gradient
+        return EXIT_OK; // no gradient
     }
     if (f_plus < f0 && f0 <= f_minus) {
         out_grad_el->value     = f0 - f_plus;
         out_grad_el->direction = DESCENDING;
-        return;
+        return EXIT_OK;
     }
     if (f_minus < f0 && f0 <= f_plus) {
         out_grad_el->value     = f0 - f_minus;
         out_grad_el->direction = ASCENDING;
-        return;
+        return EXIT_OK;
     }
     if (f_minus < f0 && f_plus < f0 && f_minus < f_plus) {
         out_grad_el->value     = f0 - f_minus;
         out_grad_el->direction = ASCENDING;
-        return;
+        return EXIT_OK;
     }
     if (f_minus < f0 && f_plus < f0 && f_minus >= f_plus) {
         out_grad_el->value     = f0 - f_plus;
         out_grad_el->direction = DESCENDING;
-        return;
+        return EXIT_OK;
     }
     assert(0 && "partial_derivative - should be unreachable");
 }
 
-static void compute_gradient(gradient_el_t* out_grad,
-                             uint64_t (*function)(uint64_t*), int64_t f0,
-                             uint64_t* x0, uint32_t n)
+static int compute_gradient(gradient_el_t* out_grad,
+                            uint64_t (*function)(uint64_t*, int*), int64_t f0,
+                            uint64_t* x0, uint32_t n)
 {
     uint32_t i;
     for (i = 0; i < n; ++i) {
-        partial_derivative(&out_grad[i], function, f0, x0, i);
+        int res = partial_derivative(&out_grad[i], function, f0, x0, i);
+        if (unlikely(res == EXIT_ERROR))
+            return EXIT_ERROR;
         out_grad[i].pct = 0.0L;
     }
+    return EXIT_OK;
 }
 
 static uint64_t max_gradient(gradient_el_t* grad, uint32_t size)
@@ -200,25 +206,31 @@ static void compute_delta_all(uint64_t* x, gradient_el_t* grad, uint64_t step,
     }
 }
 
-static void descend(uint64_t (*function)(uint64_t*), gradient_el_t* grad,
-                    uint64_t* x0, int64_t f0, uint64_t* out_x, int64_t* out_f,
-                    uint32_t n)
+static int descend(uint64_t (*function)(uint64_t*, int*), gradient_el_t* grad,
+                   uint64_t* x0, int64_t f0, uint64_t* out_x, int64_t* out_f,
+                   uint32_t n)
 {
 #if DEBUG_DESCEND
     fprintf(stderr, ">>> DESCEND\n");
 #endif
+    int       res    = EXIT_OK;
     int64_t   f_prev = f0;
     int64_t   f_next = f0;
     uint64_t* x_prev = (uint64_t*)malloc(sizeof(uint64_t) * n);
     uint64_t* x_next = out_x;
     memcpy(x_next, x0, sizeof(uint64_t) * n);
 
+    int      should_exit;
     uint64_t step = 1;
     while (1) {
         memcpy(x_prev, x_next, sizeof(uint64_t) * n);
         compute_delta_all(x_next, grad, step, n, 1);
 
-        f_next = function(x_next);
+        f_next = function(x_next, &should_exit);
+        if (unlikely(should_exit)) {
+            res = EXIT_ERROR;
+            goto OUT;
+        }
 #if DEBUG_DESCEND
         fprintf(stderr,
                 "f_prev: %lx\n"
@@ -257,7 +269,11 @@ static void descend(uint64_t (*function)(uint64_t*), gradient_el_t* grad,
                 assert(0 && "descend - should be unreachable");
             }
 
-            f_next = function(x_next);
+            f_next = function(x_next, &should_exit);
+            if (unlikely(should_exit)) {
+                res = EXIT_ERROR;
+                goto OUT;
+            }
 #if DEBUG_DESCEND
             fprintf(stderr,
                     "delta_idx: %u\n"
@@ -288,10 +304,11 @@ OUT:
 #endif
     *out_f = f_prev;
     free(x_prev);
+    return res;
 }
 
-void gd_minimize(uint64_t (*function)(uint64_t*), uint64_t* x0,
-                 uint64_t* out_x_min, uint64_t* out_f_min, uint32_t n)
+int gd_minimize(uint64_t (*function)(uint64_t*, int*), uint64_t* x0,
+                uint64_t* out_x_min, uint64_t* out_f_min, uint32_t n)
 {
 #if DEBUG_MINIMIZE
     uint32_t j;
@@ -302,14 +319,20 @@ void gd_minimize(uint64_t (*function)(uint64_t*), uint64_t* x0,
     fprintf(stderr, "f0: 0x%016lx\n", function(x0));
 
 #endif
-
+    int            res = EXIT_OK;
+    int            should_exit;
     gradient_el_t* gradient = (gradient_el_t*)malloc(sizeof(gradient_el_t) * n);
 
     uint64_t* x_prev = (uint64_t*)malloc(sizeof(uint64_t) * n);
     uint64_t* x_next = out_x_min;
     memcpy(x_next, x0, n * sizeof(uint64_t));
 
-    int64_t f_prev = (int64_t)function(x0);
+    int64_t f_prev = (int64_t)function(x0, &should_exit);
+    if (unlikely(should_exit)) {
+        res = EXIT_ERROR;
+        goto OUT;
+    }
+
     int64_t f_next = f_prev;
 
     uint32_t epoch = 0;
@@ -317,13 +340,27 @@ void gd_minimize(uint64_t (*function)(uint64_t*), uint64_t* x0,
         memcpy(x_prev, x_next, n * sizeof(uint64_t));
         f_prev = f_next;
 
-        compute_gradient(gradient, function, f_prev, x_prev, n);
+        int grad_res = compute_gradient(gradient, function, f_prev, x_prev, n);
+        if (unlikely(grad_res == EXIT_ERROR)) {
+            res = EXIT_ERROR;
+            goto OUT;
+        }
+
         uint32_t i        = 0;
         uint64_t max_grad = max_gradient(gradient, n);
         while (max_grad == 0 && i++ < MAX_RANDOM_INPUT) {
             x_prev[UR(n)] ^= UR(256);
-            f_prev = function(x0);
-            compute_gradient(gradient, function, f_prev, x_prev, n);
+            f_prev = function(x0, &should_exit);
+            if (unlikely(should_exit)) {
+                res = EXIT_ERROR;
+                goto OUT;
+            }
+
+            grad_res = compute_gradient(gradient, function, f_prev, x_prev, n);
+            if (unlikely(grad_res == EXIT_ERROR)) {
+                res = EXIT_ERROR;
+                goto OUT;
+            }
             max_grad = max_gradient(gradient, n);
         }
         if (i >= MAX_RANDOM_INPUT)
@@ -347,7 +384,12 @@ void gd_minimize(uint64_t (*function)(uint64_t*), uint64_t* x0,
                     j, gradient[j].pct);
 #endif
 
-        descend(function, gradient, x_prev, f_prev, x_next, &f_next, n);
+        int descend_res =
+            descend(function, gradient, x_prev, f_prev, x_next, &f_next, n);
+        if (unlikely(descend_res == EXIT_ERROR)) {
+            res = EXIT_ERROR;
+            goto OUT;
+        }
         if (f_prev == f_next)
             break;
 
@@ -365,12 +407,14 @@ void gd_minimize(uint64_t (*function)(uint64_t*), uint64_t* x0,
     }
 
     *out_f_min = (uint64_t)f_next;
+OUT:
     free(gradient);
     free(x_prev);
 
 #if DEBUG_MINIMIZE
     fprintf(stderr, "<<< END MINIMIZE\n");
 #endif
+    return res;
 }
 
 static gradient_el_t* __tmp_gradient;
@@ -383,28 +427,32 @@ static void           init_tmp_gradient(uint32_t n)
     }
 }
 
-int gd_descend_transf(uint64_t (*function)(uint64_t*), uint64_t* x0,
+int gd_descend_transf(uint64_t (*function)(uint64_t*, int*), uint64_t* x0,
                       uint64_t* out_x, uint64_t* out_f, uint32_t n)
 {
     // debug_dump_vector("x0 (desc)", x0, n);
-    gettimeofday(&start, 0);
 
+    int should_exit;
     init_tmp_gradient(n);
     gradient_el_t* gradient = __tmp_gradient;
 
-    int64_t f0 = function(x0);
-    compute_gradient(gradient, function, f0, x0, n);
+    int64_t f0 = function(x0, &should_exit);
+    if (unlikely(should_exit))
+        return EXIT_ERROR;
+
+    int grad_res = compute_gradient(gradient, function, f0, x0, n);
+    if (unlikely(grad_res == EXIT_ERROR))
+        return EXIT_ERROR;
     if (max_gradient(gradient, n) == 0) {
         // we reached a min
         return 1;
     }
     normalize_gradient(gradient, n);
 
-    descend(function, gradient, x0, f0, out_x, (int64_t*)out_f, n);
-
-    gettimeofday(&stop, 0);
-    if (compute_time_msec(&start, &stop) > MAX_TIME_TRANSFORM_MSEC)
-        return 2;
+    int descend_res =
+        descend(function, gradient, x0, f0, out_x, (int64_t*)out_f, n);
+    if (unlikely(descend_res == EXIT_ERROR))
+        return EXIT_ERROR;
 
     // debug_dump_vector("out_x (desc)", out_x, n);
     return 0;

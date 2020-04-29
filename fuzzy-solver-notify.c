@@ -6,6 +6,7 @@
 
 #define PRINT_STATUS
 // #define DUMP_PROOFS
+#define TIMEOUT 1000
 
 fuzzy_ctx_t fctx;
 
@@ -143,7 +144,7 @@ int main(int argc, char* argv[])
     unsigned int         i;
     int                  n;
 
-    z3fuzz_init(&fctx, ctx, seed_filename, tests_dir, NULL);
+    z3fuzz_init(&fctx, ctx, seed_filename, tests_dir, NULL, TIMEOUT);
 
 #ifdef PRINT_STATUS
     pp_init();

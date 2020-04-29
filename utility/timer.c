@@ -26,13 +26,9 @@ void start_timer(simple_timer_t* t) { gettimeofday(&t->start, 0); }
 
 int check_timer(simple_timer_t* t)
 {
-    static int i = 0;
-    if (unlikely(++i & 64)) {
-        i = 0;
-        gettimeofday(&stop, 0);
-        unsigned long delta_time = compute_time_msec(&t->start, &stop);
-        if (delta_time > t->time_max_msec)
-            return 1;
-    }
+    gettimeofday(&stop, 0);
+    unsigned long delta_time = compute_time_msec(&t->start, &stop);
+    if (delta_time > t->time_max_msec)
+        return 1;
     return 0;
 }

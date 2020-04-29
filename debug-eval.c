@@ -5,6 +5,8 @@
 #include "utility/pretty-print.h"
 #include "z3-fuzzy.h"
 
+#define TIMEOUT 1000
+
 #define USE_PP
 
 unsigned char* inputs     = NULL;
@@ -160,7 +162,7 @@ int main(int argc, char** argv)
     bv        = Z3_substitute(ctx, bv, num_inputs, str_symbols, int_symbols);
     puts("[+] BV loaded");
 
-    z3fuzz_init(&fctx, ctx, seed_filename, NULL, NULL);
+    z3fuzz_init(&fctx, ctx, seed_filename, NULL, NULL, TIMEOUT);
     puts("[+] FCTX initialized");
 
     pp_init();
