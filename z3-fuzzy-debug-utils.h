@@ -37,23 +37,18 @@ static inline void print_index_group(index_group_t* ig)
 static inline void print_interval_groups(fuzzy_ctx_t* ctx)
 {
     fprintf(stderr, "----- INTERVAL GROUPS -----\n");
-    dict__interval_group_t* group_intervals =
-        (dict__interval_group_t*)ctx->group_intervals;
+    set__interval_group_ptr* group_intervals =
+        (set__interval_group_ptr*)ctx->group_intervals;
 
-    interval_group_t* ig;
-    unsigned          i = 0;
-    for (i = 0; i < ctx->testcases.data[0].testcase_len; ++i) {
-        if ((ig = dict_get_ref__interval_group_t(group_intervals, i))) {
-            fprintf(stderr, "***************************\n");
-            fprintf(stderr, "{ %u } \n", i);
-            print_interval(&ig->interval8);
-            print_interval(&ig->interval16);
-            print_interval(&ig->interval32);
-            print_interval(&ig->interval64);
-            fprintf(stderr, "***************************\n");
-        }
+    interval_group_ptr* el;
+    set_reset_iter__interval_group_ptr(group_intervals, 0);
+    while (set_iter_next__interval_group_ptr(group_intervals, 0, &el)) {
+        fprintf(stderr, "***************************\n");
+        print_index_group(&(*el)->group);
+        print_interval(&(*el)->interval);
+        fprintf(stderr, "***************************\n");
     }
-    fprintf(stderr, "---------------------------\n");
+    fprintf(stderr, "------------------------------\n");
 }
 
 static inline void print_univocally_defined(fuzzy_ctx_t* ctx)

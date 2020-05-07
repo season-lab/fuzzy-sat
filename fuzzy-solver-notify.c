@@ -6,7 +6,7 @@
 
 #define PRINT_STATUS
 // #define DUMP_PROOFS
-// #define DUMP_SAT_QUERIES
+#define DUMP_SAT_QUERIES
 #define TIMEOUT 1000
 
 fuzzy_ctx_t fctx;

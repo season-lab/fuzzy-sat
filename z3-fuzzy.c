@@ -749,10 +749,16 @@ void z3fuzz_init(fuzzy_ctx_t* fctx, Z3_context ctx, char* seed_filename,
         (set__ulong*)fctx->univocally_defined_inputs;
     set_init__ulong(univocally_defined_inputs, &index_hash, &index_equals);
 
-    fctx->group_intervals = (void*)malloc(sizeof(dict__interval_group_t));
-    dict__interval_group_t* group_intervals =
-        (dict__interval_group_t*)fctx->group_intervals;
-    dict_init__interval_group_t(group_intervals, NULL);
+    fctx->group_intervals = (void*)malloc(sizeof(set__interval_group_ptr));
+    set__interval_group_ptr* group_intervals =
+        (set__interval_group_ptr*)fctx->group_intervals;
+    set_init__interval_group_ptr(group_intervals, &interval_group_ptr_hash,
+                                 &interval_group_ptr_equals);
+
+    fctx->index_to_group_intervals = malloc(sizeof(dict__interval_group_ptr));
+    dict__interval_group_ptr* index_to_group_intervals =
+        (dict__interval_group_ptr*)fctx->index_to_group_intervals;
+    dict_init__interval_group_ptr(index_to_group_intervals, NULL);
 
     fctx->assignment_inputs_cache = malloc(sizeof(dict__ast_info_ptr));
     dict__ast_info_ptr* assignment_inputs_cache =
@@ -836,10 +842,15 @@ void z3fuzz_free(fuzzy_ctx_t* ctx)
     set_free__ulong(univocally_defined_inputs, NULL);
     free(ctx->univocally_defined_inputs);
 
-    dict__interval_group_t* group_intervals =
-        (dict__interval_group_t*)ctx->group_intervals;
-    dict_free__interval_group_t(group_intervals);
+    set__interval_group_ptr* group_intervals =
+        (set__interval_group_ptr*)ctx->group_intervals;
+    set_free__interval_group_ptr(group_intervals, interval_group_set_el_free);
     free(ctx->group_intervals);
+
+    dict__interval_group_ptr* index_to_group_intervals =
+        (dict__interval_group_ptr*)ctx->index_to_group_intervals;
+    dict_free__interval_group_ptr(index_to_group_intervals);
+    free(ctx->index_to_group_intervals);
 
     gd_free();
 
@@ -1968,21 +1979,6 @@ static inline int is_signed_op(optype op)
     return op == OP_SGT || op == OP_SGE || op == OP_SLT || op == OP_SLE;
 }
 
-static inline void init_interval_group(interval_group_t* igt, optype op)
-{
-    if (is_signed_op(op)) {
-        igt->interval8  = init_signed_interval(8);
-        igt->interval16 = init_signed_interval(16);
-        igt->interval32 = init_signed_interval(32);
-        igt->interval64 = init_signed_interval(64);
-    } else {
-        igt->interval8  = init_unsigned_interval(8);
-        igt->interval16 = init_unsigned_interval(16);
-        igt->interval32 = init_unsigned_interval(32);
-        igt->interval64 = init_unsigned_interval(64);
-    }
-}
-
 static inline unsigned size_normalized(unsigned size)
 {
     switch (size) {
@@ -2003,85 +1999,42 @@ static inline unsigned size_normalized(unsigned size)
     }
 }
 
-static inline void update_interval_group(interval_group_t* igt, uint64_t c,
-                                         optype op, unsigned size)
+static inline interval_group_ptr
+interval_group_set_add_or_modify(set__interval_group_ptr* set,
+                                 index_group_t* ig, uint64_t c, optype op)
 {
-    size = size_normalized(size);
-    if (size == 1) {
-        update_interval(&igt->interval8, (__int128_t)c, op);
-        if (op == OP_UGT || op == OP_UGE) {
-            update_interval(&igt->interval16, (__int128_t)c, op);
-            update_interval(&igt->interval32, (__int128_t)c, op);
-            update_interval(&igt->interval64, (__int128_t)c, op);
-        }
-    } else if (size == 2) {
-        if ((op == OP_ULT || op == OP_ULE) && (c < 0xff)) {
-            int update_ok = update_interval(&igt->interval8, (__int128_t)c, op);
-            if (update_ok)
-                // inherit min of interval16
-                igt->interval8.min = igt->interval16.min;
-        }
-        update_interval(&igt->interval16, (__int128_t)c, op);
-        if (op == OP_UGT || op == OP_UGE) {
-            update_interval(&igt->interval32, (__int128_t)c, op);
-            update_interval(&igt->interval64, (__int128_t)c, op);
-        }
-    } else if (size == 4) {
-        if ((op == OP_ULT || op == OP_ULE) && (c < 0xff)) {
-            int update_ok = update_interval(&igt->interval8, (__int128_t)c, op);
-            if (update_ok)
-                // inherit min of interval32
-                igt->interval8.min = igt->interval32.min;
-        }
-        if ((op == OP_ULT || op == OP_ULE) && (c < 0xffff)) {
-            int update_ok =
-                update_interval(&igt->interval16, (__int128_t)c, op);
-            if (update_ok)
-                // inherit min of interval32
-                igt->interval16.min = igt->interval32.min;
-        }
-        update_interval(&igt->interval32, (__int128_t)c, op);
-        if (op == OP_UGT || op == OP_UGE)
-            update_interval(&igt->interval64, (__int128_t)c, op);
+    interval_group_t    igt     = {.group = *ig, .interval = {0}};
+    interval_group_ptr  igt_p   = &igt;
+    interval_group_ptr* igt_ptr = set_find_el__interval_group_ptr(set, &igt_p);
+
+    if (igt_ptr != NULL) {
+        update_interval(&(*igt_ptr)->interval, c, op);
+        return *igt_ptr;
     } else {
-        if ((op == OP_ULT || op == OP_ULE) && (c < 0xff)) {
-            int update_ok = update_interval(&igt->interval8, (__int128_t)c, op);
-            if (update_ok)
-                // inherit min of interval64
-                igt->interval8.min = igt->interval64.min;
-        }
-        if ((op == OP_ULT || op == OP_ULE) && (c < 0xffff)) {
-            int update_ok =
-                update_interval(&igt->interval16, (__int128_t)c, op);
-            if (update_ok)
-                // inherit min of interval64
-                igt->interval16.min = igt->interval64.min;
-        }
-        if ((op == OP_ULT || op == OP_ULE) && (c < 0xffffffff)) {
-            int update_ok =
-                update_interval(&igt->interval32, (__int128_t)c, op);
-            if (update_ok)
-                // inherit min of interval64
-                igt->interval32.min = igt->interval64.min;
-        }
-        update_interval(&igt->interval64, (__int128_t)c, op);
+        interval_group_ptr new_el =
+            (interval_group_ptr)malloc(sizeof(interval_group_t));
+        unsigned size    = ig->n;
+        size             = size_normalized(size);
+        new_el->interval = init_interval(size);
+        update_interval(&new_el->interval, (__int128_t)c, op);
+        new_el->group = *ig;
+        set_add__interval_group_ptr(set, new_el);
+        return new_el;
     }
 }
 
-static inline interval_t* get_interval_group_interval(interval_group_t* igt,
-                                                      unsigned          size)
+static inline interval_t*
+interval_group_get_interval(set__interval_group_ptr* set, index_group_t* ig)
 {
-    size = size_normalized(size);
-    if (size == 1)
-        return &igt->interval8;
-    if (size == 2)
-        return &igt->interval16;
-    if (size == 4)
-        return &igt->interval32;
-    return &igt->interval64;
+    interval_group_t    igt     = {.group = *ig, .interval = {0}};
+    interval_group_ptr  igt_p   = &igt;
+    interval_group_ptr* igt_ptr = set_find_el__interval_group_ptr(set, &igt_p);
+    if (igt_ptr != NULL)
+        return &(*igt_ptr)->interval;
+    return NULL;
 }
 
-static inline int __check_range_contraint(fuzzy_ctx_t* ctx, Z3_ast expr)
+static inline int __check_range_constraint(fuzzy_ctx_t* ctx, Z3_ast expr)
 {
     int         res  = 0;
     Z3_ast_kind kind = Z3_get_ast_kind(ctx->z3_ctx, expr);
@@ -2185,7 +2138,7 @@ static inline int __check_range_contraint(fuzzy_ctx_t* ctx, Z3_ast expr)
             Z3_dec_ref(ctx->z3_ctx, non_const_operand2);
             goto END_FUN_2;
         }
-        assert(ig.n > 0 && "__check_range_contraint() - size of group is zero. "
+        assert(ig.n > 0 && "__check_range_constraint() - size of group is zero. "
                            "It shouldn't happen");
 
         unsigned long input_maxval = (2 << ((ig.n * 8) - 1)) - 1;
@@ -2214,28 +2167,25 @@ static inline int __check_range_contraint(fuzzy_ctx_t* ctx, Z3_ast expr)
         if (!input_group_ok || approx)
             // no input group or approximated group
             goto END_FUN_2;
-        assert(ig.n > 0 && "__check_range_contraint() - size of group is zero. "
+        assert(ig.n > 0 && "__check_range_constraint() - size of group is zero. "
                            "It shouldn't happen");
     }
 
     // it is a range query!
-    optype   op                = __find_optype(decl_kind, const_operand);
-    unsigned least_significant = ig.indexes[ig.n - 1];
+    optype op = __find_optype(decl_kind, const_operand);
 
-    dict__interval_group_t* group_intervals =
-        (dict__interval_group_t*)ctx->group_intervals;
+    set__interval_group_ptr* group_intervals =
+        (set__interval_group_ptr*)ctx->group_intervals;
 
-    interval_group_t* igt_ref;
-    if ((igt_ref = dict_get_ref__interval_group_t(
-             group_intervals, (unsigned long)least_significant)) != NULL)
-        update_interval_group(igt_ref, constant, op, ig.n);
-    else {
-        interval_group_t igt;
-        init_interval_group(&igt, op);
-        update_interval_group(&igt, constant, op, ig.n);
-        dict_set__interval_group_t(group_intervals,
-                                   (unsigned long)least_significant, igt);
-    }
+    dict__interval_group_ptr* index_to_group_intervals =
+        (dict__interval_group_ptr*)ctx->index_to_group_intervals;
+
+    interval_group_ptr el =
+        interval_group_set_add_or_modify(group_intervals, &ig, constant, op);
+    unsigned i;
+    for (i = 0; i < ig.n; ++i)
+        dict_set__interval_group_ptr(index_to_group_intervals, ig.indexes[i],
+                                     el);
 
     res = 1;
 END_FUN_2:
@@ -4597,8 +4547,8 @@ PHASE_range_bruteforce(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
 {
     if (unlikely(skip_range_brute_force))
         return 0;
-    dict__interval_group_t* group_intervals =
-        (dict__interval_group_t*)ctx->group_intervals;
+    set__interval_group_ptr* group_intervals =
+        (set__interval_group_ptr*)ctx->group_intervals;
     testcase_t* current_testcase = &ctx->testcases.data[0];
 
     if (ast_data.inputs->index_groups.size != 1)
@@ -4610,14 +4560,9 @@ PHASE_range_bruteforce(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
     assert(ig->n > 0 &&
            "PHASE_range_bruteforce() - group size < 0. It shouldn't happen");
 
-    interval_group_t* interval_group_match =
-        dict_get_ref__interval_group_t(group_intervals, ig->indexes[ig->n - 1]);
-
-    if (interval_group_match == NULL)
-        return 0; // no interval for group in cache
-
-    interval_t* interval =
-        get_interval_group_interval(interval_group_match, ig->n);
+    interval_t* interval = interval_group_get_interval(group_intervals, ig);
+    if (interval == 0)
+        return 0; // no interval
 
     if (get_range(interval) > 256)
         return 0; // range too wide
@@ -5276,7 +5221,7 @@ void z3fuzz_notify_constraint(fuzzy_ctx_t* ctx, Z3_ast constraint)
             __check_conflicting_constraint(ctx, constraint);
 
         ctx->stats.num_range_constraints +=
-            __check_range_contraint(ctx, constraint);
+            __check_range_constraint(ctx, constraint);
     }
 
     Z3_dec_ref(ctx->z3_ctx, constraint);

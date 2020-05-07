@@ -71,6 +71,7 @@ typedef struct fuzzy_ctx_t {
     void* processed_constraints;
     void* conflicting_asts;
     void* group_intervals;
+    void* index_to_group_intervals;
     void* timer;
 } fuzzy_ctx_t;
 
