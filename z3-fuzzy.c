@@ -60,7 +60,7 @@ static int skip_afl_det_int64              = 0;
 
 static int skip_afl_havoc         = 1;
 static int use_greedy_mamin       = 0;
-static int check_unnecessary_eval = 0;
+static int check_unnecessary_eval = 1;
 
 #ifdef USE_MD5_HASH
 #include "utility/md5.h"
