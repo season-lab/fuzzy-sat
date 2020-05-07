@@ -1296,9 +1296,10 @@ static int __detect_input_group(fuzzy_ctx_t* ctx, Z3_ast node,
                         // it is an assignment
                         return 0;
 
-                    assert(ig->n < MAX_GROUP_SIZE &&
-                           "__detect_input_group() unexpected "
-                           "number of element in group");
+                    if (ig->n >= MAX_GROUP_SIZE) {
+                        res = 0;
+                        break;
+                    }
 
                     int      already_in = 0;
                     unsigned i;
@@ -1308,9 +1309,10 @@ static int __detect_input_group(fuzzy_ctx_t* ctx, Z3_ast node,
                     }
 
                     if (!already_in) {
-                        assert(ig->n < MAX_GROUP_SIZE &&
-                               "__detect_input_group() unexpected "
-                               "number of element in group");
+                        if (ig->n >= MAX_GROUP_SIZE) {
+                            res = 0;
+                            break;
+                        }
 
                         ig->indexes[ig->n++] = symbol_index;
                     }
