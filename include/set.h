@@ -120,7 +120,7 @@ static inline int glue(set_check__, SET_DATA_T)(glue(set__, SET_DATA_T) * set,
             break;
         }
     }
-    return is_present;
+    return (int)is_present;
 }
 
 static inline void glue(set_reset_iter__,
@@ -197,9 +197,9 @@ static inline void glue(set_free__, SET_DATA_T)(glue(set__, SET_DATA_T) * set,
                                                 void (*el_free)(SET_DATA_T*))
 {
     unsigned long i;
-    for (i = 0; i < set->filled_buckets_i; ++i)
-        glue(da_free__, SET_DATA_T)(&set->buckets[set->filled_buckets[i]],
-                                    el_free);
+    for (i = 0; i < SET_N_BUCKETS; ++i)
+        if (set->buckets[i].data != 0)
+            glue(da_free__, SET_DATA_T)(&set->buckets[i], el_free);
     free(set->buckets);
     free(set->filled_buckets);
     set->buckets        = NULL;

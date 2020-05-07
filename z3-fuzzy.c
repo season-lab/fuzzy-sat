@@ -1428,13 +1428,14 @@ static void __detect_input_to_state_query(fuzzy_ctx_t* ctx, Z3_ast node,
     }
 
     // condition 3 - the other child is input-to-state
+    Z3_ast non_const_ast =
+        Z3_get_app_arg(ctx->z3_ctx, node_app, const_operand == 1 ? 0 : 1);
+    Z3_inc_ref(ctx->z3_ctx, non_const_ast);
     char approx;
-    condition_ok =
-        __detect_input_group(
-            ctx,
-            Z3_get_app_arg(ctx->z3_ctx, node_app, const_operand == 1 ? 0 : 1),
-            &data->input_to_state_group, &approx) &&
-        data->input_to_state_group.n > 0;
+    condition_ok = __detect_input_group(ctx, non_const_ast,
+                                        &data->input_to_state_group, &approx) &&
+                   data->input_to_state_group.n > 0;
+    Z3_dec_ref(ctx->z3_ctx, non_const_ast);
 
     if (!condition_ok) {
         data->is_input_to_state = 0;
@@ -1803,15 +1804,21 @@ static inline int __check_conflicting_constraint(fuzzy_ctx_t* ctx, Z3_ast expr)
     if (kind != Z3_APP_AST)
         return 0;
 
+    int res = 0;
+    Z3_inc_ref(ctx->z3_ctx, expr);
     Z3_app       app       = Z3_to_app(ctx->z3_ctx, expr);
     Z3_func_decl decl      = Z3_get_app_decl(ctx->z3_ctx, app);
     Z3_decl_kind decl_kind = Z3_get_decl_kind(ctx->z3_ctx, decl);
     Z3_ast       old_expr  = expr;
+    Z3_inc_ref(ctx->z3_ctx, old_expr);
 
     // exclude initial NOT
     int is_not = 0;
     while (decl_kind == Z3_OP_NOT) {
-        expr      = Z3_get_app_arg(ctx->z3_ctx, app, 0);
+        Z3_ast tmp_expr = Z3_get_app_arg(ctx->z3_ctx, app, 0);
+        Z3_inc_ref(ctx->z3_ctx, tmp_expr);
+        Z3_dec_ref(ctx->z3_ctx, expr);
+        expr      = tmp_expr;
         app       = Z3_to_app(ctx->z3_ctx, expr);
         decl      = Z3_get_app_decl(ctx->z3_ctx, app);
         decl_kind = Z3_get_decl_kind(ctx->z3_ctx, decl);
@@ -1822,16 +1829,23 @@ static inline int __check_conflicting_constraint(fuzzy_ctx_t* ctx, Z3_ast expr)
         decl_kind != Z3_OP_ULEQ && decl_kind != Z3_OP_SLT &&
         decl_kind != Z3_OP_ULT && decl_kind != Z3_OP_SGEQ &&
         decl_kind != Z3_OP_UGEQ && decl_kind != Z3_OP_SGT &&
-        decl_kind != Z3_OP_UGT)
-        return 0;
+        decl_kind != Z3_OP_UGT) {
+        res = 0;
+        goto OUT;
+    }
 
-    if (is_not)
+    if (is_not) {
+        Z3_dec_ref(ctx->z3_ctx, expr);
         expr = old_expr;
+        Z3_inc_ref(ctx->z3_ctx, expr);
+    }
 
     ast_info_ptr inputs;
     detect_involved_inputs_wrapper(ctx, expr, &inputs);
-    if (inputs->index_groups.size != 1 && inputs->index_groups.size != 2)
-        return 0;
+    if (inputs->index_groups.size != 1 && inputs->index_groups.size != 2) {
+        res = 0;
+        goto OUT;
+    }
 
     // Take note of groups
     dict__conflicting_ptr* conflicting_asts =
@@ -1845,7 +1859,11 @@ static inline int __check_conflicting_constraint(fuzzy_ctx_t* ctx, Z3_ast expr)
             add_item_to_conflicting(conflicting_asts, expr, ig->indexes[i],
                                     ctx->z3_ctx);
     }
-    return 1;
+    res = 1;
+OUT:
+    Z3_dec_ref(ctx->z3_ctx, expr);
+    Z3_dec_ref(ctx->z3_ctx, old_expr);
+    return res;
 }
 
 static inline optype __find_optype(Z3_decl_kind dk, unsigned is_const_at_right)
@@ -2066,16 +2084,23 @@ static inline int __check_range_contraint(fuzzy_ctx_t* ctx, Z3_ast expr)
     int         res  = 0;
     Z3_ast_kind kind = Z3_get_ast_kind(ctx->z3_ctx, expr);
     if (kind != Z3_APP_AST)
-        goto END_FUN_1;
+        return 0;
 
+    Z3_inc_ref(ctx->z3_ctx, expr);
     Z3_app       app       = Z3_to_app(ctx->z3_ctx, expr);
     Z3_func_decl decl      = Z3_get_app_decl(ctx->z3_ctx, app);
     Z3_decl_kind decl_kind = Z3_get_decl_kind(ctx->z3_ctx, decl);
 
+    Z3_ast original_expr = expr;
+    Z3_inc_ref(ctx->z3_ctx, original_expr);
+
     // exclude initial NOT
     int is_not = 0;
     while (decl_kind == Z3_OP_NOT) {
-        expr      = Z3_get_app_arg(ctx->z3_ctx, app, 0);
+        Z3_ast tmp_expr = Z3_get_app_arg(ctx->z3_ctx, app, 0);
+        Z3_inc_ref(ctx->z3_ctx, tmp_expr);
+        Z3_dec_ref(ctx->z3_ctx, expr);
+        expr      = tmp_expr;
         app       = Z3_to_app(ctx->z3_ctx, expr);
         decl      = Z3_get_app_decl(ctx->z3_ctx, app);
         decl_kind = Z3_get_decl_kind(ctx->z3_ctx, decl);
@@ -2124,7 +2149,7 @@ static inline int __check_range_contraint(fuzzy_ctx_t* ctx, Z3_ast expr)
         nonconst_op_decl_kind == Z3_OP_BSUB) {
 
         if (Z3_get_app_num_args(ctx->z3_ctx, nonconst_op_app) != 2)
-            goto END_FUN_1;
+            goto END_FUN_2;
 
         uint64_t new_constant;
         uint64_t constant_2;
@@ -2149,29 +2174,34 @@ static inline int __check_range_contraint(fuzzy_ctx_t* ctx, Z3_ast expr)
         Z3_ast non_const_operand2 =
             Z3_get_app_arg(ctx->z3_ctx, nonconst_op_app, const_operand_2 ^ 1);
         Z3_inc_ref(ctx->z3_ctx, non_const_operand2);
-        Z3_dec_ref(ctx->z3_ctx, non_const_operand);
 
         char approx = 0;
         int  input_group_ok =
             __detect_input_group(ctx, non_const_operand2, &ig, &approx);
-        if (!input_group_ok || approx)
+        if (!input_group_ok || approx) {
             // no input group or approximated group
+            Z3_dec_ref(ctx->z3_ctx, non_const_operand2);
             goto END_FUN_2;
+        }
         assert(ig.n > 0 && "__check_range_contraint() - size of group is zero. "
                            "It shouldn't happen");
 
         unsigned long input_maxval = (2 << ((ig.n * 8) - 1)) - 1;
         if (!is_signed_op(__find_optype(decl_kind, const_operand)) &&
             nonconst_op_decl_kind == Z3_OP_BADD &&
-            check_sum_wrap(input_maxval, constant_2, non_const_op_size))
+            check_sum_wrap(input_maxval, constant_2, non_const_op_size)) {
             // unsigned OP and C2 + inp can wrap => unsafe to add
+            Z3_dec_ref(ctx->z3_ctx, non_const_operand2);
             goto END_FUN_2;
-        else if (!is_signed_op(__find_optype(decl_kind, const_operand)) &&
-                 nonconst_op_decl_kind == Z3_OP_BSUB &&
-                 input_maxval > constant_2)
+        } else if (!is_signed_op(__find_optype(decl_kind, const_operand)) &&
+                   nonconst_op_decl_kind == Z3_OP_BSUB &&
+                   input_maxval > constant_2) {
             // unsigned OP and C2 - inp can wrap => unsafe to add
+            Z3_dec_ref(ctx->z3_ctx, non_const_operand2);
             goto END_FUN_2;
+        }
 
+        Z3_dec_ref(ctx->z3_ctx, non_const_operand);
         constant          = new_constant;
         non_const_operand = non_const_operand2;
     } else {
@@ -2209,6 +2239,8 @@ static inline int __check_range_contraint(fuzzy_ctx_t* ctx, Z3_ast expr)
 END_FUN_2:
     Z3_dec_ref(ctx->z3_ctx, non_const_operand);
 END_FUN_1:
+    Z3_dec_ref(ctx->z3_ctx, expr);
+    Z3_dec_ref(ctx->z3_ctx, original_expr);
     return res;
 }
 
@@ -5228,6 +5260,8 @@ void z3fuzz_notify_constraint(fuzzy_ctx_t* ctx, Z3_ast constraint)
         return;
     set_add__ulong(processed_constraints, hash);
 
+    Z3_inc_ref(ctx->z3_ctx, constraint);
+
     if (__check_univocally_defined(ctx, constraint)) {
         ctx->stats.num_univocally_defined++;
 
@@ -5242,6 +5276,8 @@ void z3fuzz_notify_constraint(fuzzy_ctx_t* ctx, Z3_ast constraint)
         ctx->stats.num_range_constraints +=
             __check_range_contraint(ctx, constraint);
     }
+
+    Z3_dec_ref(ctx->z3_ctx, constraint);
 }
 
 int z3fuzz_get_optimistic_sol(fuzzy_ctx_t* ctx, unsigned char const** proof,
