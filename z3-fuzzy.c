@@ -23,7 +23,7 @@
 #define Z3_UNIQUE Z3_get_ast_hash // Z3_get_ast_id
 
 // #define PRINT_SAT
-// #define PRINT_NUM_EVALUATE
+// #define DEBUG_RANGE
 // #define DEBUG_CHECK_LIGHT
 // #define DEBUG_DETECT_GROUP
 
@@ -853,10 +853,6 @@ void z3fuzz_free(fuzzy_ctx_t* ctx)
     free(ctx->index_to_group_intervals);
 
     gd_free();
-
-#ifdef PRINT_NUM_EVALUATE
-    printf("num evaluate:\t%lu\n", ctx->stats.num_evaluate);
-#endif
 }
 
 void z3fuzz_print_expr(fuzzy_ctx_t* ctx, Z3_ast e)
@@ -2015,7 +2011,7 @@ interval_group_set_add_or_modify(set__interval_group_ptr* set,
             (interval_group_ptr)malloc(sizeof(interval_group_t));
         unsigned size    = ig->n;
         size             = size_normalized(size);
-        new_el->interval = init_interval(size);
+        new_el->interval = init_interval(size * 8);
         update_interval(&new_el->interval, (__int128_t)c, op);
         new_el->group = *ig;
         set_add__interval_group_ptr(set, new_el);
@@ -2099,6 +2095,34 @@ static inline int __check_range_constraint(fuzzy_ctx_t* ctx, Z3_ast expr)
     Z3_decl_kind nonconst_op_decl_kind =
         Z3_get_decl_kind(ctx->z3_ctx, nonconst_op_decl);
 
+    // remove concat with 0 (extend to any constant?)
+    if (nonconst_op_decl_kind == Z3_OP_CONCAT) {
+        if (Z3_get_app_num_args(ctx->z3_ctx, nonconst_op_app) == 2) {
+            Z3_ast tmp_expr = Z3_get_app_arg(ctx->z3_ctx, nonconst_op_app, 0);
+            Z3_inc_ref(ctx->z3_ctx, tmp_expr);
+
+            if (Z3_get_ast_kind(ctx->z3_ctx, tmp_expr) == Z3_NUMERAL_AST) {
+                uint64_t v;
+                Z3_bool  successGet =
+                    Z3_get_numeral_uint64(ctx->z3_ctx, tmp_expr, &v);
+
+                if (successGet != Z3_FALSE && v == 0) {
+                    Z3_ast old_non_const_operand = non_const_operand;
+                    non_const_operand =
+                        Z3_get_app_arg(ctx->z3_ctx, nonconst_op_app, 1);
+                    Z3_inc_ref(ctx->z3_ctx, non_const_operand);
+                    nonconst_op_app = Z3_to_app(ctx->z3_ctx, non_const_operand);
+                    nonconst_op_decl =
+                        Z3_get_app_decl(ctx->z3_ctx, nonconst_op_app);
+                    nonconst_op_decl_kind =
+                        Z3_get_decl_kind(ctx->z3_ctx, nonconst_op_decl);
+                    Z3_dec_ref(ctx->z3_ctx, old_non_const_operand);
+                }
+            }
+            Z3_dec_ref(ctx->z3_ctx, tmp_expr);
+        }
+    }
+
     index_group_t ig = {0};
     if (nonconst_op_decl_kind == Z3_OP_BADD ||
         nonconst_op_decl_kind == Z3_OP_BSUB) {
@@ -2138,8 +2162,9 @@ static inline int __check_range_constraint(fuzzy_ctx_t* ctx, Z3_ast expr)
             Z3_dec_ref(ctx->z3_ctx, non_const_operand2);
             goto END_FUN_2;
         }
-        assert(ig.n > 0 && "__check_range_constraint() - size of group is zero. "
-                           "It shouldn't happen");
+        assert(ig.n > 0 &&
+               "__check_range_constraint() - size of group is zero. "
+               "It shouldn't happen");
 
         unsigned long input_maxval = (2 << ((ig.n * 8) - 1)) - 1;
         if (!is_signed_op(__find_optype(decl_kind, const_operand)) &&
@@ -2167,8 +2192,9 @@ static inline int __check_range_constraint(fuzzy_ctx_t* ctx, Z3_ast expr)
         if (!input_group_ok || approx)
             // no input group or approximated group
             goto END_FUN_2;
-        assert(ig.n > 0 && "__check_range_constraint() - size of group is zero. "
-                           "It shouldn't happen");
+        assert(ig.n > 0 &&
+               "__check_range_constraint() - size of group is zero. "
+               "It shouldn't happen");
     }
 
     // it is a range query!
@@ -2186,6 +2212,13 @@ static inline int __check_range_constraint(fuzzy_ctx_t* ctx, Z3_ast expr)
     for (i = 0; i < ig.n; ++i)
         dict_set__interval_group_ptr(index_to_group_intervals, ig.indexes[i],
                                      el);
+
+#ifdef DEBUG_RANGE
+    puts("+++++++++++++++++++++++++++++++++++++");
+    z3fuzz_print_expr(ctx, original_expr);
+    print_interval_groups(ctx);
+    puts("+++++++++++++++++++++++++++++++++++++");
+#endif
 
     res = 1;
 END_FUN_2:
