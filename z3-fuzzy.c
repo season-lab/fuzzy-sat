@@ -1,4 +1,3 @@
-#include <assert.h>
 #include <fcntl.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -14,9 +13,19 @@
 #define unlikely(x) __builtin_expect(!!(x), 0)
 #endif
 
+#define ASSERT_OR_ABORT(x, mex)                                                \
+    if (unlikely(!(x))) {                                                      \
+        fprintf(stderr, "[z3fuzz ABORT] " mex "\n");                           \
+        abort();                                                               \
+    }
+#define ABORT(mex)                                                             \
+    do {                                                                       \
+        fprintf(stderr, "[z3fuzz ABORT] " mex "\n");                           \
+        abort();                                                               \
+    } while (0);
 #define Z3FUZZ_LOG(x...) fprintf(stderr, "[z3fuzz] " x)
-#define FLIP_BIT(_var, _idx) ((_var) ^ (1 << (_idx)));
 
+#define FLIP_BIT(_var, _idx) ((_var) ^ (1 << (_idx)));
 #define rightmost_set_bit(x) ((x) != 0 ? __builtin_ctzl(x) : -1)
 #define leftmost_set_bit(x) ((x) != 0 ? (63 - __builtin_clzl(x)) : -1)
 
@@ -250,7 +259,7 @@ static inline unsigned UR(unsigned limit)
     if (unlikely(!rand_cnt--)) {
         unsigned seed[2];
         size_t   res = read(dev_urandom_fd, &seed, sizeof(seed));
-        assert(res == sizeof(seed) && "read failed");
+        ASSERT_OR_ABORT(res == sizeof(seed), "read failed");
         srandom(seed[0]);
         rand_cnt = (RESEED_RNG / 2) + (seed[1] % RESEED_RNG);
     }
@@ -402,8 +411,8 @@ static int __gd_init_eval(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast expr,
     Z3_inc_ref(ctx->z3_ctx, out_ctx->pi);
 
     Z3_sort bv_sort = Z3_get_sort(ctx->z3_ctx, expr);
-    assert(Z3_get_sort_kind(ctx->z3_ctx, bv_sort) == Z3_BV_SORT &&
-           "gd works with bitvectors");
+    ASSERT_OR_ABORT(Z3_get_sort_kind(ctx->z3_ctx, bv_sort) == Z3_BV_SORT,
+                    "gd works with bitvectors");
     out_ctx->ast_sort_size = Z3_get_bv_sort_size(ctx->z3_ctx, bv_sort);
 
     if (must_initialize_ast) {
@@ -462,8 +471,8 @@ static void __gd_free_eval(eval_wapper_ctx_t* eval_ctx)
 
 static int __gradient_transf_init(Z3_context ctx, Z3_ast expr, Z3_ast* out_exp)
 {
-    assert(Z3_get_ast_kind(ctx, expr) == Z3_APP_AST &&
-           "__gradient_transf_init expects an APP argument");
+    ASSERT_OR_ABORT(Z3_get_ast_kind(ctx, expr) == Z3_APP_AST,
+                    "__gradient_transf_init expects an APP argument");
 
     Z3_app       app       = Z3_to_app(ctx, expr);
     Z3_func_decl decl      = Z3_get_app_decl(ctx, app);
@@ -479,8 +488,8 @@ static int __gradient_transf_init(Z3_context ctx, Z3_ast expr, Z3_ast* out_exp)
         is_not    = !is_not;
     }
 
-    assert(Z3_get_app_num_args(ctx, app) == 2 &&
-           "__gradient_transf_init requires a binary APP");
+    ASSERT_OR_ABORT(Z3_get_app_num_args(ctx, app) == 2,
+                    "__gradient_transf_init requires a binary APP");
 
     Z3_ast args[2] = {0};
     Z3_inc_ref(ctx, arg);
@@ -576,9 +585,9 @@ PRE_SWITCH:
             Z3_ast iff = Z3_mk_bvsub(ctx, args[1], args[0]);
             Z3_inc_ref(ctx, iff);
 
-            assert(Z3_get_sort_kind(ctx, Z3_get_sort(ctx, cond)) ==
-                       Z3_BOOL_SORT &&
-                   "not bool sort");
+            ASSERT_OR_ABORT(Z3_get_sort_kind(ctx, Z3_get_sort(ctx, cond)) ==
+                                Z3_BOOL_SORT,
+                            "not bool sort");
             Z3_ast ite = Z3_mk_ite(ctx, cond, ift, iff);
             Z3_inc_ref(ctx, ite);
             Z3_dec_ref(ctx, cond);
@@ -599,7 +608,7 @@ PRE_SWITCH:
         }
 
         default:
-            assert(0 && "__gradient_transf_init unknown decl kind");
+            ASSERT_OR_ABORT(0, "__gradient_transf_init unknown decl kind");
     }
 
     Z3_dec_ref(ctx, arg1);
@@ -646,7 +655,7 @@ static void env_get_or_die(int* env_var, char* value)
     else if (value[0] == '1')
         *env_var = 1;
     else
-        assert(0 && "environment config value must be '0' or '1'");
+        ASSERT_OR_ABORT(0, "environment config value must be '0' or '1'");
 }
 
 static void init_config_params()
@@ -707,7 +716,7 @@ void z3fuzz_init(fuzzy_ctx_t* fctx, Z3_context ctx, char* seed_filename,
 
     dev_urandom_fd = open("/dev/urandom", O_RDONLY);
     if (dev_urandom_fd < 0)
-        assert(0 && "Unable to open /dev/urandom");
+        ASSERT_OR_ABORT(0, "Unable to open /dev/urandom");
 
     if (log_query_stats) {
         query_log = fopen(query_log_filename, "w");
@@ -724,7 +733,7 @@ void z3fuzz_init(fuzzy_ctx_t* fctx, Z3_context ctx, char* seed_filename,
     load_testcase(&fctx->testcases, seed_filename, ctx);
     if (testcase_path != NULL)
         load_testcase_folder(&fctx->testcases, testcase_path, ctx);
-    assert(fctx->testcases.size > 0 && "no testcase");
+    ASSERT_OR_ABORT(fctx->testcases.size > 0, "no testcase");
 
     fctx->assignments      = (Z3_ast*)calloc(10, sizeof(Z3_ast));
     fctx->size_assignments = 10;
@@ -1120,7 +1129,7 @@ static int __detect_input_group(fuzzy_ctx_t* ctx, Z3_ast node,
 
                     // move tmp to: ig->indexes + prev_n
                     for (i = low / 8; i <= hig / 8; ++i) {
-                        assert(i < bv_width && "extract overflow");
+                        ASSERT_OR_ABORT(i < bv_width, "extract overflow");
                         ig->indexes[prev_n++] = tmp[i];
                     }
                     ig->n = prev_n;
@@ -1217,7 +1226,7 @@ static int __detect_input_group(fuzzy_ctx_t* ctx, Z3_ast node,
 
                     // move tmp to: ig->indexes + prev_n
                     for (i = low / 8; i <= hig / 8; ++i) {
-                        assert(i < bv_width && "extract overflow");
+                        ASSERT_OR_ABORT(i < bv_width, "extract overflow");
                         ig->indexes[prev_n++] = tmp[i];
                     }
                     ig->n = prev_n;
@@ -1734,10 +1743,10 @@ static inline void __detect_involved_inputs(fuzzy_ctx_t* ctx, Z3_ast v,
             break;
         }
         case Z3_QUANTIFIER_AST: {
-            assert(0 && "__main_ast_visit() found quantifier\n");
+            ASSERT_OR_ABORT(0, "__main_ast_visit() found quantifier\n");
         }
         default:
-            assert(0 && "__main_ast_visit() unknown ast kind\n");
+            ASSERT_OR_ABORT(0, "__main_ast_visit() unknown ast kind\n");
     }
 
 FUN_END:
@@ -1837,8 +1846,8 @@ static void __detect_early_constants(fuzzy_ctx_t* ctx, Z3_ast v,
                         Z3_NUMERAL_AST) {
                         successGet = Z3_get_numeral_uint64(
                             ctx->z3_ctx, child1, (uint64_t*)&tmp_const);
-                        assert(successGet == Z3_TRUE &&
-                               "failed to get constant");
+                        ASSERT_OR_ABORT(successGet == Z3_TRUE,
+                                        "failed to get constant");
                         da_add_item__ulong(&data->values, tmp_const);
                         da_add_item__ulong(&data->values, tmp_const + 1);
                         da_add_item__ulong(&data->values, tmp_const - 1);
@@ -1846,8 +1855,8 @@ static void __detect_early_constants(fuzzy_ctx_t* ctx, Z3_ast v,
                                Z3_NUMERAL_AST) {
                         successGet = Z3_get_numeral_uint64(
                             ctx->z3_ctx, child2, (uint64_t*)&tmp_const);
-                        assert(successGet == Z3_TRUE &&
-                               "failed to get constant");
+                        ASSERT_OR_ABORT(successGet == Z3_TRUE,
+                                        "failed to get constant");
                         da_add_item__ulong(&data->values, tmp_const);
                         da_add_item__ulong(&data->values, tmp_const + 1);
                         da_add_item__ulong(&data->values, tmp_const - 1);
@@ -1981,8 +1990,9 @@ static inline optype __find_optype(Z3_decl_kind dk, unsigned is_const_at_right)
             else
                 return OP_ULT;
         default:
-            assert(0 && "__find_optype() unexpected Z3_decl_kind");
+            break;
     }
+    ABORT("__find_optype() unexpected Z3_decl_kind");
 }
 
 static inline int __find_child_constant(Z3_context ctx, Z3_app app,
@@ -2028,8 +2038,9 @@ static inline Z3_decl_kind get_opposite_decl_kind(Z3_decl_kind kind)
         case Z3_OP_UGT:
             return Z3_OP_ULEQ;
         default:
-            assert(0 && "get_opposite_decl_kind() - unexpected decl kind");
+            break;
     }
+    ABORT("get_opposite_decl_kind() - unexpected decl kind");
 }
 
 static inline int is_signed_op(optype op)
@@ -2053,8 +2064,9 @@ static inline unsigned size_normalized(unsigned size)
         case 8:
             return 8;
         default:
-            assert(0 && "size_normalized() - unexpected size");
+            break;
     }
+    ABORT("size_normalized() - unexpected size");
 }
 
 static inline interval_group_ptr
@@ -2243,9 +2255,9 @@ static inline int __check_range_constraint(fuzzy_ctx_t* ctx, Z3_ast expr)
             Z3_dec_ref(ctx->z3_ctx, non_const_operand2);
             goto END_FUN_2;
         }
-        assert(ig.n > 0 &&
-               "__check_range_constraint() - size of group is zero. "
-               "It shouldn't happen");
+        ASSERT_OR_ABORT(ig.n > 0,
+                        "__check_range_constraint() - size of group is zero. "
+                        "It shouldn't happen");
 
         unsigned long input_maxval = (2 << ((ig.n * 8) - 1)) - 1;
         if (!is_signed_op(__find_optype(decl_kind, const_operand)) &&
@@ -2273,9 +2285,9 @@ static inline int __check_range_constraint(fuzzy_ctx_t* ctx, Z3_ast expr)
         if (!input_group_ok || approx)
             // no input group or approximated group
             goto END_FUN_2;
-        assert(ig.n > 0 &&
-               "__check_range_constraint() - size of group is zero. "
-               "It shouldn't happen");
+        ASSERT_OR_ABORT(ig.n > 0,
+                        "__check_range_constraint() - size of group is zero. "
+                        "It shouldn't happen");
     }
 
     // it is a range query!
@@ -2528,7 +2540,8 @@ static __always_inline int PHASE_reuse(fuzzy_ctx_t* ctx, Z3_ast query,
     if (skip_reuse)
         return 0;
 
-    assert(ctx->testcases.size > 1 && "PHASE_reuse not enough testcases");
+    ASSERT_OR_ABORT(ctx->testcases.size > 1,
+                    "PHASE_reuse not enough testcases");
 #ifdef DEBUG_CHECK_LIGHT
     Z3FUZZ_LOG("Trying REUSE PHASE\n");
 #endif
@@ -2563,8 +2576,8 @@ static __always_inline int PHASE_input_to_state(fuzzy_ctx_t* ctx, Z3_ast query,
     if (unlikely(skip_input_to_state))
         return 0;
 
-    assert(ast_data.is_input_to_state &&
-           "PHASE_input_to_state not an input to state query");
+    ASSERT_OR_ABORT(ast_data.is_input_to_state,
+                    "PHASE_input_to_state not an input to state query");
 #ifdef DEBUG_CHECK_LIGHT
     Z3FUZZ_LOG("Trying Input to State\n");
 #endif
@@ -2628,8 +2641,8 @@ static __always_inline int PHASE_input_to_state_extended(
     if (unlikely(skip_input_to_state_extended))
         return 0;
 
-    assert(ast_data.values.size > 0 &&
-           "PHASE_input_to_state_extended  no early constants");
+    ASSERT_OR_ABORT(ast_data.values.size > 0,
+                    "PHASE_input_to_state_extended  no early constants");
 
 #ifdef DEBUG_CHECK_LIGHT
     Z3FUZZ_LOG("Trying Input to State Extended\n");
@@ -2758,7 +2771,7 @@ PHASE_gradient_descend(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
     eval_wapper_ctx_t ew;
 
     int valid_eval = __gd_init_eval(ctx, query, out_ast, 0, 0, &ew);
-    assert(valid_eval == 1 && "eval should be always valid here");
+    ASSERT_OR_ABORT(valid_eval == 1, "eval should be always valid here");
 
     eval_set_ctx(&ew);
     set__digest_t digest_set;
@@ -4978,7 +4991,7 @@ static __always_inline int PHASE_afl_havoc(fuzzy_ctx_t* ctx, Z3_ast query,
                 break;
             }
             default: {
-                assert(0 && "havoc default case");
+                ASSERT_OR_ABORT(0, "havoc default case");
             }
         }
         // do evaluate
@@ -5045,8 +5058,9 @@ PHASE_range_bruteforce(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
     index_group_t* ig = NULL;
     set_reset_iter__index_group_t(&ast_data.inputs->index_groups, 0);
     set_iter_next__index_group_t(&ast_data.inputs->index_groups, 0, &ig);
-    assert(ig->n > 0 &&
-           "PHASE_range_bruteforce() - group size < 0. It shouldn't happen");
+    ASSERT_OR_ABORT(
+        ig->n > 0,
+        "PHASE_range_bruteforce() - group size < 0. It shouldn't happen");
 
     interval_t* interval = interval_group_get_interval(group_intervals, ig);
     if (interval == 0)
@@ -5414,8 +5428,9 @@ void z3fuzz_add_assignment(fuzzy_ctx_t* ctx, int idx, Z3_ast assignment_value)
         ctx->size_assignments = (idx + 1) * 3 / 2;
         ctx->assignments      = (Z3_ast*)realloc(
             ctx->assignments, sizeof(Z3_ast) * ctx->size_assignments);
-        assert(ctx->assignments != NULL &&
-               "z3fuzz_add_assignment() ctx->assignments - failed realloc");
+        ASSERT_OR_ABORT(
+            ctx->assignments != NULL,
+            "z3fuzz_add_assignment() ctx->assignments - failed realloc");
 
         // set to zero the new memory
         memset(ctx->assignments + old_size, 0,
@@ -5439,18 +5454,20 @@ void z3fuzz_add_assignment(fuzzy_ctx_t* ctx, int idx, Z3_ast assignment_value)
             testcase->values_len = (idx + 1) * 3 / 2;
             testcase->values     = (unsigned long*)realloc(
                 testcase->values, sizeof(unsigned long) * testcase->values_len);
-            assert(testcase->values != 0 &&
-                   "z3fuzz_add_assignment() testcase->values - failed realloc");
+            ASSERT_OR_ABORT(
+                testcase->values != 0,
+                "z3fuzz_add_assignment() testcase->values - failed realloc");
             testcase->value_sizes = (unsigned char*)realloc(
                 testcase->value_sizes,
                 sizeof(unsigned char) * testcase->values_len);
-            assert(testcase->value_sizes != 0 &&
-                   "z3fuzz_add_assignment() testcase->value_sizes - failed "
-                   "realloc");
+            ASSERT_OR_ABORT(
+                testcase->value_sizes != 0,
+                "z3fuzz_add_assignment() testcase->value_sizes - failed "
+                "realloc");
             testcase->z3_values = (Z3_ast*)realloc(
                 testcase->z3_values, sizeof(Z3_ast) * testcase->values_len);
-            assert(
-                testcase->z3_values != 0 &&
+            ASSERT_OR_ABORT(
+                testcase->z3_values != 0,
                 "z3fuzz_add_assignment() testcase->z3_values - failed realloc");
             memset(testcase->z3_values + old_len, 0,
                    testcase->values_len - old_len);
@@ -5475,13 +5492,14 @@ void z3fuzz_add_assignment(fuzzy_ctx_t* ctx, int idx, Z3_ast assignment_value)
         tmp_input = (unsigned long*)realloc(
             tmp_input,
             sizeof(unsigned long) * ctx->testcases.data[0].values_len);
-        assert(tmp_input != 0 &&
-               "z3fuzz_add_assignment() tmp_input - failed realloc");
+        ASSERT_OR_ABORT(tmp_input != 0,
+                        "z3fuzz_add_assignment() tmp_input - failed realloc");
         tmp_opt_input = (unsigned long*)realloc(
             tmp_opt_input,
             sizeof(unsigned long) * ctx->testcases.data[0].values_len);
-        assert(tmp_opt_input != 0 &&
-               "z3fuzz_add_assignment() tmp_opt_input - failed realloc");
+        ASSERT_OR_ABORT(
+            tmp_opt_input != 0,
+            "z3fuzz_add_assignment() tmp_opt_input - failed realloc");
     }
 }
 
@@ -5569,10 +5587,10 @@ unsigned long z3fuzz_maximize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_maximize,
 
     Z3_ast  original_to_maximize = to_maximize;
     Z3_sort arg_sort             = Z3_get_sort(ctx->z3_ctx, to_maximize);
-    assert(Z3_get_sort_kind(ctx->z3_ctx, arg_sort) == Z3_BV_SORT &&
-           "z3fuzz_minimize requires a BV sort");
+    ASSERT_OR_ABORT(Z3_get_sort_kind(ctx->z3_ctx, arg_sort) == Z3_BV_SORT,
+                    "z3fuzz_minimize requires a BV sort");
     unsigned sort_size = Z3_get_bv_sort_size(ctx->z3_ctx, arg_sort);
-    assert(sort_size > 1 && "z3fuzz_minimize unexpected sort size");
+    ASSERT_OR_ABORT(sort_size > 1, "z3fuzz_minimize unexpected sort size");
 
     if (sort_size < 64) {
         to_maximize = Z3_mk_sign_ext(ctx->z3_ctx, 64 - sort_size, to_maximize);
@@ -5637,10 +5655,10 @@ unsigned long z3fuzz_minimize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_minimize,
     testcase_t* current_testcase = &ctx->testcases.data[0];
 
     Z3_sort arg_sort = Z3_get_sort(ctx->z3_ctx, to_minimize);
-    assert(Z3_get_sort_kind(ctx->z3_ctx, arg_sort) == Z3_BV_SORT &&
-           "z3fuzz_minimize requires a BV sort");
+    ASSERT_OR_ABORT(Z3_get_sort_kind(ctx->z3_ctx, arg_sort) == Z3_BV_SORT,
+                    "z3fuzz_minimize requires a BV sort");
     unsigned sort_size = Z3_get_bv_sort_size(ctx->z3_ctx, arg_sort);
-    assert(sort_size > 1 && "z3fuzz_minimize unexpected sort size");
+    ASSERT_OR_ABORT(sort_size > 1, "z3fuzz_minimize unexpected sort size");
 
     if (sort_size < 64) {
         to_minimize = Z3_mk_sign_ext(ctx->z3_ctx, 64 - sort_size, to_minimize);
@@ -5730,7 +5748,7 @@ void z3fuzz_dump_proof(fuzzy_ctx_t* ctx, const char* filename,
                        unsigned char const* proof, unsigned long proof_size)
 {
     FILE* fp = fopen(filename, "w");
-    assert(fp != NULL && "z3fuzz_dump_proof() open failed");
+    ASSERT_OR_ABORT(fp != NULL, "z3fuzz_dump_proof() open failed");
 
     Z3FUZZ_LOG("dumping proof in %s\n", filename);
 
@@ -5777,14 +5795,14 @@ unsigned long z3fuzz_evaluate_expression_z3(fuzzy_ctx_t* ctx, Z3_ast query,
     Z3_ast  solution;
     Z3_bool successfulEval =
         Z3_model_eval(ctx->z3_ctx, z3_m, query, Z3_TRUE, &solution);
-    assert(successfulEval && "Failed to evaluate model");
+    ASSERT_OR_ABORT(successfulEval, "Failed to evaluate model");
 
     Z3_model_dec_ref(ctx->z3_ctx, z3_m);
     if (Z3_get_ast_kind(ctx->z3_ctx, solution) == Z3_NUMERAL_AST) {
         Z3_bool successGet = Z3_get_numeral_uint64(ctx->z3_ctx, solution, &res);
-        assert(successGet == Z3_TRUE &&
-               "z3fuzz_evaluate_expression_z3() failed to get "
-               "constant");
+        ASSERT_OR_ABORT(successGet == Z3_TRUE,
+                        "z3fuzz_evaluate_expression_z3() failed to get "
+                        "constant");
     } else
         res = Z3_get_bool_value(ctx->z3_ctx, solution) == Z3_L_TRUE ? 1UL : 0UL;
     Z3_dec_ref(ctx->z3_ctx, solution);

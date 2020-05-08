@@ -1,8 +1,19 @@
 #include <fts.h>
 #include <stdlib.h>
-#include <assert.h>
 #include "testcase-list.h"
 
+#ifndef likely
+#define likely(x) __builtin_expect(!!(x), 1)
+#endif
+#ifndef unlikely
+#define unlikely(x) __builtin_expect(!!(x), 0)
+#endif
+
+#define ASSERT_OR_ABORT(x, mex)                                                \
+    if (unlikely(!(x))) {                                                      \
+        fprintf(stderr, "[testcase-lib ABORT] " mex "\n");                     \
+        abort();                                                               \
+    }
 #define TESTCASE_LIB_LOG(x...) fprintf(stderr, "[testcase-lib] " x)
 
 void init_testcase_list(testcase_list_t* t) { da_init__testcase_t(t); }
@@ -27,7 +38,7 @@ void free_testcase_list(Z3_context ctx, testcase_list_t* t)
 
 void load_testcase(testcase_list_t* t, char const* filename, Z3_context ctx)
 {
-    assert(t->size < t->max_size && "testcase_list is full\n");
+    ASSERT_OR_ABORT(t->size < t->max_size, "testcase_list is full");
 
     TESTCASE_LIB_LOG("Loading testcase \"%s\" \n", filename);
 
@@ -36,7 +47,7 @@ void load_testcase(testcase_list_t* t, char const* filename, Z3_context ctx)
     int           res, i = 0;
     unsigned char c;
 
-    assert(fp != NULL && "fopen() failed");
+    ASSERT_OR_ABORT(fp != NULL, "fopen() failed");
 
     fseek(fp, 0L, SEEK_END);
     tc.testcase_len = ftell(fp);
@@ -44,8 +55,9 @@ void load_testcase(testcase_list_t* t, char const* filename, Z3_context ctx)
     fseek(fp, 0L, SEEK_SET);
 
     tc.values = (unsigned long*)malloc(sizeof(unsigned long) * tc.values_len);
-    tc.z3_values   = (Z3_ast*)malloc(sizeof(Z3_ast) * tc.values_len);
-    tc.value_sizes = (unsigned char*)malloc(sizeof(unsigned char) * tc.values_len);
+    tc.z3_values = (Z3_ast*)malloc(sizeof(Z3_ast) * tc.values_len);
+    tc.value_sizes =
+        (unsigned char*)malloc(sizeof(unsigned char) * tc.values_len);
 
     Z3_sort bv_sort = Z3_mk_bv_sort(ctx, 8);
     while (1) {
@@ -73,10 +85,10 @@ void load_testcase_folder(testcase_list_t* t, char* testcase_dir,
     TESTCASE_LIB_LOG("Loading testcases from folder \"%s\" \n", testcase_dir);
 
     ftsp = fts_open(file_list, fts_options, NULL);
-    assert(ftsp != NULL && "error in fts_open");
+    ASSERT_OR_ABORT(ftsp != NULL, "error in fts_open");
 
     chp = fts_children(ftsp, 0);
-    assert(chp != NULL && "error in fts_children");
+    ASSERT_OR_ABORT(chp != NULL, "error in fts_children");
 
     while ((p = fts_read(ftsp)) != NULL) {
         switch (p->fts_info) {

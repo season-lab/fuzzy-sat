@@ -1,6 +1,5 @@
 #include <stdlib.h>
 #include <stdio.h>
-#include <assert.h>
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -13,6 +12,12 @@
 #ifndef unlikely
 #define unlikely(x) __builtin_expect(!!(x), 0)
 #endif
+
+#define ASSERT_OR_ABORT(x, mex)                                                \
+    if (unlikely(!(x))) {                                                      \
+        fprintf(stderr, "[interval ABORT] " mex "\n");                         \
+        abort();                                                               \
+    }
 
 #define DEBUG_GRADIENT 0
 #define DEBUG_PARTIAL_DERIVATIVE 0
@@ -65,7 +70,7 @@ static inline unsigned UR(unsigned limit)
     if (!rand_cnt--) {
         unsigned seed[2];
         size_t   res = read(dev_urandom_fd, &seed, sizeof(seed));
-        assert(res == sizeof(seed) && "read failed");
+        ASSERT_OR_ABORT(res == sizeof(seed), "read failed");
         srandom(seed[0]);
         rand_cnt = (RESEED_RNG / 2) + (seed[1] % RESEED_RNG);
     }
@@ -136,7 +141,7 @@ static int partial_derivative(gradient_el_t* out_grad_el,
         out_grad_el->direction = DESCENDING;
         return EXIT_OK;
     }
-    assert(0 && "partial_derivative - should be unreachable");
+    ASSERT_OR_ABORT(0, "partial_derivative - should be unreachable");
 }
 
 static int compute_gradient(gradient_el_t* out_grad,
@@ -266,7 +271,7 @@ static int descend(uint64_t (*function)(uint64_t*, int*), gradient_el_t* grad,
             else if (grad[delta_idx].direction == DESCENDING)
                 x_next[delta_idx] = x_next[delta_idx] + movement;
             else {
-                assert(0 && "descend - should be unreachable");
+                ASSERT_OR_ABORT(0, "descend - should be unreachable");
             }
 
             f_next = function(x_next, &should_exit);
@@ -462,7 +467,7 @@ void gd_init()
 {
     dev_urandom_fd = open("/dev/urandom", O_RDONLY);
     if (dev_urandom_fd < 0)
-        assert(0 && "Unable to open /dev/urandom");
+        ASSERT_OR_ABORT(0, "Unable to open /dev/urandom");
 
     __tmp_gradient      = (gradient_el_t*)malloc(sizeof(gradient_el_t) * 10);
     __tmp_gradient_size = 10;

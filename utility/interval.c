@@ -1,14 +1,26 @@
-#include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include "interval.h"
 
+#ifndef likely
+#define likely(x) __builtin_expect(!!(x), 1)
+#endif
+#ifndef unlikely
+#define unlikely(x) __builtin_expect(!!(x), 0)
+#endif
+
+#define ASSERT_OR_ABORT(x, mex)                                                \
+    if (unlikely(!(x))) {                                                      \
+        fprintf(stderr, "[interval ABORT] " mex "\n");                         \
+        abort();                                                               \
+    }
 #define _min(a, b) (a) < (b) ? (a) : (b)
 #define _max(a, b) (a) > (b) ? (a) : (b)
 
 interval_t init_interval(unsigned size)
 // for 8 bit is -> [-256, 255]. Fixed at the first update
 {
-    assert(size <= 64 && "INTERVAL_H init_interval() - invalid size");
+    ASSERT_OR_ABORT(size <= 64, "INTERVAL_H init_interval() - invalid size");
 
     __int128_t mask = 2;
     mask            = (mask << (size - 1)) - 1;
@@ -18,7 +30,7 @@ interval_t init_interval(unsigned size)
 
 interval_t init_signed_interval(unsigned size)
 {
-    assert(size <= 64 && "INTERVAL_H init_interval() - invalid size");
+    ASSERT_OR_ABORT(size <= 64, "INTERVAL_H init_interval() - invalid size");
 
     __int128_t mask = 2;
     mask            = (mask << (size - 2)) - 1;
@@ -28,7 +40,7 @@ interval_t init_signed_interval(unsigned size)
 
 interval_t init_unsigned_interval(unsigned size)
 {
-    assert(size <= 64 && "INTERVAL_H init_interval() - invalid size");
+    ASSERT_OR_ABORT(size <= 64, "INTERVAL_H init_interval() - invalid size");
 
     __int128_t mask = 2;
     mask            = (mask << (size - 1)) - 1;
@@ -101,7 +113,7 @@ int update_interval(interval_t* src, __int128_t c, optype op)
         }
 
         default:
-            assert(0 && "INTERVAL_H update_interval() - invalid op");
+            ASSERT_OR_ABORT(0, "INTERVAL_H update_interval() - invalid op");
             break;
     }
     return 1;
@@ -177,7 +189,7 @@ const char* op_to_string(optype op)
             return "OP_SLE";
 
         default:
-            assert(0 && "op_to_string() - unexpected optype");
+            ASSERT_OR_ABORT(0, "op_to_string() - unexpected optype");
     }
 }
 
