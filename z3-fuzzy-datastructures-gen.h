@@ -134,7 +134,7 @@ typedef interval_group_t* interval_group_ptr;
 #define SET_DATA_T interval_group_ptr
 #include <set.h>
 
-#define DICT_DATA_T interval_group_ptr
+#define DICT_DATA_T da__interval_group_ptr
 #include <dict.h>
 
 static unsigned long interval_group_ptr_hash(interval_group_ptr* el)
@@ -143,10 +143,15 @@ static unsigned long interval_group_ptr_hash(interval_group_ptr* el)
 }
 
 static unsigned int interval_group_ptr_equals(interval_group_ptr* el1,
-                                     interval_group_ptr* el2)
+                                              interval_group_ptr* el2)
 {
     return index_group_equals(&(*el1)->group, &(*el2)->group);
 }
 
 static void interval_group_set_el_free(interval_group_ptr* el) { free(*el); }
+
+static void index_to_group_intervals_el_free(da__interval_group_ptr* el)
+{
+    da_free__interval_group_ptr(el, NULL);
+}
 // ******* end interval group *************

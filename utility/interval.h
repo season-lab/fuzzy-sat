@@ -27,6 +27,7 @@ int         update_interval(interval_t* src, __int128_t c, optype op);
 void        print_interval(interval_t* interval);
 const char* op_to_string(optype op);
 
+int      is_element_in_interval(interval_t* interval, uint64_t value);
 int      is_signed(interval_t* interval);
 int64_t  get_signed_min(interval_t* interval);
 int64_t  get_signed_max(interval_t* interval);

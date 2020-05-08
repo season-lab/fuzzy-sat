@@ -107,6 +107,19 @@ int update_interval(interval_t* src, __int128_t c, optype op)
     return 1;
 }
 
+int is_element_in_interval(interval_t* interval, uint64_t value)
+{
+    __int128_t value_ext;
+    if (is_signed(interval)) {
+        uint64_t mask = 1UL << (interval->size - 1UL);
+        if (value & mask)
+            value |= ((2 << (64 - interval->size - 1)) - 1) << interval->size;
+        value_ext = (__int128_t)value;
+    } else
+        value_ext = (__uint128_t)value;
+    return value_ext >= interval->min && value_ext <= interval->max;
+}
+
 int is_signed(interval_t* interval)
 {
     uint64_t high = interval->min >> 64;

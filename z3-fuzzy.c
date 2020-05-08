@@ -27,6 +27,7 @@
 // #define DEBUG_CHECK_LIGHT
 // #define DEBUG_DETECT_GROUP
 
+// #define SKIP_IS_VALID_EVAL
 // #define USE_MD5_HASH
 
 #define USE_AFL_DET_GROUPS
@@ -755,10 +756,12 @@ void z3fuzz_init(fuzzy_ctx_t* fctx, Z3_context ctx, char* seed_filename,
     set_init__interval_group_ptr(group_intervals, &interval_group_ptr_hash,
                                  &interval_group_ptr_equals);
 
-    fctx->index_to_group_intervals = malloc(sizeof(dict__interval_group_ptr));
-    dict__interval_group_ptr* index_to_group_intervals =
-        (dict__interval_group_ptr*)fctx->index_to_group_intervals;
-    dict_init__interval_group_ptr(index_to_group_intervals, NULL);
+    fctx->index_to_group_intervals =
+        malloc(sizeof(dict__da__interval_group_ptr));
+    dict__da__interval_group_ptr* index_to_group_intervals =
+        (dict__da__interval_group_ptr*)fctx->index_to_group_intervals;
+    dict_init__da__interval_group_ptr(index_to_group_intervals,
+                                      &index_to_group_intervals_el_free);
 
     fctx->assignment_inputs_cache = malloc(sizeof(dict__ast_info_ptr));
     dict__ast_info_ptr* assignment_inputs_cache =
@@ -847,9 +850,9 @@ void z3fuzz_free(fuzzy_ctx_t* ctx)
     set_free__interval_group_ptr(group_intervals, interval_group_set_el_free);
     free(ctx->group_intervals);
 
-    dict__interval_group_ptr* index_to_group_intervals =
-        (dict__interval_group_ptr*)ctx->index_to_group_intervals;
-    dict_free__interval_group_ptr(index_to_group_intervals);
+    dict__da__interval_group_ptr* index_to_group_intervals =
+        (dict__da__interval_group_ptr*)ctx->index_to_group_intervals;
+    dict_free__da__interval_group_ptr(index_to_group_intervals);
     free(ctx->index_to_group_intervals);
 
     gd_free();
@@ -942,6 +945,65 @@ evaluate_pi(fuzzy_ctx_t* ctx, Z3_ast pi, unsigned long* values,
 
     set_free__ulong(&processed_asts, NULL);
     return *num_sat == num_fields - num_skipped;
+}
+
+static __always_inline unsigned long index_group_to_value(index_group_t* ig,
+                                                          unsigned long* values)
+{
+    unsigned long res = 0;
+    int           i;
+    for (i = 0; i < ig->n; ++i)
+        res |= (values[ig->indexes[ig->n - i - 1]] << (8UL * i));
+    return res;
+}
+
+static __always_inline int is_valid_eval_index(fuzzy_ctx_t*   ctx,
+                                               unsigned long  index,
+                                               unsigned long* values,
+                                               unsigned char* value_sizes,
+                                               unsigned long  n_values)
+{
+#ifdef SKIP_IS_VALID_EVAL
+    return 1;
+#else
+    // check validity of index eval
+    dict__da__interval_group_ptr* index_to_group_intervals =
+        (dict__da__interval_group_ptr*)ctx->index_to_group_intervals;
+
+    da__interval_group_ptr* list;
+    list =
+        dict_get_ref__da__interval_group_ptr(index_to_group_intervals, index);
+    if (list == NULL)
+        return 1;
+
+    unsigned           i;
+    interval_group_ptr el;
+    for (i = 0; i < list->size; ++i) {
+        el = list->data[i];
+
+        unsigned long group_value = index_group_to_value(&el->group, values);
+        if (!is_element_in_interval(&el->interval, group_value))
+            return 0;
+    }
+    return 1;
+#endif
+}
+
+static __always_inline int
+is_valid_eval_group(fuzzy_ctx_t* ctx, index_group_t* ig, unsigned long* values,
+                    unsigned char* value_sizes, unsigned long n_values)
+{
+#ifdef SKIP_IS_VALID_EVAL
+    return 1;
+#else
+    // for every element in ig, check interval validity
+    unsigned i;
+    for (i = 0; i < ig->n; ++i)
+        if (!is_valid_eval_index(ctx, ig->indexes[i], values, value_sizes,
+                                 n_values))
+            return 0;
+    return 1;
+#endif
 }
 
 static inline int __evaluate_branch_query(fuzzy_ctx_t* ctx, Z3_ast query,
@@ -1997,7 +2059,8 @@ static inline unsigned size_normalized(unsigned size)
 
 static inline interval_group_ptr
 interval_group_set_add_or_modify(set__interval_group_ptr* set,
-                                 index_group_t* ig, uint64_t c, optype op)
+                                 index_group_t* ig, uint64_t c, optype op,
+                                 int* created_new)
 {
     interval_group_t    igt     = {.group = *ig, .interval = {0}};
     interval_group_ptr  igt_p   = &igt;
@@ -2007,6 +2070,7 @@ interval_group_set_add_or_modify(set__interval_group_ptr* set,
         update_interval(&(*igt_ptr)->interval, c, op);
         return *igt_ptr;
     } else {
+        *created_new = 1;
         interval_group_ptr new_el =
             (interval_group_ptr)malloc(sizeof(interval_group_t));
         unsigned size    = ig->n;
@@ -2016,6 +2080,23 @@ interval_group_set_add_or_modify(set__interval_group_ptr* set,
         new_el->group = *ig;
         set_add__interval_group_ptr(set, new_el);
         return new_el;
+    }
+}
+
+static inline void
+update_or_create_in_index_to_group_intervals(dict__da__interval_group_ptr* dict,
+                                             unsigned long                 idx,
+                                             interval_group_ptr            el)
+{
+    da__interval_group_ptr* el_list;
+    el_list = dict_get_ref__da__interval_group_ptr(dict, idx);
+    if (el_list == NULL) {
+        da__interval_group_ptr new_list;
+        da_init__interval_group_ptr(&new_list);
+        da_add_item__interval_group_ptr(&new_list, el);
+        dict_set__da__interval_group_ptr(dict, idx, new_list);
+    } else {
+        da_add_item__interval_group_ptr(el_list, el);
     }
 }
 
@@ -2203,15 +2284,19 @@ static inline int __check_range_constraint(fuzzy_ctx_t* ctx, Z3_ast expr)
     set__interval_group_ptr* group_intervals =
         (set__interval_group_ptr*)ctx->group_intervals;
 
-    dict__interval_group_ptr* index_to_group_intervals =
-        (dict__interval_group_ptr*)ctx->index_to_group_intervals;
+    dict__da__interval_group_ptr* index_to_group_intervals =
+        (dict__da__interval_group_ptr*)ctx->index_to_group_intervals;
 
-    interval_group_ptr el =
-        interval_group_set_add_or_modify(group_intervals, &ig, constant, op);
-    unsigned i;
-    for (i = 0; i < ig.n; ++i)
-        dict_set__interval_group_ptr(index_to_group_intervals, ig.indexes[i],
-                                     el);
+    int                created_new;
+    interval_group_ptr el = interval_group_set_add_or_modify(
+        group_intervals, &ig, constant, op, &created_new);
+
+    if (created_new) {
+        unsigned i;
+        for (i = 0; i < ig.n; ++i)
+            update_or_create_in_index_to_group_intervals(
+                index_to_group_intervals, ig.indexes[i], el);
+    }
 
 #ifdef DEBUG_RANGE
     puts("+++++++++++++++++++++++++++++++++++++");
@@ -2501,22 +2586,27 @@ static __always_inline int PHASE_input_to_state(fuzzy_ctx_t* ctx, Z3_ast query,
 #endif
         tmp_input[index] = b;
     }
-    int eval_v = __evaluate_branch_query(
-        ctx, query, branch_condition, tmp_input, current_testcase->value_sizes,
-        current_testcase->values_len);
-    if (eval_v == 1) {
+    int valid_eval = is_valid_eval_group(ctx, group, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len);
+    if (valid_eval) {
+        int eval_v = __evaluate_branch_query(
+            ctx, query, branch_condition, tmp_input,
+            current_testcase->value_sizes, current_testcase->values_len);
+        if (eval_v == 1) {
 #ifdef PRINT_SAT
-        Z3FUZZ_LOG("[check light - input to state] Query is SAT\n");
+            Z3FUZZ_LOG("[check light - input to state] Query is SAT\n");
 #endif
-        ctx->stats.input_to_state++;
-        ctx->stats.num_sat++;
-        __vals_long_to_char(tmp_input, tmp_proof,
-                            current_testcase->testcase_len);
-        *proof      = tmp_proof;
-        *proof_size = current_testcase->testcase_len;
-        return 1;
-    } else if (unlikely(eval_v == TIMEOUT_V))
-        return TIMEOUT_V;
+            ctx->stats.input_to_state++;
+            ctx->stats.num_sat++;
+            __vals_long_to_char(tmp_input, tmp_proof,
+                                current_testcase->testcase_len);
+            *proof      = tmp_proof;
+            *proof_size = current_testcase->testcase_len;
+            return 1;
+        } else if (unlikely(eval_v == TIMEOUT_V))
+            return TIMEOUT_V;
+    }
 
     // if (ast_data.op_input_to_state == Z3_OP_EQ)
     //     // query is UNSAT
@@ -2568,23 +2658,29 @@ static __always_inline int PHASE_input_to_state_extended(
 
                 tmp_input[index] = b;
             }
-            int eval_v = __evaluate_branch_query(
-                ctx, query, branch_condition, tmp_input,
-                current_testcase->value_sizes, current_testcase->values_len);
-            if (eval_v == 1) {
+            int valid_eval = is_valid_eval_group(ctx, group, tmp_input,
+                                                 current_testcase->value_sizes,
+                                                 current_testcase->values_len);
+            if (valid_eval) {
+                int eval_v = __evaluate_branch_query(
+                    ctx, query, branch_condition, tmp_input,
+                    current_testcase->value_sizes,
+                    current_testcase->values_len);
+                if (eval_v == 1) {
 #ifdef PRINT_SAT
-                Z3FUZZ_LOG(
-                    "[check light - input to state extended] Query is SAT\n");
+                    Z3FUZZ_LOG("[check light - input to state extended] Query "
+                               "is SAT\n");
 #endif
-                ctx->stats.input_to_state_ext++;
-                ctx->stats.num_sat++;
-                __vals_long_to_char(tmp_input, tmp_proof,
-                                    current_testcase->testcase_len);
-                *proof      = tmp_proof;
-                *proof_size = current_testcase->values_len;
-                return 1;
-            } else if (unlikely(eval_v == TIMEOUT_V))
-                return TIMEOUT_V;
+                    ctx->stats.input_to_state_ext++;
+                    ctx->stats.num_sat++;
+                    __vals_long_to_char(tmp_input, tmp_proof,
+                                        current_testcase->testcase_len);
+                    *proof      = tmp_proof;
+                    *proof_size = current_testcase->values_len;
+                    return 1;
+                } else if (unlikely(eval_v == TIMEOUT_V))
+                    return TIMEOUT_V;
+            }
             // restore tmp_input
             for (k = 0; k < group->n; ++k) {
                 index            = group->indexes[group->n - k - 1];
@@ -2728,23 +2824,28 @@ static __always_inline int SUBPHASE_afl_det_single_waliking_bit(
     for (i = 0; i < 8; ++i) {
         tmp_byte               = FLIP_BIT(input_byte_0, i);
         tmp_input[input_index] = (unsigned long)tmp_byte;
-        int eval_v             = __evaluate_branch_query(
-            ctx, query, branch_condition, tmp_input,
-            current_testcase->value_sizes, current_testcase->values_len);
-        if (eval_v == 1) {
+        int valid_eval = is_valid_eval_index(ctx, input_index, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len);
+        if (valid_eval) {
+            int eval_v = __evaluate_branch_query(
+                ctx, query, branch_condition, tmp_input,
+                current_testcase->value_sizes, current_testcase->values_len);
+            if (eval_v == 1) {
 #ifdef PRINT_SAT
-            Z3FUZZ_LOG("[check light - flip1] "
-                       "Query is SAT\n");
+                Z3FUZZ_LOG("[check light - flip1] "
+                           "Query is SAT\n");
 #endif
-            ctx->stats.flip1++;
-            ctx->stats.num_sat++;
-            __vals_long_to_char(tmp_input, tmp_proof,
-                                current_testcase->testcase_len);
-            *proof      = tmp_proof;
-            *proof_size = current_testcase->testcase_len;
-            return 1;
-        } else if (unlikely(eval_v == TIMEOUT_V))
-            return TIMEOUT_V;
+                ctx->stats.flip1++;
+                ctx->stats.num_sat++;
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                *proof      = tmp_proof;
+                *proof_size = current_testcase->testcase_len;
+                return 1;
+            } else if (unlikely(eval_v == TIMEOUT_V))
+                return TIMEOUT_V;
+        }
     }
     return 0;
 }
@@ -2766,23 +2867,29 @@ static __always_inline int SUBPHASE_afl_det_two_waliking_bits(
         tmp_byte               = FLIP_BIT(input_byte_0, i);
         tmp_byte               = FLIP_BIT(tmp_byte, i + 1);
         tmp_input[input_index] = (unsigned long)tmp_byte;
-        int eval_v             = __evaluate_branch_query(
-            ctx, query, branch_condition, tmp_input,
-            current_testcase->value_sizes, current_testcase->values_len);
-        if (eval_v == 1) {
+        int valid_eval = is_valid_eval_index(ctx, input_index, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len);
+        if (valid_eval) {
+
+            int eval_v = __evaluate_branch_query(
+                ctx, query, branch_condition, tmp_input,
+                current_testcase->value_sizes, current_testcase->values_len);
+            if (eval_v == 1) {
 #ifdef PRINT_SAT
-            Z3FUZZ_LOG("[check light - flip2] "
-                       "Query is SAT\n");
+                Z3FUZZ_LOG("[check light - flip2] "
+                           "Query is SAT\n");
 #endif
-            ctx->stats.flip2++;
-            ctx->stats.num_sat++;
-            __vals_long_to_char(tmp_input, tmp_proof,
-                                current_testcase->testcase_len);
-            *proof      = tmp_proof;
-            *proof_size = current_testcase->testcase_len;
-            return 1;
-        } else if (unlikely(eval_v == TIMEOUT_V))
-            return TIMEOUT_V;
+                ctx->stats.flip2++;
+                ctx->stats.num_sat++;
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                *proof      = tmp_proof;
+                *proof_size = current_testcase->testcase_len;
+                return 1;
+            } else if (unlikely(eval_v == TIMEOUT_V))
+                return TIMEOUT_V;
+        }
     }
     return 0;
 }
@@ -2807,23 +2914,28 @@ static __always_inline int SUBPHASE_afl_det_four_waliking_bits(
         tmp_byte               = FLIP_BIT(tmp_byte, i + 2);
         tmp_byte               = FLIP_BIT(tmp_byte, i + 3);
         tmp_input[input_index] = (unsigned long)tmp_byte;
-        int eval_v             = __evaluate_branch_query(
-            ctx, query, branch_condition, tmp_input,
-            current_testcase->value_sizes, current_testcase->values_len);
-        if (eval_v == 1) {
+        int valid_eval = is_valid_eval_index(ctx, input_index, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len);
+        if (valid_eval) {
+            int eval_v = __evaluate_branch_query(
+                ctx, query, branch_condition, tmp_input,
+                current_testcase->value_sizes, current_testcase->values_len);
+            if (eval_v == 1) {
 #ifdef PRINT_SAT
-            Z3FUZZ_LOG("[check light - flip4] "
-                       "Query is SAT\n");
+                Z3FUZZ_LOG("[check light - flip4] "
+                           "Query is SAT\n");
 #endif
-            ctx->stats.flip4++;
-            ctx->stats.num_sat++;
-            __vals_long_to_char(tmp_input, tmp_proof,
-                                current_testcase->testcase_len);
-            *proof      = tmp_proof;
-            *proof_size = current_testcase->testcase_len;
-            return 1;
-        } else if (unlikely(eval_v == TIMEOUT_V))
-            return TIMEOUT_V;
+                ctx->stats.flip4++;
+                ctx->stats.num_sat++;
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                *proof      = tmp_proof;
+                *proof_size = current_testcase->testcase_len;
+                return 1;
+            } else if (unlikely(eval_v == TIMEOUT_V))
+                return TIMEOUT_V;
+        }
     }
     return 0;
 }
@@ -2841,23 +2953,28 @@ SUBPHASE_afl_det_byte_flip(fuzzy_ctx_t* ctx, Z3_ast query,
         (unsigned char)current_testcase->values[input_index];
 
     tmp_input[input_index] = (unsigned long)input_byte_0 ^ 0xffUL;
-    int eval_v             = __evaluate_branch_query(
-        ctx, query, branch_condition, tmp_input, current_testcase->value_sizes,
-        current_testcase->values_len);
-    if (eval_v == 1) {
+    int valid_eval         = is_valid_eval_index(ctx, input_index, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len);
+    if (valid_eval) {
+        int eval_v = __evaluate_branch_query(
+            ctx, query, branch_condition, tmp_input,
+            current_testcase->value_sizes, current_testcase->values_len);
+        if (eval_v == 1) {
 #ifdef PRINT_SAT
-        Z3FUZZ_LOG("[check light - flip8] "
-                   "Query is SAT\n");
+            Z3FUZZ_LOG("[check light - flip8] "
+                       "Query is SAT\n");
 #endif
-        ctx->stats.flip8++;
-        ctx->stats.num_sat++;
-        __vals_long_to_char(tmp_input, tmp_proof,
-                            current_testcase->testcase_len);
-        *proof      = tmp_proof;
-        *proof_size = current_testcase->testcase_len;
-        return 1;
-    } else if (unlikely(eval_v == TIMEOUT_V))
-        return TIMEOUT_V;
+            ctx->stats.flip8++;
+            ctx->stats.num_sat++;
+            __vals_long_to_char(tmp_input, tmp_proof,
+                                current_testcase->testcase_len);
+            *proof      = tmp_proof;
+            *proof_size = current_testcase->testcase_len;
+            return 1;
+        } else if (unlikely(eval_v == TIMEOUT_V))
+            return TIMEOUT_V;
+    }
     return 0;
 }
 
@@ -2876,41 +2993,52 @@ SUBPHASE_afl_det_arith8(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
 
     for (i = 1; i < 35; ++i) {
         tmp_input[input_index] = (unsigned char)(input_byte_0 + i);
-        int eval_v             = __evaluate_branch_query(
-            ctx, query, branch_condition, tmp_input,
-            current_testcase->value_sizes, current_testcase->values_len);
-        if (eval_v == 1) {
+        int valid_eval = is_valid_eval_index(ctx, input_index, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len);
+        if (valid_eval) {
+            int eval_v = __evaluate_branch_query(
+                ctx, query, branch_condition, tmp_input,
+                current_testcase->value_sizes, current_testcase->values_len);
+            if (eval_v == 1) {
 #ifdef PRINT_SAT
-            Z3FUZZ_LOG("[check light - arith8-sum] "
-                       "Query is SAT\n");
+                Z3FUZZ_LOG("[check light - arith8-sum] "
+                           "Query is SAT\n");
 #endif
-            ctx->stats.arith8_sum++;
-            ctx->stats.num_sat++;
-            __vals_long_to_char(tmp_input, tmp_proof,
-                                current_testcase->testcase_len);
-            *proof      = tmp_proof;
-            *proof_size = current_testcase->testcase_len;
-            return 1;
-        } else if (unlikely(eval_v == TIMEOUT_V))
-            return TIMEOUT_V;
+                ctx->stats.arith8_sum++;
+                ctx->stats.num_sat++;
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                *proof      = tmp_proof;
+                *proof_size = current_testcase->testcase_len;
+                return 1;
+            } else if (unlikely(eval_v == TIMEOUT_V))
+                return TIMEOUT_V;
+        }
         tmp_input[input_index] = (unsigned char)(input_byte_0 - i);
-        eval_v                 = __evaluate_branch_query(
-            ctx, query, branch_condition, tmp_input,
-            current_testcase->value_sizes, current_testcase->values_len);
-        if (eval_v == 1) {
+        valid_eval = is_valid_eval_index(ctx, input_index, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len);
+        if (valid_eval) {
+
+            int eval_v = __evaluate_branch_query(
+                ctx, query, branch_condition, tmp_input,
+                current_testcase->value_sizes, current_testcase->values_len);
+            if (eval_v == 1) {
 #ifdef PRINT_SAT
-            Z3FUZZ_LOG("[check light - arith8-sub] "
-                       "Query is SAT\n");
+                Z3FUZZ_LOG("[check light - arith8-sub] "
+                           "Query is SAT\n");
 #endif
-            ctx->stats.arith8_sub++;
-            ctx->stats.num_sat++;
-            __vals_long_to_char(tmp_input, tmp_proof,
-                                current_testcase->testcase_len);
-            *proof      = tmp_proof;
-            *proof_size = current_testcase->testcase_len;
-            return 1;
-        } else if (unlikely(eval_v == TIMEOUT_V))
-            return TIMEOUT_V;
+                ctx->stats.arith8_sub++;
+                ctx->stats.num_sat++;
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                *proof      = tmp_proof;
+                *proof_size = current_testcase->testcase_len;
+                return 1;
+            } else if (unlikely(eval_v == TIMEOUT_V))
+                return TIMEOUT_V;
+        }
     }
     return 0;
 }
@@ -2929,23 +3057,28 @@ static __always_inline int SUBPHASE_afl_det_int8(fuzzy_ctx_t* ctx, Z3_ast query,
 
     for (i = 0; i < sizeof(interesting8); ++i) {
         tmp_input[input_index] = (unsigned char)(interesting8[i]);
-        int eval_v             = __evaluate_branch_query(
-            ctx, query, branch_condition, tmp_input,
-            current_testcase->value_sizes, current_testcase->values_len);
-        if (eval_v == 1) {
+        int valid_eval = is_valid_eval_index(ctx, input_index, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len);
+        if (valid_eval) {
+            int eval_v = __evaluate_branch_query(
+                ctx, query, branch_condition, tmp_input,
+                current_testcase->value_sizes, current_testcase->values_len);
+            if (eval_v == 1) {
 #ifdef PRINT_SAT
-            Z3FUZZ_LOG("[check light - int8] "
-                       "Query is SAT\n");
+                Z3FUZZ_LOG("[check light - int8] "
+                           "Query is SAT\n");
 #endif
-            ctx->stats.int8++;
-            ctx->stats.num_sat++;
-            __vals_long_to_char(tmp_input, tmp_proof,
-                                current_testcase->testcase_len);
-            *proof      = tmp_proof;
-            *proof_size = current_testcase->testcase_len;
-            return 1;
-        } else if (unlikely(eval_v == TIMEOUT_V))
-            return TIMEOUT_V;
+                ctx->stats.int8++;
+                ctx->stats.num_sat++;
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                *proof      = tmp_proof;
+                *proof_size = current_testcase->testcase_len;
+                return 1;
+            } else if (unlikely(eval_v == TIMEOUT_V))
+                return TIMEOUT_V;
+        }
     }
     return 0;
 }
@@ -2967,23 +3100,31 @@ static __always_inline int SUBPHASE_afl_det_flip_short(
     // flip short
     tmp_input[input_index_0] = (unsigned long)input_byte_0 ^ 0xffUL;
     tmp_input[input_index_1] = (unsigned long)input_byte_1 ^ 0xffUL;
-    int eval_v               = __evaluate_branch_query(
-        ctx, query, branch_condition, tmp_input, current_testcase->value_sizes,
-        current_testcase->values_len);
-    if (eval_v == 1) {
+    int valid_eval = is_valid_eval_index(ctx, input_index_0, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_1, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len);
+    if (valid_eval) {
+        int eval_v = __evaluate_branch_query(
+            ctx, query, branch_condition, tmp_input,
+            current_testcase->value_sizes, current_testcase->values_len);
+        if (eval_v == 1) {
 #ifdef PRINT_SAT
-        Z3FUZZ_LOG("[check light - flip16] "
-                   "Query is SAT\n");
+            Z3FUZZ_LOG("[check light - flip16] "
+                       "Query is SAT\n");
 #endif
-        ctx->stats.flip16++;
-        ctx->stats.num_sat++;
-        __vals_long_to_char(tmp_input, tmp_proof,
-                            current_testcase->testcase_len);
-        *proof      = tmp_proof;
-        *proof_size = current_testcase->testcase_len;
-        return 1;
-    } else if (unlikely(eval_v == TIMEOUT_V))
-        return TIMEOUT_V;
+            ctx->stats.flip16++;
+            ctx->stats.num_sat++;
+            __vals_long_to_char(tmp_input, tmp_proof,
+                                current_testcase->testcase_len);
+            *proof      = tmp_proof;
+            *proof_size = current_testcase->testcase_len;
+            return 1;
+        } else if (unlikely(eval_v == TIMEOUT_V))
+            return TIMEOUT_V;
+    }
     return 0;
 }
 
@@ -3011,87 +3152,116 @@ SUBPHASE_afl_det_arith16(fuzzy_ctx_t* ctx, Z3_ast query,
         tmp_input[input_index_0] = (unsigned long)(tmp & 0xffUL);
         tmp_input[input_index_1] = (unsigned long)((tmp >> 8) & 0xffUL);
 
-        int eval_v = __evaluate_branch_query(
-            ctx, query, branch_condition, tmp_input,
-            current_testcase->value_sizes, current_testcase->values_len);
-        if (eval_v == 1) {
+        int valid_eval = is_valid_eval_index(ctx, input_index_0, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len) &&
+                         is_valid_eval_index(ctx, input_index_1, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len);
+        if (valid_eval) {
+            int eval_v = __evaluate_branch_query(
+                ctx, query, branch_condition, tmp_input,
+                current_testcase->value_sizes, current_testcase->values_len);
+            if (eval_v == 1) {
 #ifdef PRINT_SAT
-            Z3FUZZ_LOG("[check light - arith16-sum-LE] "
-                       "Query is SAT\n");
+                Z3FUZZ_LOG("[check light - arith16-sum-LE] "
+                           "Query is SAT\n");
 #endif
-            ctx->stats.arith16_sum_LE++;
-            ctx->stats.num_sat++;
-            __vals_long_to_char(tmp_input, tmp_proof,
-                                current_testcase->testcase_len);
-            *proof      = tmp_proof;
-            *proof_size = current_testcase->testcase_len;
-            return 1;
-        } else if (unlikely(eval_v == TIMEOUT_V))
-            return TIMEOUT_V;
+                ctx->stats.arith16_sum_LE++;
+                ctx->stats.num_sat++;
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                *proof      = tmp_proof;
+                *proof_size = current_testcase->testcase_len;
+                return 1;
+            } else if (unlikely(eval_v == TIMEOUT_V))
+                return TIMEOUT_V;
+        }
         tmp                      = input_word_LE - i;
         tmp_input[input_index_0] = (unsigned long)(tmp & 0xffUL);
         tmp_input[input_index_1] = (unsigned long)((tmp >> 8) & 0xffUL);
-
-        eval_v = __evaluate_branch_query(
-            ctx, query, branch_condition, tmp_input,
-            current_testcase->value_sizes, current_testcase->values_len);
-        if (eval_v == 1) {
+        valid_eval = is_valid_eval_index(ctx, input_index_0, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_1, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len);
+        if (valid_eval) {
+            int eval_v = __evaluate_branch_query(
+                ctx, query, branch_condition, tmp_input,
+                current_testcase->value_sizes, current_testcase->values_len);
+            if (eval_v == 1) {
 #ifdef PRINT_SAT
-            Z3FUZZ_LOG("[check light - arith16-sub-LE] "
-                       "Query is SAT\n");
+                Z3FUZZ_LOG("[check light - arith16-sub-LE] "
+                           "Query is SAT\n");
 #endif
-            ctx->stats.arith16_sub_LE++;
-            ctx->stats.num_sat++;
-            __vals_long_to_char(tmp_input, tmp_proof,
-                                current_testcase->testcase_len);
-            *proof      = tmp_proof;
-            *proof_size = current_testcase->testcase_len;
-            return 1;
-        } else if (unlikely(eval_v == TIMEOUT_V))
-            return TIMEOUT_V;
+                ctx->stats.arith16_sub_LE++;
+                ctx->stats.num_sat++;
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                *proof      = tmp_proof;
+                *proof_size = current_testcase->testcase_len;
+                return 1;
+            } else if (unlikely(eval_v == TIMEOUT_V))
+                return TIMEOUT_V;
+        }
         tmp                      = input_word_BE + i;
         tmp_input[input_index_1] = (unsigned long)(tmp & 0xffUL);
         tmp_input[input_index_0] = (unsigned long)((tmp >> 8) & 0xffUL);
-
-        eval_v = __evaluate_branch_query(
-            ctx, query, branch_condition, tmp_input,
-            current_testcase->value_sizes, current_testcase->values_len);
-        if (eval_v == 1) {
+        valid_eval = is_valid_eval_index(ctx, input_index_0, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_1, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len);
+        if (valid_eval) {
+            int eval_v = __evaluate_branch_query(
+                ctx, query, branch_condition, tmp_input,
+                current_testcase->value_sizes, current_testcase->values_len);
+            if (eval_v == 1) {
 #ifdef PRINT_SAT
-            Z3FUZZ_LOG("[check light - arith16-sum-BE] "
-                       "Query is SAT\n");
+                Z3FUZZ_LOG("[check light - arith16-sum-BE] "
+                           "Query is SAT\n");
 #endif
-            ctx->stats.arith16_sum_BE++;
-            ctx->stats.num_sat++;
-            __vals_long_to_char(tmp_input, tmp_proof,
-                                current_testcase->testcase_len);
-            *proof      = tmp_proof;
-            *proof_size = current_testcase->testcase_len;
-            return 1;
-        } else if (unlikely(eval_v == TIMEOUT_V))
-            return TIMEOUT_V;
+                ctx->stats.arith16_sum_BE++;
+                ctx->stats.num_sat++;
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                *proof      = tmp_proof;
+                *proof_size = current_testcase->testcase_len;
+                return 1;
+            } else if (unlikely(eval_v == TIMEOUT_V))
+                return TIMEOUT_V;
+        }
 
         tmp                      = input_word_BE - i;
         tmp_input[input_index_1] = (unsigned long)(tmp & 0xffUL);
         tmp_input[input_index_0] = (unsigned long)((tmp >> 8) & 0xffUL);
-
-        eval_v = __evaluate_branch_query(
-            ctx, query, branch_condition, tmp_input,
-            current_testcase->value_sizes, current_testcase->values_len);
-        if (eval_v == 1) {
+        valid_eval = is_valid_eval_index(ctx, input_index_0, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_1, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len);
+        if (valid_eval) {
+            int eval_v = __evaluate_branch_query(
+                ctx, query, branch_condition, tmp_input,
+                current_testcase->value_sizes, current_testcase->values_len);
+            if (eval_v == 1) {
 #ifdef PRINT_SAT
-            Z3FUZZ_LOG("[check light - arith16-sub-BE] "
-                       "Query is SAT\n");
+                Z3FUZZ_LOG("[check light - arith16-sub-BE] "
+                           "Query is SAT\n");
 #endif
-            ctx->stats.arith32_sub_BE++;
-            ctx->stats.num_sat++;
-            __vals_long_to_char(tmp_input, tmp_proof,
-                                current_testcase->testcase_len);
-            *proof      = tmp_proof;
-            *proof_size = current_testcase->testcase_len;
-            return 1;
-        } else if (unlikely(eval_v == TIMEOUT_V))
-            return TIMEOUT_V;
+                ctx->stats.arith32_sub_BE++;
+                ctx->stats.num_sat++;
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                *proof      = tmp_proof;
+                *proof_size = current_testcase->testcase_len;
+                return 1;
+            } else if (unlikely(eval_v == TIMEOUT_V))
+                return TIMEOUT_V;
+        }
     }
     return 0;
 }
@@ -3110,46 +3280,60 @@ SUBPHASE_afl_det_int16(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
         tmp_input[input_index_0] = (unsigned long)(interesting16[i]) & 0xffUL;
         tmp_input[input_index_1] =
             (unsigned long)(interesting16[i] >> 8) & 0xffUL;
-
-        int eval_v = __evaluate_branch_query(
-            ctx, query, branch_condition, tmp_input,
-            current_testcase->value_sizes, current_testcase->values_len);
-        if (eval_v == 1) {
+        int valid_eval = is_valid_eval_index(ctx, input_index_0, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len) &&
+                         is_valid_eval_index(ctx, input_index_1, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len);
+        if (valid_eval) {
+            int eval_v = __evaluate_branch_query(
+                ctx, query, branch_condition, tmp_input,
+                current_testcase->value_sizes, current_testcase->values_len);
+            if (eval_v == 1) {
 #ifdef PRINT_SAT
-            Z3FUZZ_LOG("[check light - int16] "
-                       "Query is SAT\n");
+                Z3FUZZ_LOG("[check light - int16] "
+                           "Query is SAT\n");
 #endif
-            ctx->stats.int16++;
-            ctx->stats.num_sat++;
-            __vals_long_to_char(tmp_input, tmp_proof,
-                                current_testcase->testcase_len);
-            *proof      = tmp_proof;
-            *proof_size = current_testcase->testcase_len;
-            return 1;
-        } else if (unlikely(eval_v == TIMEOUT_V))
-            return TIMEOUT_V;
+                ctx->stats.int16++;
+                ctx->stats.num_sat++;
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                *proof      = tmp_proof;
+                *proof_size = current_testcase->testcase_len;
+                return 1;
+            } else if (unlikely(eval_v == TIMEOUT_V))
+                return TIMEOUT_V;
+        }
 #if 0
         tmp_input[input_index_1] = (unsigned long)(interesting16[i]) & 0xffUL;
         tmp_input[input_index_0] =
             (unsigned long)(interesting16[i] >> 8) & 0xffUL;
-
-        eval_v = __evaluate_branch_query(
-            ctx, query, branch_condition, tmp_input,
-            current_testcase->value_sizes, current_testcase->values_len);
-        if (eval_v == 1) {
+        valid_eval = is_valid_eval_index(ctx, input_index_0, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len) &&
+                         is_valid_eval_index(ctx, input_index_1, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len);
+        if (valid_eval) {
+            int eval_v = __evaluate_branch_query(
+                ctx, query, branch_condition, tmp_input,
+                current_testcase->value_sizes, current_testcase->values_len);
+            if (eval_v == 1) {
 #ifdef PRINT_SAT
-            Z3FUZZ_LOG("[check light - int16] "
-                       "Query is SAT\n");
+                Z3FUZZ_LOG("[check light - int16] "
+                           "Query is SAT\n");
 #endif
-            ctx->stats.int16++;
-            ctx->stats.num_sat++;
-            __vals_long_to_char(tmp_input, tmp_proof,
-                                current_testcase->testcase_len);
-            *proof      = tmp_proof;
-            *proof_size = current_testcase->testcase_len;
-            return 1;
-        } else if (unlikely(eval_v == TIMEOUT_V))
-            return TIMEOUT_V;
+                ctx->stats.int16++;
+                ctx->stats.num_sat++;
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                *proof      = tmp_proof;
+                *proof_size = current_testcase->testcase_len;
+                return 1;
+            } else if (unlikely(eval_v == TIMEOUT_V))
+                return TIMEOUT_V;
+        }
 #endif
     }
     return 0;
@@ -3179,24 +3363,37 @@ static __always_inline int SUBPHASE_afl_det_flip_int(
     tmp_input[input_index_1] = (unsigned long)input_byte_1 ^ 0xffUL;
     tmp_input[input_index_2] = (unsigned long)input_byte_2 ^ 0xffUL;
     tmp_input[input_index_3] = (unsigned long)input_byte_3 ^ 0xffUL;
-
-    int eval_v = __evaluate_branch_query(
-        ctx, query, branch_condition, tmp_input, current_testcase->value_sizes,
-        current_testcase->values_len);
-    if (eval_v == 1) {
+    int valid_eval = is_valid_eval_index(ctx, input_index_0, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_1, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_2, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_3, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len);
+    if (valid_eval) {
+        int eval_v = __evaluate_branch_query(
+            ctx, query, branch_condition, tmp_input,
+            current_testcase->value_sizes, current_testcase->values_len);
+        if (eval_v == 1) {
 #ifdef PRINT_SAT
-        Z3FUZZ_LOG("[check light - flip32] "
-                   "Query is SAT\n");
+            Z3FUZZ_LOG("[check light - flip32] "
+                       "Query is SAT\n");
 #endif
-        ctx->stats.flip32++;
-        ctx->stats.num_sat++;
-        __vals_long_to_char(tmp_input, tmp_proof,
-                            current_testcase->testcase_len);
-        *proof      = tmp_proof;
-        *proof_size = current_testcase->testcase_len;
-        return 1;
-    } else if (unlikely(eval_v == TIMEOUT_V))
-        return TIMEOUT_V;
+            ctx->stats.flip32++;
+            ctx->stats.num_sat++;
+            __vals_long_to_char(tmp_input, tmp_proof,
+                                current_testcase->testcase_len);
+            *proof      = tmp_proof;
+            *proof_size = current_testcase->testcase_len;
+            return 1;
+        } else if (unlikely(eval_v == TIMEOUT_V))
+            return TIMEOUT_V;
+    }
     return 0;
 }
 
@@ -3231,95 +3428,147 @@ static __always_inline int SUBPHASE_afl_det_arith32(
         tmp_input[input_index_1] = (unsigned long)((tmp >> 8) & 0xffUL);
         tmp_input[input_index_2] = (unsigned long)((tmp >> 16) & 0xffUL);
         tmp_input[input_index_3] = (unsigned long)((tmp >> 24) & 0xffUL);
-
-        int eval_v = __evaluate_branch_query(
-            ctx, query, branch_condition, tmp_input,
-            current_testcase->value_sizes, current_testcase->values_len);
-        if (eval_v == 1) {
+        int valid_eval = is_valid_eval_index(ctx, input_index_0, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len) &&
+                         is_valid_eval_index(ctx, input_index_1, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len) &&
+                         is_valid_eval_index(ctx, input_index_2, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len) &&
+                         is_valid_eval_index(ctx, input_index_3, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len);
+        if (valid_eval) {
+            int eval_v = __evaluate_branch_query(
+                ctx, query, branch_condition, tmp_input,
+                current_testcase->value_sizes, current_testcase->values_len);
+            if (eval_v == 1) {
 #ifdef PRINT_SAT
-            Z3FUZZ_LOG("[check light - arith32-sum-LE] "
-                       "Query is SAT\n");
+                Z3FUZZ_LOG("[check light - arith32-sum-LE] "
+                           "Query is SAT\n");
 #endif
-            ctx->stats.arith32_sum_LE++;
-            ctx->stats.num_sat++;
-            __vals_long_to_char(tmp_input, tmp_proof,
-                                current_testcase->testcase_len);
-            *proof      = tmp_proof;
-            *proof_size = current_testcase->testcase_len;
-            return 1;
-        } else if (unlikely(eval_v == TIMEOUT_V))
-            return TIMEOUT_V;
+                ctx->stats.arith32_sum_LE++;
+                ctx->stats.num_sat++;
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                *proof      = tmp_proof;
+                *proof_size = current_testcase->testcase_len;
+                return 1;
+            } else if (unlikely(eval_v == TIMEOUT_V))
+                return TIMEOUT_V;
+        }
 
         tmp                      = input_dword_LE - i;
         tmp_input[input_index_0] = (unsigned long)(tmp & 0xffUL);
         tmp_input[input_index_1] = (unsigned long)((tmp >> 8) & 0xffUL);
         tmp_input[input_index_2] = (unsigned long)((tmp >> 16) & 0xffUL);
         tmp_input[input_index_3] = (unsigned long)((tmp >> 24) & 0xffUL);
-
-        eval_v = __evaluate_branch_query(
-            ctx, query, branch_condition, tmp_input,
-            current_testcase->value_sizes, current_testcase->values_len);
-        if (eval_v == 1) {
+        valid_eval = is_valid_eval_index(ctx, input_index_0, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_1, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_2, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_3, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len);
+        if (valid_eval) {
+            int eval_v = __evaluate_branch_query(
+                ctx, query, branch_condition, tmp_input,
+                current_testcase->value_sizes, current_testcase->values_len);
+            if (eval_v == 1) {
 #ifdef PRINT_SAT
-            Z3FUZZ_LOG("[check light - arith32-sub-LE] "
-                       "Query is SAT\n");
+                Z3FUZZ_LOG("[check light - arith32-sub-LE] "
+                           "Query is SAT\n");
 #endif
-            ctx->stats.arith32_sub_LE++;
-            ctx->stats.num_sat++;
-            __vals_long_to_char(tmp_input, tmp_proof,
-                                current_testcase->testcase_len);
-            *proof      = tmp_proof;
-            *proof_size = current_testcase->testcase_len;
-            return 1;
-        } else if (unlikely(eval_v == TIMEOUT_V))
-            return TIMEOUT_V;
+                ctx->stats.arith32_sub_LE++;
+                ctx->stats.num_sat++;
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                *proof      = tmp_proof;
+                *proof_size = current_testcase->testcase_len;
+                return 1;
+            } else if (unlikely(eval_v == TIMEOUT_V))
+                return TIMEOUT_V;
+        }
 
         tmp                      = input_dword_BE + i;
         tmp_input[input_index_3] = (unsigned long)(tmp & 0xffUL);
         tmp_input[input_index_2] = (unsigned long)((tmp >> 8) & 0xffUL);
         tmp_input[input_index_1] = (unsigned long)((tmp >> 16) & 0xffUL);
         tmp_input[input_index_0] = (unsigned long)((tmp >> 24) & 0xffUL);
-
-        eval_v = __evaluate_branch_query(
-            ctx, query, branch_condition, tmp_input,
-            current_testcase->value_sizes, current_testcase->values_len);
-        if (eval_v == 1) {
+        valid_eval = is_valid_eval_index(ctx, input_index_0, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_1, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_2, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_3, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len);
+        if (valid_eval) {
+            int eval_v = __evaluate_branch_query(
+                ctx, query, branch_condition, tmp_input,
+                current_testcase->value_sizes, current_testcase->values_len);
+            if (eval_v == 1) {
 #ifdef PRINT_SAT
-            Z3FUZZ_LOG("[check light - arith32-sum-BE] "
-                       "Query is SAT\n");
+                Z3FUZZ_LOG("[check light - arith32-sum-BE] "
+                           "Query is SAT\n");
 #endif
-            ctx->stats.arith32_sum_BE++;
-            ctx->stats.num_sat++;
-            __vals_long_to_char(tmp_input, tmp_proof,
-                                current_testcase->testcase_len);
-            *proof      = tmp_proof;
-            *proof_size = current_testcase->testcase_len;
-            return 1;
-        } else if (unlikely(eval_v == TIMEOUT_V))
-            return TIMEOUT_V;
+                ctx->stats.arith32_sum_BE++;
+                ctx->stats.num_sat++;
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                *proof      = tmp_proof;
+                *proof_size = current_testcase->testcase_len;
+                return 1;
+            } else if (unlikely(eval_v == TIMEOUT_V))
+                return TIMEOUT_V;
+        }
         tmp                      = input_dword_BE - i;
         tmp_input[input_index_3] = (unsigned long)(tmp & 0xffU);
         tmp_input[input_index_2] = (unsigned long)((tmp >> 8) & 0xffU);
         tmp_input[input_index_1] = (unsigned long)((tmp >> 16) & 0xffU);
         tmp_input[input_index_0] = (unsigned long)((tmp >> 24) & 0xffU);
-
-        eval_v = __evaluate_branch_query(
-            ctx, query, branch_condition, tmp_input,
-            current_testcase->value_sizes, current_testcase->values_len);
-        if (eval_v == 1) {
+        valid_eval = is_valid_eval_index(ctx, input_index_0, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_1, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_2, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_3, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len);
+        if (valid_eval) {
+            int eval_v = __evaluate_branch_query(
+                ctx, query, branch_condition, tmp_input,
+                current_testcase->value_sizes, current_testcase->values_len);
+            if (eval_v == 1) {
 #ifdef PRINT_SAT
-            Z3FUZZ_LOG("[check light - arith32-sub-BE] "
-                       "Query is SAT\n");
+                Z3FUZZ_LOG("[check light - arith32-sub-BE] "
+                           "Query is SAT\n");
 #endif
-            ctx->stats.arith32_sub_BE++;
-            ctx->stats.num_sat++;
-            __vals_long_to_char(tmp_input, tmp_proof,
-                                current_testcase->testcase_len);
-            *proof      = tmp_proof;
-            *proof_size = current_testcase->testcase_len;
-            return 1;
-        } else if (unlikely(eval_v == TIMEOUT_V))
-            return TIMEOUT_V;
+                ctx->stats.arith32_sub_BE++;
+                ctx->stats.num_sat++;
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                *proof      = tmp_proof;
+                *proof_size = current_testcase->testcase_len;
+                return 1;
+            } else if (unlikely(eval_v == TIMEOUT_V))
+                return TIMEOUT_V;
+        }
     }
     return 0;
 }
@@ -3344,21 +3593,35 @@ SUBPHASE_afl_det_int32(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
             (unsigned long)(interesting32[i] >> 16) & 0xffU;
         tmp_input[input_index_3] =
             (unsigned long)(interesting32[i] >> 24) & 0xffU;
-        int eval_v = __evaluate_branch_query(
-            ctx, query, branch_condition, tmp_input,
-            current_testcase->value_sizes, current_testcase->values_len);
-        if (eval_v == 1) {
+        int valid_eval = is_valid_eval_index(ctx, input_index_0, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len) &&
+                         is_valid_eval_index(ctx, input_index_1, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len) &&
+                         is_valid_eval_index(ctx, input_index_2, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len) &&
+                         is_valid_eval_index(ctx, input_index_3, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len);
+        if (valid_eval) {
+            int eval_v = __evaluate_branch_query(
+                ctx, query, branch_condition, tmp_input,
+                current_testcase->value_sizes, current_testcase->values_len);
+            if (eval_v == 1) {
 #ifdef PRINT_SAT
-            Z3FUZZ_LOG("[check light - int32] "
-                       "Query is SAT\n");
+                Z3FUZZ_LOG("[check light - int32] "
+                           "Query is SAT\n");
 #endif
-            ctx->stats.int32++;
-            ctx->stats.num_sat++;
-            __vals_long_to_char(tmp_input, tmp_proof,
-                                current_testcase->testcase_len);
-            *proof      = tmp_proof;
-            *proof_size = current_testcase->testcase_len;
-            return 1;
+                ctx->stats.int32++;
+                ctx->stats.num_sat++;
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                *proof      = tmp_proof;
+                *proof_size = current_testcase->testcase_len;
+                return 1;
+            }
         }
 
 #if 0
@@ -3369,23 +3632,37 @@ SUBPHASE_afl_det_int32(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
             (unsigned long)(interesting32[i] >> 16) & 0xffU;
         tmp_input[input_index_0] =
             (unsigned long)(interesting32[i] >> 24) & 0xffU;
-        eval_v = __evaluate_branch_query(
-            ctx, query, branch_condition, tmp_input,
-            current_testcase->value_sizes, current_testcase->values_len);
-        if (eval_v == 1) {
+        valid_eval = is_valid_eval_index(ctx, input_index_0, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len) &&
+                         is_valid_eval_index(ctx, input_index_1, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len) &&
+                         is_valid_eval_index(ctx, input_index_2, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len) &&
+                         is_valid_eval_index(ctx, input_index_3, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len);
+        if (valid_eval) {
+            int eval_v = __evaluate_branch_query(
+                ctx, query, branch_condition, tmp_input,
+                current_testcase->value_sizes, current_testcase->values_len);
+            if (eval_v == 1) {
 #ifdef PRINT_SAT
-            Z3FUZZ_LOG("[check light - int32] "
-                       "Query is SAT\n");
+                Z3FUZZ_LOG("[check light - int32] "
+                           "Query is SAT\n");
 #endif
-            ctx->stats.int32++;
-            ctx->stats.num_sat++;
-            __vals_long_to_char(tmp_input, tmp_proof,
-                                current_testcase->testcase_len);
-            *proof      = tmp_proof;
-            *proof_size = current_testcase->testcase_len;
-            return 1;
-        } else if (unlikely(eval_v == TIMEOUT_V))
-            return TIMEOUT_V;
+                ctx->stats.int32++;
+                ctx->stats.num_sat++;
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                *proof      = tmp_proof;
+                *proof_size = current_testcase->testcase_len;
+                return 1;
+            } else if (unlikely(eval_v == TIMEOUT_V))
+                return TIMEOUT_V;
+        }
 #endif
     }
     return 0;
@@ -3429,24 +3706,49 @@ static __always_inline int SUBPHASE_afl_det_flip_long(
     tmp_input[input_index_5] = (unsigned long)input_byte_5 ^ 0xffUL;
     tmp_input[input_index_6] = (unsigned long)input_byte_6 ^ 0xffUL;
     tmp_input[input_index_7] = (unsigned long)input_byte_7 ^ 0xffUL;
-
-    int eval_v = __evaluate_branch_query(
-        ctx, query, branch_condition, tmp_input, current_testcase->value_sizes,
-        current_testcase->values_len);
-    if (eval_v == 1) {
+    int valid_eval = is_valid_eval_index(ctx, input_index_0, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_1, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_2, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_3, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_4, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_5, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_6, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_7, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len);
+    if (valid_eval) {
+        int eval_v = __evaluate_branch_query(
+            ctx, query, branch_condition, tmp_input,
+            current_testcase->value_sizes, current_testcase->values_len);
+        if (eval_v == 1) {
 #ifdef PRINT_SAT
-        Z3FUZZ_LOG("[check light - flip64] "
-                   "Query is SAT\n");
+            Z3FUZZ_LOG("[check light - flip64] "
+                       "Query is SAT\n");
 #endif
-        ctx->stats.flip64++;
-        ctx->stats.num_sat++;
-        __vals_long_to_char(tmp_input, tmp_proof,
-                            current_testcase->testcase_len);
-        *proof      = tmp_proof;
-        *proof_size = current_testcase->testcase_len;
-        return 1;
-    } else if (unlikely(eval_v == TIMEOUT_V))
-        return TIMEOUT_V;
+            ctx->stats.flip64++;
+            ctx->stats.num_sat++;
+            __vals_long_to_char(tmp_input, tmp_proof,
+                                current_testcase->testcase_len);
+            *proof      = tmp_proof;
+            *proof_size = current_testcase->testcase_len;
+            return 1;
+        } else if (unlikely(eval_v == TIMEOUT_V))
+            return TIMEOUT_V;
+    }
     return 0;
 }
 
@@ -3503,24 +3805,49 @@ static __always_inline int SUBPHASE_afl_det_arith64(
         tmp_input[input_index_5] = (unsigned long)((tmp >> 40) & 0xffUL);
         tmp_input[input_index_6] = (unsigned long)((tmp >> 48) & 0xffUL);
         tmp_input[input_index_7] = (unsigned long)((tmp >> 56) & 0xffUL);
-
-        int eval_v = __evaluate_branch_query(
-            ctx, query, branch_condition, tmp_input,
-            current_testcase->value_sizes, current_testcase->values_len);
-        if (eval_v == 1) {
+        int valid_eval = is_valid_eval_index(ctx, input_index_0, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len) &&
+                         is_valid_eval_index(ctx, input_index_1, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len) &&
+                         is_valid_eval_index(ctx, input_index_2, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len) &&
+                         is_valid_eval_index(ctx, input_index_3, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len) &&
+                         is_valid_eval_index(ctx, input_index_4, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len) &&
+                         is_valid_eval_index(ctx, input_index_5, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len) &&
+                         is_valid_eval_index(ctx, input_index_6, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len) &&
+                         is_valid_eval_index(ctx, input_index_7, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len);
+        if (valid_eval) {
+            int eval_v = __evaluate_branch_query(
+                ctx, query, branch_condition, tmp_input,
+                current_testcase->value_sizes, current_testcase->values_len);
+            if (eval_v == 1) {
 #ifdef PRINT_SAT
-            Z3FUZZ_LOG("[check light - arith64-sum-LE] "
-                       "Query is SAT\n");
+                Z3FUZZ_LOG("[check light - arith64-sum-LE] "
+                           "Query is SAT\n");
 #endif
-            ctx->stats.arith64_sum_LE++;
-            ctx->stats.num_sat++;
-            __vals_long_to_char(tmp_input, tmp_proof,
-                                current_testcase->testcase_len);
-            *proof      = tmp_proof;
-            *proof_size = current_testcase->testcase_len;
-            return 1;
-        } else if (unlikely(eval_v == TIMEOUT_V))
-            return TIMEOUT_V;
+                ctx->stats.arith64_sum_LE++;
+                ctx->stats.num_sat++;
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                *proof      = tmp_proof;
+                *proof_size = current_testcase->testcase_len;
+                return 1;
+            } else if (unlikely(eval_v == TIMEOUT_V))
+                return TIMEOUT_V;
+        }
         tmp                      = input_qword_LE - i;
         tmp_input[input_index_0] = (unsigned long)(tmp & 0xffUL);
         tmp_input[input_index_1] = (unsigned long)((tmp >> 8) & 0xffUL);
@@ -3530,23 +3857,49 @@ static __always_inline int SUBPHASE_afl_det_arith64(
         tmp_input[input_index_5] = (unsigned long)((tmp >> 40) & 0xffUL);
         tmp_input[input_index_6] = (unsigned long)((tmp >> 48) & 0xffUL);
         tmp_input[input_index_7] = (unsigned long)((tmp >> 56) & 0xffUL);
-        eval_v                   = __evaluate_branch_query(
-            ctx, query, branch_condition, tmp_input,
-            current_testcase->value_sizes, current_testcase->values_len);
-        if (eval_v == 1) {
+        valid_eval = is_valid_eval_index(ctx, input_index_0, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_1, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_2, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_3, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_4, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_5, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_6, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_7, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len);
+        if (valid_eval) {
+            int eval_v = __evaluate_branch_query(
+                ctx, query, branch_condition, tmp_input,
+                current_testcase->value_sizes, current_testcase->values_len);
+            if (eval_v == 1) {
 #ifdef PRINT_SAT
-            Z3FUZZ_LOG("[check light - arith64-sub-LE] "
-                       "Query is SAT\n");
+                Z3FUZZ_LOG("[check light - arith64-sub-LE] "
+                           "Query is SAT\n");
 #endif
-            ctx->stats.arith64_sub_LE++;
-            ctx->stats.num_sat++;
-            __vals_long_to_char(tmp_input, tmp_proof,
-                                current_testcase->testcase_len);
-            *proof      = tmp_proof;
-            *proof_size = current_testcase->testcase_len;
-            return 1;
-        } else if (unlikely(eval_v == TIMEOUT_V))
-            return TIMEOUT_V;
+                ctx->stats.arith64_sub_LE++;
+                ctx->stats.num_sat++;
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                *proof      = tmp_proof;
+                *proof_size = current_testcase->testcase_len;
+                return 1;
+            } else if (unlikely(eval_v == TIMEOUT_V))
+                return TIMEOUT_V;
+        }
         tmp                      = input_qword_BE + i;
         tmp_input[input_index_7] = (unsigned long)(tmp & 0xffUL);
         tmp_input[input_index_6] = (unsigned long)((tmp >> 8) & 0xffUL);
@@ -3556,24 +3909,49 @@ static __always_inline int SUBPHASE_afl_det_arith64(
         tmp_input[input_index_2] = (unsigned long)((tmp >> 40) & 0xffUL);
         tmp_input[input_index_1] = (unsigned long)((tmp >> 48) & 0xffUL);
         tmp_input[input_index_0] = (unsigned long)((tmp >> 56) & 0xffUL);
-
-        eval_v = __evaluate_branch_query(
-            ctx, query, branch_condition, tmp_input,
-            current_testcase->value_sizes, current_testcase->values_len);
-        if (eval_v == 1) {
+        valid_eval = is_valid_eval_index(ctx, input_index_0, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_1, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_2, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_3, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_4, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_5, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_6, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_7, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len);
+        if (valid_eval) {
+            int eval_v = __evaluate_branch_query(
+                ctx, query, branch_condition, tmp_input,
+                current_testcase->value_sizes, current_testcase->values_len);
+            if (eval_v == 1) {
 #ifdef PRINT_SAT
-            Z3FUZZ_LOG("[check light - arith64-sum-BE] "
-                       "Query is SAT\n");
+                Z3FUZZ_LOG("[check light - arith64-sum-BE] "
+                           "Query is SAT\n");
 #endif
-            ctx->stats.arith64_sum_BE++;
-            ctx->stats.num_sat++;
-            __vals_long_to_char(tmp_input, tmp_proof,
-                                current_testcase->testcase_len);
-            *proof      = tmp_proof;
-            *proof_size = current_testcase->testcase_len;
-            return 1;
-        } else if (unlikely(eval_v == TIMEOUT_V))
-            return TIMEOUT_V;
+                ctx->stats.arith64_sum_BE++;
+                ctx->stats.num_sat++;
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                *proof      = tmp_proof;
+                *proof_size = current_testcase->testcase_len;
+                return 1;
+            } else if (unlikely(eval_v == TIMEOUT_V))
+                return TIMEOUT_V;
+        }
         tmp                      = input_qword_BE - i;
         tmp_input[input_index_7] = (unsigned long)(tmp & 0xffUL);
         tmp_input[input_index_6] = (unsigned long)((tmp >> 8) & 0xffUL);
@@ -3583,24 +3961,49 @@ static __always_inline int SUBPHASE_afl_det_arith64(
         tmp_input[input_index_2] = (unsigned long)((tmp >> 40) & 0xffUL);
         tmp_input[input_index_1] = (unsigned long)((tmp >> 48) & 0xffUL);
         tmp_input[input_index_0] = (unsigned long)((tmp >> 56) & 0xffUL);
-
-        eval_v = __evaluate_branch_query(
-            ctx, query, branch_condition, tmp_input,
-            current_testcase->value_sizes, current_testcase->values_len);
-        if (eval_v == 1) {
+        valid_eval = is_valid_eval_index(ctx, input_index_0, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_1, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_2, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_3, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_4, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_5, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_6, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_7, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len);
+        if (valid_eval) {
+            int eval_v = __evaluate_branch_query(
+                ctx, query, branch_condition, tmp_input,
+                current_testcase->value_sizes, current_testcase->values_len);
+            if (eval_v == 1) {
 #ifdef PRINT_SAT
-            Z3FUZZ_LOG("[check light - arith64-sub-BE] "
-                       "Query is SAT\n");
+                Z3FUZZ_LOG("[check light - arith64-sub-BE] "
+                           "Query is SAT\n");
 #endif
-            ctx->stats.arith64_sub_BE++;
-            ctx->stats.num_sat++;
-            __vals_long_to_char(tmp_input, tmp_proof,
-                                current_testcase->testcase_len);
-            *proof      = tmp_proof;
-            *proof_size = current_testcase->testcase_len;
-            return 1;
-        } else if (unlikely(eval_v == TIMEOUT_V))
-            return TIMEOUT_V;
+                ctx->stats.arith64_sub_BE++;
+                ctx->stats.num_sat++;
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                *proof      = tmp_proof;
+                *proof_size = current_testcase->testcase_len;
+                return 1;
+            } else if (unlikely(eval_v == TIMEOUT_V))
+                return TIMEOUT_V;
+        }
     }
     return 0;
 }
@@ -3635,23 +4038,49 @@ SUBPHASE_afl_det_int64(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
             (unsigned long)(interesting64[i] >> 24) & 0xffU;
         tmp_input[input_index_7] =
             (unsigned long)(interesting64[i] >> 24) & 0xffU;
-        int eval_v = __evaluate_branch_query(
-            ctx, query, branch_condition, tmp_input,
-            current_testcase->value_sizes, current_testcase->values_len);
-        if (eval_v == 1) {
+        int valid_eval = is_valid_eval_index(ctx, input_index_0, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len) &&
+                         is_valid_eval_index(ctx, input_index_1, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len) &&
+                         is_valid_eval_index(ctx, input_index_2, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len) &&
+                         is_valid_eval_index(ctx, input_index_3, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len) &&
+                         is_valid_eval_index(ctx, input_index_4, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len) &&
+                         is_valid_eval_index(ctx, input_index_5, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len) &&
+                         is_valid_eval_index(ctx, input_index_6, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len) &&
+                         is_valid_eval_index(ctx, input_index_7, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len);
+        if (valid_eval) {
+            int eval_v = __evaluate_branch_query(
+                ctx, query, branch_condition, tmp_input,
+                current_testcase->value_sizes, current_testcase->values_len);
+            if (eval_v == 1) {
 #ifdef PRINT_SAT
-            Z3FUZZ_LOG("[check light - int64] "
-                       "Query is SAT\n");
+                Z3FUZZ_LOG("[check light - int64] "
+                           "Query is SAT\n");
 #endif
-            ctx->stats.int64++;
-            ctx->stats.num_sat++;
-            __vals_long_to_char(tmp_input, tmp_proof,
-                                current_testcase->testcase_len);
-            *proof      = tmp_proof;
-            *proof_size = current_testcase->testcase_len;
-            return 1;
-        } else if (unlikely(eval_v == TIMEOUT_V))
-            return TIMEOUT_V;
+                ctx->stats.int64++;
+                ctx->stats.num_sat++;
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                *proof      = tmp_proof;
+                *proof_size = current_testcase->testcase_len;
+                return 1;
+            } else if (unlikely(eval_v == TIMEOUT_V))
+                return TIMEOUT_V;
+        }
 
 #if 0
         tmp_input[input_index_7] = (unsigned long)(interesting64[i]) & 0xffU;
@@ -3669,23 +4098,49 @@ SUBPHASE_afl_det_int64(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
             (unsigned long)(interesting64[i] >> 24) & 0xffU;
         tmp_input[input_index_0] =
             (unsigned long)(interesting64[i] >> 24) & 0xffU;
-        int eval_v = __evaluate_branch_query(
-            ctx, query, branch_condition, tmp_input,
-            current_testcase->value_sizes, current_testcase->values_len);
-        if (eval_v == 1) {
+        valid_eval = is_valid_eval_index(ctx, input_index_0, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len) &&
+                         is_valid_eval_index(ctx, input_index_1, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len) &&
+                         is_valid_eval_index(ctx, input_index_2, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len) &&
+                         is_valid_eval_index(ctx, input_index_3, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len) &&
+                         is_valid_eval_index(ctx, input_index_4, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len) &&
+                         is_valid_eval_index(ctx, input_index_5, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len) &&
+                         is_valid_eval_index(ctx, input_index_6, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len) &&
+                         is_valid_eval_index(ctx, input_index_7, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len);
+        if (valid_eval) {
+            int eval_v = __evaluate_branch_query(
+                ctx, query, branch_condition, tmp_input,
+                current_testcase->value_sizes, current_testcase->values_len);
+            if (eval_v == 1) {
 #ifdef PRINT_SAT
-            Z3FUZZ_LOG("[check light - int64] "
-                       "Query is SAT\n");
+                Z3FUZZ_LOG("[check light - int64] "
+                           "Query is SAT\n");
 #endif
-            ctx->stats.int64++;
-            ctx->stats.num_sat++;
-            __vals_long_to_char(tmp_input, tmp_proof,
-                                current_testcase->testcase_len);
-            *proof      = tmp_proof;
-            *proof_size = current_testcase->testcase_len;
-            return 1;
-        } else if (unlikely(eval_v == TIMEOUT_V))
-            return TIMEOUT_V;
+                ctx->stats.int64++;
+                ctx->stats.num_sat++;
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                *proof      = tmp_proof;
+                *proof_size = current_testcase->testcase_len;
+                return 1;
+            } else if (unlikely(eval_v == TIMEOUT_V))
+                return TIMEOUT_V;
+        }
 #endif
     }
     return 0;
