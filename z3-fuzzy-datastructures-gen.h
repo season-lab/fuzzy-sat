@@ -155,3 +155,7 @@ static void index_to_group_intervals_el_free(da__interval_group_ptr* el)
     da_free__interval_group_ptr(el, NULL);
 }
 // ******* end interval group *************
+// *********** ast dict ******************
+#define DA_DATA_T Z3_ast
+#include <dynamic-array.h>
+// ***************************************

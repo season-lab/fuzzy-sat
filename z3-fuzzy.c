@@ -113,6 +113,7 @@ typedef ast_info_t* ast_info_ptr;
 #define DICT_DATA_T ast_info_ptr
 #include <dict.h>
 
+static da__Z3_ast                       ast_range     = {0};
 static unsigned long*                   tmp_input     = NULL;
 static unsigned long*                   tmp_opt_input = NULL;
 static unsigned char*                   tmp_proof     = NULL;
@@ -793,6 +794,8 @@ void z3fuzz_init(fuzzy_ctx_t* fctx, Z3_context ctx, char* seed_filename,
         (set__ulong*)fctx->processed_constraints;
     set_init__ulong(processed_constraints, index_hash, index_equals);
 
+    da_init__Z3_ast(&ast_range);
+
     gd_init();
 }
 
@@ -863,6 +866,8 @@ void z3fuzz_free(fuzzy_ctx_t* ctx)
         (dict__da__interval_group_ptr*)ctx->index_to_group_intervals;
     dict_free__da__interval_group_ptr(index_to_group_intervals);
     free(ctx->index_to_group_intervals);
+
+    da_free__Z3_ast(&ast_range, NULL);
 
     gd_free();
 }
@@ -998,21 +1003,42 @@ static __always_inline int is_valid_eval_index(fuzzy_ctx_t*   ctx,
 #endif
 }
 
+static inline int check_valid_assignment_custom_eval(
+    fuzzy_ctx_t* ctx, unsigned long* values, unsigned char* value_sizes,
+    unsigned long n_values, Z3_ast* constraints, unsigned n_constraints)
+{
+    if (n_constraints == 0)
+        return 1;
+
+    Z3_ast c = Z3_mk_and(ctx->z3_ctx, n_constraints, constraints);
+    Z3_inc_ref(ctx->z3_ctx, c);
+    int res =
+        ctx->model_eval(ctx->z3_ctx, c, values, value_sizes, n_values) == 0 ? 0
+                                                                            : 1;
+    Z3_dec_ref(ctx->z3_ctx, c);
+    return res;
+}
+
 static __always_inline int
 is_valid_eval_group(fuzzy_ctx_t* ctx, index_group_t* ig, unsigned long* values,
                     unsigned char* value_sizes, unsigned long n_values)
 {
-#ifdef SKIP_IS_VALID_EVAL
-    return 1;
-#else
+    int was_unhelpful = 0;
+    if (!check_valid_assignment_custom_eval(ctx, values, value_sizes, n_values,
+                                            ast_range.data, ast_range.size)) {
+        ctx->stats.unhelpful_eval++;
+        was_unhelpful = 1;
+    }
     // for every element in ig, check interval validity
     unsigned i;
     for (i = 0; i < ig->n; ++i)
         if (!is_valid_eval_index(ctx, ig->indexes[i], values, value_sizes,
-                                 n_values))
+                                 n_values)) {
+            ASSERT_OR_ABORT(was_unhelpful, "!is_valid_eval_group but wasn't unhelpful");
+            ctx->stats.unhelpful_eval_interval++;
             return 0;
+        }
     return 1;
-#endif
 }
 
 static inline int __evaluate_branch_query(fuzzy_ctx_t* ctx, Z3_ast query,
@@ -2316,6 +2342,9 @@ static inline int __check_range_constraint(fuzzy_ctx_t* ctx, Z3_ast expr)
     print_interval_groups(ctx);
     puts("+++++++++++++++++++++++++++++++++++++");
 #endif
+
+    Z3_inc_ref(ctx->z3_ctx, original_expr);
+    da_add_item__Z3_ast(&ast_range, original_expr);
 
     res = 1;
 END_FUN_2:
