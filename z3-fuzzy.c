@@ -5351,9 +5351,6 @@ int z3fuzz_query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
             continue;
         }
 
-        // conflicting AST is false. Let's try to fix it
-        ctx->stats.conflicting_fallbacks++;
-
         // reset globals
         opt_found = 0;
         __reset_ast_data();
@@ -5369,6 +5366,8 @@ int z3fuzz_query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
         ast_data.inputs = new_ast_info;
 
         if (new_ast_info->indexes.size != 0) {
+            ctx->stats.conflicting_fallbacks++;
+
             res = __query_check_light(ctx, query, *ast, proof, proof_size);
             if (res) {
                 // the PI is true, we have fixed the input
