@@ -242,6 +242,8 @@ static inline int timer_check_wrapper(fuzzy_ctx_t* ctx)
 
 static inline void timer_init_wrapper(fuzzy_ctx_t* ctx, unsigned time_max_msec)
 {
+    if (ctx->timer == NULL)
+        return 0;
     init_timer(ctx->timer, time_max_msec);
 }
 
@@ -5330,6 +5332,8 @@ int z3fuzz_query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
 
     int         res;
     testcase_t* curr_t = &ctx->testcases.data[0];
+
+    *proof_size = curr_t->testcase_len;
 
     timer_start_wrapper(ctx);
     __init_global_data(ctx, query, branch_condition);
