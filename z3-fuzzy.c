@@ -971,38 +971,6 @@ static __always_inline unsigned long index_group_to_value(index_group_t* ig,
     return res;
 }
 
-static __always_inline int is_valid_eval_index(fuzzy_ctx_t*   ctx,
-                                               unsigned long  index,
-                                               unsigned long* values,
-                                               unsigned char* value_sizes,
-                                               unsigned long  n_values)
-{
-#ifdef SKIP_IS_VALID_EVAL
-    return 1;
-#else
-    // check validity of index eval
-    dict__da__interval_group_ptr* index_to_group_intervals =
-        (dict__da__interval_group_ptr*)ctx->index_to_group_intervals;
-
-    da__interval_group_ptr* list;
-    list =
-        dict_get_ref__da__interval_group_ptr(index_to_group_intervals, index);
-    if (list == NULL)
-        return 1;
-
-    unsigned           i;
-    interval_group_ptr el;
-    for (i = 0; i < list->size; ++i) {
-        el = list->data[i];
-
-        unsigned long group_value = index_group_to_value(&el->group, values);
-        if (!is_element_in_interval(&el->interval, group_value))
-            return 0;
-    }
-    return 1;
-#endif
-}
-
 static inline int check_valid_assignment_custom_eval(
     fuzzy_ctx_t* ctx, unsigned long* values, unsigned char* value_sizes,
     unsigned long n_values, Z3_ast* constraints, unsigned n_constraints)
@@ -1019,9 +987,11 @@ static inline int check_valid_assignment_custom_eval(
     return res;
 }
 
-static __always_inline int
-is_valid_eval_group(fuzzy_ctx_t* ctx, index_group_t* ig, unsigned long* values,
-                    unsigned char* value_sizes, unsigned long n_values)
+static __always_inline int is_valid_eval_index(fuzzy_ctx_t*   ctx,
+                                               unsigned long  index,
+                                               unsigned long* values,
+                                               unsigned char* value_sizes,
+                                               unsigned long  n_values)
 {
     int was_unhelpful = 0;
     if (!check_valid_assignment_custom_eval(ctx, values, value_sizes, n_values,
@@ -1029,11 +999,24 @@ is_valid_eval_group(fuzzy_ctx_t* ctx, index_group_t* ig, unsigned long* values,
         ctx->stats.unhelpful_eval++;
         was_unhelpful = 1;
     }
-    // for every element in ig, check interval validity
-    unsigned i;
-    for (i = 0; i < ig->n; ++i)
-        if (!is_valid_eval_index(ctx, ig->indexes[i], values, value_sizes,
-                                 n_values)) {
+
+    // check validity of index eval
+    dict__da__interval_group_ptr* index_to_group_intervals =
+        (dict__da__interval_group_ptr*)ctx->index_to_group_intervals;
+
+    da__interval_group_ptr* list;
+    list =
+        dict_get_ref__da__interval_group_ptr(index_to_group_intervals, index);
+    if (list == NULL)
+        return 1;
+
+    unsigned           i;
+    interval_group_ptr el;
+    for (i = 0; i < list->size; ++i) {
+        el = list->data[i];
+
+        unsigned long group_value = index_group_to_value(&el->group, values);
+        if (!is_element_in_interval(&el->interval, group_value)) {
 #if 0
             puts("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@");
             unsigned j;
@@ -1044,10 +1027,24 @@ is_valid_eval_group(fuzzy_ctx_t* ctx, index_group_t* ig, unsigned long* values,
             printf("value: 0x%016lx\n", group_value);
 #endif
             ASSERT_OR_ABORT(was_unhelpful,
-                            "!is_valid_eval_group but wasn't unhelpful");
+                            "!is_valid_eval_index but wasn't unhelpful");
             ctx->stats.unhelpful_eval_interval++;
             return 0;
         }
+    }
+    return 1;
+}
+
+static __always_inline int
+is_valid_eval_group(fuzzy_ctx_t* ctx, index_group_t* ig, unsigned long* values,
+                    unsigned char* value_sizes, unsigned long n_values)
+{
+    // for every element in ig, check interval validity
+    unsigned i;
+    for (i = 0; i < ig->n; ++i)
+        if (!is_valid_eval_index(ctx, ig->indexes[i], values, value_sizes,
+                                 n_values))
+            return 0;
     return 1;
 }
 
