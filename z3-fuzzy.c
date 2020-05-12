@@ -1022,8 +1022,9 @@ static __always_inline int is_valid_eval_index(fuzzy_ctx_t*   ctx,
             unsigned j;
             for (j = 0; j < ast_range.size; ++j)
                 z3fuzz_print_expr(ctx, ast_range.data[j]);
-            print_index_group(ig);
-            unsigned long group_value = index_group_to_value(ig, values);
+            print_index_group(&el->group);
+            unsigned long group_value =
+                index_group_to_value(&el->group, values);
             printf("value: 0x%016lx\n", group_value);
 #endif
             ASSERT_OR_ABORT(was_unhelpful,
@@ -2317,17 +2318,14 @@ static inline int __check_range_constraint(fuzzy_ctx_t* ctx, Z3_ast expr)
                         "It shouldn't happen");
 
         unsigned long input_maxval = (2 << ((ig.n * 8) - 1)) - 1;
-        if (!is_signed_op(__find_optype(decl_kind, const_operand, has_zext)) &&
-            nonconst_op_decl_kind == Z3_OP_BADD &&
+        if (nonconst_op_decl_kind == Z3_OP_BADD &&
             check_sum_wrap(input_maxval, constant_2, non_const_op_size)) {
-            // unsigned OP and C2 + inp can wrap => unsafe to add
+            // C2 + inp can wrap => unsafe to add
             Z3_dec_ref(ctx->z3_ctx, non_const_operand2);
             goto END_FUN_2;
-        } else if (!is_signed_op(
-                       __find_optype(decl_kind, const_operand, has_zext)) &&
-                   nonconst_op_decl_kind == Z3_OP_BSUB &&
+        } else if (nonconst_op_decl_kind == Z3_OP_BSUB &&
                    input_maxval > constant_2) {
-            // unsigned OP and C2 - inp can wrap => unsafe to add
+            // C2 - inp can wrap => unsafe to add
             Z3_dec_ref(ctx->z3_ctx, non_const_operand2);
             goto END_FUN_2;
         }
