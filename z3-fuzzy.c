@@ -1946,14 +1946,20 @@ OUT:
     return res;
 }
 
-static inline optype __find_optype(Z3_decl_kind dk, unsigned is_const_at_right)
+static inline optype __find_optype(Z3_decl_kind dk, int is_const_at_right,
+                                   int has_zext)
 {
     switch (dk) {
         case Z3_OP_SLEQ:
             if (is_const_at_right)
-                return OP_SLE;
-            else
+                if (!has_zext)
+                    return OP_SLE;
+                else
+                    return OP_ULE;
+            else if (!has_zext)
                 return OP_SGE;
+            else
+                return OP_UGE;
         case Z3_OP_ULEQ:
             if (is_const_at_right)
                 return OP_ULE;
@@ -1961,9 +1967,14 @@ static inline optype __find_optype(Z3_decl_kind dk, unsigned is_const_at_right)
                 return OP_UGE;
         case Z3_OP_SLT:
             if (is_const_at_right)
-                return OP_SLT;
-            else
+                if (!has_zext)
+                    return OP_SLT;
+                else
+                    return OP_ULT;
+            else if (!has_zext)
                 return OP_SGT;
+            else
+                return OP_UGT;
         case Z3_OP_ULT:
             if (is_const_at_right)
                 return OP_ULT;
@@ -1971,9 +1982,14 @@ static inline optype __find_optype(Z3_decl_kind dk, unsigned is_const_at_right)
                 return OP_UGT;
         case Z3_OP_SGEQ:
             if (is_const_at_right)
-                return OP_SGE;
-            else
+                if (!has_zext)
+                    return OP_SGE;
+                else
+                    return OP_UGE;
+            else if (!has_zext)
                 return OP_SLE;
+            else
+                return OP_ULE;
         case Z3_OP_UGEQ:
             if (is_const_at_right)
                 return OP_UGE;
@@ -1981,9 +1997,14 @@ static inline optype __find_optype(Z3_decl_kind dk, unsigned is_const_at_right)
                 return OP_ULE;
         case Z3_OP_SGT:
             if (is_const_at_right)
-                return OP_SGT;
-            else
+                if (!has_zext)
+                    return OP_SGT;
+                else
+                    return OP_UGT;
+            else if (!has_zext)
                 return OP_SLT;
+            else
+                return OP_ULT;
         case Z3_OP_UGT:
             if (is_const_at_right)
                 return OP_UGT;
@@ -2189,6 +2210,7 @@ static inline int __check_range_constraint(fuzzy_ctx_t* ctx, Z3_ast expr)
         Z3_get_decl_kind(ctx->z3_ctx, nonconst_op_decl);
 
     // remove concat with 0 (extend to any constant?)
+    int has_zext = 0;
     if (nonconst_op_decl_kind == Z3_OP_CONCAT) {
         if (Z3_get_app_num_args(ctx->z3_ctx, nonconst_op_app) == 2) {
             Z3_ast tmp_expr = Z3_get_app_arg(ctx->z3_ctx, nonconst_op_app, 0);
@@ -2200,6 +2222,7 @@ static inline int __check_range_constraint(fuzzy_ctx_t* ctx, Z3_ast expr)
                     Z3_get_numeral_uint64(ctx->z3_ctx, tmp_expr, &v);
 
                 if (successGet != Z3_FALSE && v == 0) {
+                    has_zext                     = 1;
                     Z3_ast old_non_const_operand = non_const_operand;
                     non_const_operand =
                         Z3_get_app_arg(ctx->z3_ctx, nonconst_op_app, 1);
@@ -2231,7 +2254,8 @@ static inline int __check_range_constraint(fuzzy_ctx_t* ctx, Z3_ast expr)
             goto END_FUN_2;
 
         if (nonconst_op_decl_kind == Z3_OP_BADD) {
-            if (!is_signed_op(__find_optype(decl_kind, const_operand)) &&
+            if (!is_signed_op(
+                    __find_optype(decl_kind, const_operand, has_zext)) &&
                 constant_2 > constant)
                 // unsigned op, and constant_2 > constant => unsafe to add
                 goto END_FUN_2;
@@ -2260,13 +2284,14 @@ static inline int __check_range_constraint(fuzzy_ctx_t* ctx, Z3_ast expr)
                         "It shouldn't happen");
 
         unsigned long input_maxval = (2 << ((ig.n * 8) - 1)) - 1;
-        if (!is_signed_op(__find_optype(decl_kind, const_operand)) &&
+        if (!is_signed_op(__find_optype(decl_kind, const_operand, has_zext)) &&
             nonconst_op_decl_kind == Z3_OP_BADD &&
             check_sum_wrap(input_maxval, constant_2, non_const_op_size)) {
             // unsigned OP and C2 + inp can wrap => unsafe to add
             Z3_dec_ref(ctx->z3_ctx, non_const_operand2);
             goto END_FUN_2;
-        } else if (!is_signed_op(__find_optype(decl_kind, const_operand)) &&
+        } else if (!is_signed_op(
+                       __find_optype(decl_kind, const_operand, has_zext)) &&
                    nonconst_op_decl_kind == Z3_OP_BSUB &&
                    input_maxval > constant_2) {
             // unsigned OP and C2 - inp can wrap => unsafe to add
@@ -2291,7 +2316,7 @@ static inline int __check_range_constraint(fuzzy_ctx_t* ctx, Z3_ast expr)
     }
 
     // it is a range query!
-    optype op = __find_optype(decl_kind, const_operand);
+    optype op = __find_optype(decl_kind, const_operand, has_zext);
 
     set__interval_group_ptr* group_intervals =
         (set__interval_group_ptr*)ctx->group_intervals;

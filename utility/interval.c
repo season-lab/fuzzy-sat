@@ -17,6 +17,11 @@
 #define _min(a, b) (a) < (b) ? (a) : (b)
 #define _max(a, b) (a) > (b) ? (a) : (b)
 
+__attribute__((unused)) static void dump_128bit_var(__int128_t v)
+{
+    printf("0x%016lx:%016lx\n", (uint64_t)(v >> 64), (uint64_t)v);
+}
+
 interval_t init_interval(unsigned size)
 // for 8 bit is -> [-256, 255]. Fixed at the first update
 {
@@ -124,9 +129,12 @@ int is_element_in_interval(interval_t* interval, uint64_t value)
     __int128_t value_ext;
     if (is_signed(interval)) {
         uint64_t mask = 1UL << (interval->size - 1UL);
-        if (value & mask)
+        if (value & mask) {
             value |= ((2 << (64 - interval->size - 1)) - 1) << interval->size;
-        value_ext = (__int128_t)value;
+            __int128_t high_mask = 0xffffffffffffffffUL;
+            value_ext            = (high_mask << 64) | value;
+        } else
+            value_ext = (__int128_t)value;
     } else
         value_ext = (__uint128_t)value;
     return value_ext >= interval->min && value_ext <= interval->max;
