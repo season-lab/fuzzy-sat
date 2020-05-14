@@ -1441,6 +1441,12 @@ static int __detect_input_group(fuzzy_ctx_t* ctx, Z3_ast node,
             break;
         }
         case Z3_NUMERAL_AST: {
+            uint64_t v;
+            Z3_bool  successGet =
+                Z3_get_numeral_uint64(ctx->z3_ctx, node, (uint64_t*)&v);
+            if (!successGet || v != 0)
+                *approx = 1;
+
             res = 1;
             break;
         }
@@ -2054,7 +2060,8 @@ static inline optype __find_optype(Z3_decl_kind dk, int is_const_at_right,
 
 static inline int __find_child_constant(Z3_context ctx, Z3_app app,
                                         uint64_t* constant,
-                                        unsigned* const_operand)
+                                        unsigned* const_operand,
+                                        unsigned* const_size)
 {
     int      condition_ok = 0;
     unsigned num_fields   = Z3_get_app_num_args(ctx, app);
@@ -2069,6 +2076,7 @@ static inline int __find_child_constant(Z3_context ctx, Z3_app app,
                 return 0; // constant is too big
             condition_ok   = 1;
             *const_operand = i;
+            *const_size    = Z3_get_bv_sort_size(ctx, Z3_get_sort(ctx, child));
             break;
         }
     }
@@ -2128,19 +2136,25 @@ static inline unsigned size_normalized(unsigned size)
 
 static inline interval_group_ptr interval_group_set_add_or_modify(
     set__interval_group_ptr* set, index_group_t* ig, uint64_t c, optype op,
-    uint64_t add_constant, uint64_t sub_constant, int* created_new)
+    uint64_t add_constant, uint64_t sub_constant, uint32_t add_sub_const_size,
+    uint32_t const_size, int* created_new)
 {
     interval_group_t    igt     = {.group = *ig, .interval = {0}};
     interval_group_ptr  igt_p   = &igt;
     interval_group_ptr* igt_ptr = set_find_el__interval_group_ptr(set, &igt_p);
 
-    wrapped_interval_t wi = wi_init(ig->n * 8);
+    wrapped_interval_t wi = wi_init(const_size);
     wi_update_cmp(&wi, c, op);
-    if (add_constant > 0)
+    if (add_constant > 0) {
+        wi_modify_size(&wi, add_sub_const_size);
         wi_update_sub(&wi, add_constant);
-    if (sub_constant > 0)
+    }
+    if (sub_constant > 0) {
+        wi_modify_size(&wi, add_sub_const_size);
         wi_update_add(&wi, add_constant);
+    }
 
+    wi_modify_size(&wi, ig->n * 8);
     if (igt_ptr != NULL) {
         wi_intersect(&(*igt_ptr)->interval, &wi);
         return *igt_ptr;
@@ -2229,7 +2243,9 @@ static inline int __check_range_constraint(fuzzy_ctx_t* ctx, Z3_ast expr)
     // one of the two child is a constant
     uint64_t constant;
     unsigned const_operand;
-    if (!__find_child_constant(ctx->z3_ctx, app, &constant, &const_operand))
+    unsigned const_size;
+    if (!__find_child_constant(ctx->z3_ctx, app, &constant, &const_operand,
+                               &const_size))
         goto END_FUN_1;
 
     // the other operand is a group (possibly with an add/sub with a constant)
@@ -2280,8 +2296,9 @@ static inline int __check_range_constraint(fuzzy_ctx_t* ctx, Z3_ast expr)
         }
     }
 
-    uint64_t add_constant = 0;
-    uint64_t sub_constant = 0;
+    uint64_t add_constant       = 0;
+    uint64_t sub_constant       = 0;
+    uint32_t add_sub_const_size = 0;
 
     index_group_t ig = {0};
     if (nonconst_op_decl_kind == Z3_OP_BADD ||
@@ -2293,7 +2310,7 @@ static inline int __check_range_constraint(fuzzy_ctx_t* ctx, Z3_ast expr)
         uint64_t constant_2;
         unsigned const_operand_2;
         if (!__find_child_constant(ctx->z3_ctx, nonconst_op_app, &constant_2,
-                                   &const_operand_2))
+                                   &const_operand_2, &add_sub_const_size))
             goto END_FUN_2;
 
         if (nonconst_op_decl_kind == Z3_OP_BADD) {
@@ -2344,7 +2361,7 @@ static inline int __check_range_constraint(fuzzy_ctx_t* ctx, Z3_ast expr)
     int                created_new;
     interval_group_ptr el = interval_group_set_add_or_modify(
         group_intervals, &ig, constant, op, add_constant, sub_constant,
-        &created_new);
+        add_sub_const_size, const_size, &created_new);
 
     if (created_new) {
         unsigned i;

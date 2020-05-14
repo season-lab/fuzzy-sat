@@ -191,6 +191,15 @@ void wi_update_sub(wrapped_interval_t* src, uint64_t c)
     src->max = (src->max - c) & get_size_mask(src->size);
 }
 
+void wi_modify_size(wrapped_interval_t* src, uint32_t new_size)
+{
+    if (new_size < src->size) {
+        src->min &= get_size_mask(new_size);
+        src->max &= get_size_mask(new_size);
+    }
+    src->size = new_size;
+}
+
 int wi_contains_element(wrapped_interval_t* interval, uint64_t value)
 {
     if (is_wrapping(interval))
