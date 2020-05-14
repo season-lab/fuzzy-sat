@@ -126,8 +126,8 @@ static inline void add_item_to_conflicting(dict__conflicting_ptr* dict,
 // ******** end conflicting dict *********
 // ********** interval group *************
 typedef struct interval_group_t {
-    interval_t    interval;
-    index_group_t group;
+    wrapped_interval_t interval;
+    index_group_t      group;
 } interval_group_t;
 
 typedef interval_group_t* interval_group_ptr;

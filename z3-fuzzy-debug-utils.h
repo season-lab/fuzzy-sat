@@ -45,7 +45,7 @@ static inline void print_interval_groups(fuzzy_ctx_t* ctx)
     while (set_iter_next__interval_group_ptr(group_intervals, 0, &el)) {
         fprintf(stderr, "***************************\n");
         print_index_group(&(*el)->group);
-        print_interval(&(*el)->interval);
+        wi_print(&(*el)->interval);
         fprintf(stderr, "***************************\n");
     }
     fprintf(stderr, "------------------------------\n");
