@@ -150,7 +150,7 @@ int wi_update_cmp(wrapped_interval_t* src, uint64_t c, optype op)
         case OP_SLT:
             c--;
         case OP_SLE: {
-            cint.min = get_signed_min(src->size);
+            cint.min = _max(get_signed_min(src->size), src->min);
             cint.max = c;
             res      = wi_intersect(src, &cint);
             break;
@@ -159,7 +159,7 @@ int wi_update_cmp(wrapped_interval_t* src, uint64_t c, optype op)
             c++;
         case OP_UGE: {
             cint.min = c;
-            cint.max = get_size_mask(src->size);
+            cint.max = _min(get_size_mask(src->size), src->max);
             res      = wi_intersect(src, &cint);
             break;
         }
@@ -167,7 +167,7 @@ int wi_update_cmp(wrapped_interval_t* src, uint64_t c, optype op)
             c++;
         case OP_SGE: {
             cint.min = c;
-            cint.max = get_signed_max(src->size);
+            cint.max = _min(get_signed_max(src->size), src->max);
             res      = wi_intersect(src, &cint);
             break;
         }
@@ -194,8 +194,8 @@ void wi_update_sub(wrapped_interval_t* src, uint64_t c)
 void wi_modify_size(wrapped_interval_t* src, uint32_t new_size)
 {
     if (new_size < src->size) {
-        src->min &= get_size_mask(new_size);
-        src->max &= get_size_mask(new_size);
+        src->min = _min(get_size_mask(new_size), src->min);
+        src->max = _min(get_size_mask(new_size), src->max);
     }
     src->size = new_size;
 }
