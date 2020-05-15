@@ -5297,6 +5297,9 @@ int z3fuzz_query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
     int         res;
     testcase_t* curr_t = &ctx->testcases.data[0];
 
+    // just a mitigation. Remove for debugging
+    *proof_size = 0;
+
     timer_start_wrapper(ctx);
     __init_global_data(ctx, query, branch_condition);
     // print_univocally_defined(ctx);
@@ -5394,7 +5397,11 @@ int z3fuzz_query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
             ctx->stats.conflicting_fallbacks++;
 
             res = __query_check_light(ctx, query, *ast, proof, proof_size);
-            if (res) {
+            if (unlikely(res == TIMEOUT_V)) {
+                res = 0;
+                break;
+            }
+            if (res == 1) {
                 // the PI is true, we have fixed the input
                 ctx->stats.multigoal++;
                 break;
