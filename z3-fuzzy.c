@@ -1034,6 +1034,21 @@ static __always_inline int is_valid_eval_index(fuzzy_ctx_t*   ctx,
             ctx->stats.unhelpful_eval_interval++;
             return 0;
         }
+#if 0
+         else if (wi_contains_element(&el->interval, group_value) && was_unhelpful) {
+            puts("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@");
+            unsigned j;
+            for (j = 0; j < ast_range.size; ++j)
+                z3fuzz_print_expr(ctx, ast_range.data[j]);
+            print_index_group(&el->group);
+            unsigned long group_value =
+                index_group_to_value(&el->group, values);
+            printf("value: 0x%016lx\n", group_value);
+            ASSERT_OR_ABORT(0,
+                "is_valid_eval_index but was unhelpful");
+
+        }
+#endif
     }
     return 1;
 }
@@ -2366,6 +2381,7 @@ static inline int __check_range_constraint(fuzzy_ctx_t* ctx, Z3_ast expr)
     }
 
     // it is a range query!
+    has_zext = 0;
     optype op = __find_optype(decl_kind, const_operand, has_zext);
 
     set__interval_group_ptr* group_intervals =
