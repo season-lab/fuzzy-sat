@@ -101,16 +101,56 @@ int wi_intersect(wrapped_interval_t* int1, wrapped_interval_t* int2)
         int1->min = _max(int1->min, int2->min);
         int1->max = _min(int2->max, int2->max);
     } else {
-        if (is_right_of(int1->max, int2->min, int1->size) &&
-            is_right_of(int1->min, int2->max, int1->size)) {
+        if (wi_contains_element(int2, int1->max) &&
+            !wi_contains_element(int2, int1->min)) {
+            /*
+             *        +--------+
+             * +------|-+      |
+             * |   I1 | | I2   |
+             * +------|-+      |
+             *        +--------+
+             */
             int1->min = int2->min;
             // int1->max = int1->max;
-        } else if (is_left_of(int1->max, int2->min, int1->size) &&
-                   is_left_of(int1->min, int2->max, int1->size)) {
+        } else if (wi_contains_element(int2, int1->min) &&
+                   !wi_contains_element(int2, int1->max)) {
+            /*
+             *        +--------+
+             * +------|-+      |
+             * |   I2 | | I1   |
+             * +------|-+      |
+             *        +--------+
+             */
             // int1->min = int1->min;
             int1->max = int2->max;
         } else {
-            // double intersection -> overapproximation
+            /*
+             * ------+    +------
+             *     +-|----|-+
+             *  I1 | | I2 | | I1     (overapprox, take min (I1, I2))
+             *     +-|----|-+
+             * ------+    +------
+             *
+             * ------+    +------
+             *     +-|----|-+
+             *  I2 | | I1 | | I2     (overapprox, take min (I1, I2))
+             *     +-|----|-+
+             * ------+    +------
+             *
+             * +-----------------+
+             * |   +--------+    |
+             * |   |   I1   | I2 |   (no approximation)
+             * |   +--------+    |
+             * +-----------------+
+             *
+             * +-----------------+
+             * |   +--------+    |
+             * |   |   I2   | I1 |   (no approximation)
+             * |   +--------+    |
+             * +-----------------+
+
+             */
+            // double intersection -> possibly overapproximation
             if (wi_get_range(int2) < wi_get_range(int1)) {
                 int1->min = int2->min;
                 int1->max = int2->max;
@@ -194,8 +234,9 @@ void wi_update_sub(wrapped_interval_t* src, uint64_t c)
 void wi_modify_size(wrapped_interval_t* src, uint32_t new_size)
 {
     if (new_size < src->size) {
-        src->min = _min(get_size_mask(new_size), src->min);
-        src->max = _min(get_size_mask(new_size), src->max);
+        wrapped_interval_t tmp = {
+            .min = 0, .max = get_size_mask(new_size), .size = src->size};
+        wi_intersect(src, &tmp);
     }
     src->size = new_size;
 }
