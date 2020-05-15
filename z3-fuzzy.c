@@ -2314,6 +2314,7 @@ static inline int __check_range_constraint(fuzzy_ctx_t* ctx, Z3_ast expr)
     }
 
     // it is a range query!
+    has_zext  = 0;
     optype op = __find_optype(decl_kind, const_operand, has_zext);
 
     set__interval_group_ptr* group_intervals =

@@ -99,7 +99,7 @@ int wi_intersect(wrapped_interval_t* int1, wrapped_interval_t* int2)
 
     if (!is_wrapping(int1) && !is_wrapping(int2)) {
         int1->min = _max(int1->min, int2->min);
-        int1->max = _min(int2->max, int2->max);
+        int1->max = _min(int1->max, int2->max);
     } else {
         if (wi_contains_element(int2, int1->max) &&
             !wi_contains_element(int2, int1->min)) {
