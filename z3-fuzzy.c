@@ -5702,6 +5702,95 @@ unsigned long z3fuzz_minimize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_minimize,
     return min_val;
 }
 
+void z3fuzz_find_all_values(fuzzy_ctx_t* ctx, Z3_ast expr, Z3_ast pi,
+                            void (*callback)(unsigned char const* out_bytes,
+                                             unsigned long out_bytes_len))
+{
+    testcase_t* current_testcase = &ctx->testcases.data[0];
+    memcpy(tmp_input, current_testcase->values,
+           current_testcase->values_len * sizeof(unsigned long));
+    __reset_ast_data();
+    detect_involved_inputs_wrapper(ctx, expr, &ast_data.inputs);
+
+    index_group_t* g;
+
+    set_reset_iter__index_group_t(&ast_data.inputs->index_groups, 1);
+    while (
+        set_iter_next__index_group_t(&ast_data.inputs->index_groups, 1, &g)) {
+
+        unsigned long original_val =
+            index_group_to_value(g, current_testcase->values);
+
+        set__interval_group_ptr* group_intervals =
+            (set__interval_group_ptr*)ctx->group_intervals;
+        wrapped_interval_t* interval =
+            interval_group_get_interval(group_intervals, g);
+
+        if (interval != NULL && wi_get_range(interval) < 256) {
+            // the group is within a (small) known interval, brute force it
+            wrapped_interval_iter_t it = wi_init_iter_values(interval);
+            uint64_t                val;
+            while (wi_iter_get_next(&it, &val)) {
+                set_tmp_input_group_to_value(g, val);
+                if (ctx->model_eval(ctx->z3_ctx, pi, tmp_input,
+                                    current_testcase->value_sizes,
+                                    current_testcase->values_len)) {
+                    __vals_long_to_char(tmp_input, tmp_proof,
+                                        current_testcase->testcase_len);
+                    callback(tmp_proof, current_testcase->testcase_len);
+                }
+            }
+        } else if (g->n == 1) {
+            // single byte, brute force it
+            unsigned long val = original_val;
+            unsigned      i;
+            for (i = 1; i < 256; ++i) {
+                val += i;
+                val &= 0xff;
+                set_tmp_input_group_to_value(g, val);
+                if (ctx->model_eval(ctx->z3_ctx, pi, tmp_input,
+                                    current_testcase->value_sizes,
+                                    current_testcase->values_len)) {
+                    __vals_long_to_char(tmp_input, tmp_proof,
+                                        current_testcase->testcase_len);
+                    callback(tmp_proof, current_testcase->testcase_len);
+                }
+            }
+        } else {
+            // greedy +1, -1
+            unsigned      max_iter = 128;
+            unsigned      i        = 0;
+            unsigned long val      = original_val + 1;
+            set_tmp_input_group_to_value(g, val);
+            while (ctx->model_eval(ctx->z3_ctx, pi, tmp_input,
+                                   current_testcase->value_sizes,
+                                   current_testcase->values_len) &&
+                   i++ < max_iter) {
+                set_tmp_input_group_to_value(g, val);
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                callback(tmp_proof, current_testcase->testcase_len);
+                val += 1;
+            }
+
+            val = original_val - 1;
+            i   = 0;
+            set_tmp_input_group_to_value(g, val);
+            while (ctx->model_eval(ctx->z3_ctx, pi, tmp_input,
+                                   current_testcase->value_sizes,
+                                   current_testcase->values_len) &&
+                   i++ < max_iter) {
+                set_tmp_input_group_to_value(g, val);
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                callback(tmp_proof, current_testcase->testcase_len);
+                val -= 1;
+            }
+        }
+        set_tmp_input_group_to_value(g, original_val);
+    }
+}
+
 void z3fuzz_notify_constraint(fuzzy_ctx_t* ctx, Z3_ast constraint)
 {
     // this is a visit of the AST of the constraint... Too slow? I don't know
