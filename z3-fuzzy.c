@@ -5741,25 +5741,9 @@ void z3fuzz_find_all_values(fuzzy_ctx_t* ctx, Z3_ast expr, Z3_ast pi,
                     callback(tmp_proof, current_testcase->testcase_len);
                 }
             }
-        } else if (g->n == 1) {
-            // single byte, brute force it
-            unsigned long val = original_val;
-            unsigned      i;
-            for (i = 1; i < 256; ++i) {
-                val += i;
-                val &= 0xff;
-                set_tmp_input_group_to_value(g, val);
-                if (ctx->model_eval(ctx->z3_ctx, pi, tmp_input,
-                                    current_testcase->value_sizes,
-                                    current_testcase->values_len)) {
-                    __vals_long_to_char(tmp_input, tmp_proof,
-                                        current_testcase->testcase_len);
-                    callback(tmp_proof, current_testcase->testcase_len);
-                }
-            }
         } else {
             // greedy +1, -1
-            unsigned      max_iter = 128;
+            unsigned      max_iter = 5;
             unsigned      i        = 0;
             unsigned long val      = original_val + 1;
             set_tmp_input_group_to_value(g, val);
