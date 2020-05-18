@@ -1405,11 +1405,11 @@ static int __detect_input_group(fuzzy_ctx_t* ctx, Z3_ast node,
             break;
         }
         case Z3_NUMERAL_AST: {
-            uint64_t v;
-            Z3_bool  successGet =
-                Z3_get_numeral_uint64(ctx->z3_ctx, node, (uint64_t*)&v);
-            if (!successGet || v != 0)
-                *approx = 1;
+            // uint64_t v;
+            // Z3_bool  successGet =
+            //     Z3_get_numeral_uint64(ctx->z3_ctx, node, (uint64_t*)&v);
+            // if (!successGet || v != 0)
+            //     *approx = 1;
 
             res = 1;
             break;

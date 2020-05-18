@@ -269,7 +269,7 @@ wrapped_interval_iter_t wi_init_iter_values(wrapped_interval_t* interval)
 
 int wi_iter_get_next(wrapped_interval_iter_t* it, uint64_t* el)
 {
-    if (it->curr_i >= it->max_i)
+    if (it->curr_i > it->max_i)
         return 0;
 
     *el = (uint64_t)((it->min_v + it->curr_i++) & it->mask);
