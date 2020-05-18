@@ -28,14 +28,14 @@ fuzzy-lib:
 	${CC} ${CFLAGS} -c z3-fuzzy.c ${CINCLUDE} ${CLIB_PATHS} ${CLIBS}
 	${CC} ${CFLAGS} -c ./utility/md5.c ${CINCLUDE} ${CLIB_PATHS} ${CLIBS}
 	${CC} ${CFLAGS} -c ./utility/gradient_descend.c ${CINCLUDE} ${CLIB_PATHS} ${CLIBS}
-	${CC} ${CFLAGS} -c ./utility/interval.c ${CINCLUDE} ${CLIB_PATHS} ${CLIBS}
+	${CC} ${CFLAGS} -c ./utility/wrapped_interval.c ${CINCLUDE} ${CLIB_PATHS} ${CLIBS}
 	${CC} ${CFLAGS} -c ./utility/timer.c ${CINCLUDE} ${CLIB_PATHS} ${CLIBS}
 	${CC} ${CFLAGS} -c testcase-list.c ${CINCLUDE} ${CLIB_PATHS} ${CLIBS}
-	ar rcs libZ3Fuzzy.a z3-fuzzy.o testcase-list.o gradient_descend.o md5.o interval.o timer.o
-	rm z3-fuzzy.o testcase-list.o gradient_descend.o md5.o interval.o timer.o
+	ar rcs libZ3Fuzzy.a z3-fuzzy.o testcase-list.o gradient_descend.o md5.o wrapped_interval.o timer.o
+	rm z3-fuzzy.o testcase-list.o gradient_descend.o md5.o wrapped_interval.o timer.o
 
 interval-test:
-	${CC} ${CFLAGS} interval_test.c ./utility/interval.c -o interval_test
+	${CC} ${CFLAGS} interval_test.c ./utility/wrapped_interval.c -o interval_test
 
 clean:
 	rm -f libZ3Fuzzy.a fuzzy-solver fuzzy-solver-notify solver eval-driver maxmin-driver debug-eval

@@ -99,6 +99,9 @@ unsigned long z3fuzz_maximize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_maximize,
 unsigned long z3fuzz_minimize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_minimize,
                               unsigned char const** out_values,
                               unsigned long*        out_len);
+void          z3fuzz_find_all_values(fuzzy_ctx_t* ctx, Z3_ast expr, Z3_ast pi,
+                                     void (*callback)(unsigned char const* out_bytes,
+                                             unsigned long out_bytes_len));
 void z3fuzz_add_assignment(fuzzy_ctx_t* ctx, int idx, Z3_ast assignment_value);
 
 void z3fuzz_notify_constraint(fuzzy_ctx_t* ctx, Z3_ast constraint);

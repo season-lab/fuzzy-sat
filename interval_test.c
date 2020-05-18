@@ -1,41 +1,27 @@
-#include "utility/interval.h"
-#include <assert.h>
+#include "utility/wrapped_interval.h"
+#include <stdio.h>
 
 int main()
 {
-    interval_t iu8 = init_interval(8);
-    assert(update_interval(&iu8, 7, OP_ULT) == 1);
-    print_interval(&iu8);
+    wrapped_interval_t wi1 = wi_init(8);
+    wi_update_add(&wi1, 10);
+    wi_print(&wi1);
 
-    interval_t is8 = init_interval(8);
-    assert(update_interval(&is8, 7, OP_SLT) == 1);
-    print_interval(&is8);
+    printf("contains %d ? %d\n", 9, wi_contains_element(&wi1, 9));
+    printf("contains %d ? %d\n", 10, wi_contains_element(&wi1, 10));
+    printf("contains %d ? %d\n", 255, wi_contains_element(&wi1, 255));
 
-    interval_t iu64 = init_interval(64);
-    assert(update_interval(&iu64, 100, OP_UGT) == 1);
-    print_interval(&iu64);
+    wi_update_cmp(&wi1, -4, OP_SGT);
+    wi_print(&wi1);
 
-    interval_t is64 = init_interval(64);
-    assert(update_interval(&is64, 100, OP_SGT) == 1);
-    print_interval(&is64);
+    wi_update_sub(&wi1, 13);
+    wi_print(&wi1);
 
-    iu64 = init_interval(64);
-    assert(update_interval(&iu64, 100, OP_ULT) == 1);
-    print_interval(&iu64);
+    wi_update_add(&wi1, 30);
+    wi_print(&wi1);
 
-    is64 = init_interval(64);
-    assert(update_interval(&is64, 100, OP_SLT) == 1);
-    print_interval(&is64);
-
-    iu64 = init_interval(64);
-    assert(update_interval(&iu64, 30, OP_UGE) == 1);
-    assert(update_interval(&iu64, 51, OP_ULT) == 1);
-    assert(update_interval(&iu64, 10, OP_ULT) == 0);
-    print_interval(&iu64);
-
-    is64 = init_interval(64);
-    int64_t    sc   = -3;
-    uint64_t   c    = (uint64_t)sc;
-    assert(update_interval(&is64, (__int128_t)c, OP_ULT) == 1);
-    print_interval(&is64);
+    wrapped_interval_t wi2 = wi_init(8);
+    wi_update_cmp(&wi2, 0xb0, OP_UGT);
+    wi_update_sub(&wi2, 0x0a);
+    wi_print(&wi2);
 }
