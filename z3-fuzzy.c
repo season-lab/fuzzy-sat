@@ -1456,11 +1456,11 @@ static int __detect_input_group(fuzzy_ctx_t* ctx, Z3_ast node,
             break;
         }
         case Z3_NUMERAL_AST: {
-            uint64_t v;
-            Z3_bool  successGet =
-                Z3_get_numeral_uint64(ctx->z3_ctx, node, (uint64_t*)&v);
-            if (!successGet || v != 0)
-                *approx = 1;
+            // uint64_t v;
+            // Z3_bool  successGet =
+            //     Z3_get_numeral_uint64(ctx->z3_ctx, node, (uint64_t*)&v);
+            // if (!successGet || v != 0)
+            //     *approx = 1;
 
             res = 1;
             break;
@@ -2159,35 +2159,35 @@ static inline interval_group_ptr interval_group_set_add_or_modify(
     interval_group_ptr* igt_ptr = set_find_el__interval_group_ptr(set, &igt_p);
 
     wrapped_interval_t wi = wi_init(const_size);
-    //puts("WI init");
-    //wi_print(&wi);
+    // puts("WI init");
+    // wi_print(&wi);
     wi_update_cmp(&wi, c, op);
-    //puts("WI after cmp");
-    //wi_print(&wi);
+    // puts("WI after cmp");
+    // wi_print(&wi);
     if (add_constant > 0) {
         wi_modify_size(&wi, add_sub_const_size);
-        //puts("WI after mod size (add)");
-        //wi_print(&wi);
+        // puts("WI after mod size (add)");
+        // wi_print(&wi);
         wi_update_sub(&wi, add_constant);
-        //puts("WI after update sub (add)");
-        //wi_print(&wi);
+        // puts("WI after update sub (add)");
+        // wi_print(&wi);
     }
     if (sub_constant > 0) {
         wi_modify_size(&wi, add_sub_const_size);
-        //puts("WI after mod size (sub)");
-        //wi_print(&wi);
+        // puts("WI after mod size (sub)");
+        // wi_print(&wi);
         wi_update_add(&wi, add_constant);
-        //puts("WI after update add (sub)");
-        //wi_print(&wi);
+        // puts("WI after update add (sub)");
+        // wi_print(&wi);
     }
 
     wi_modify_size(&wi, ig->n * 8);
-    //puts("WI after update size");
-    //wi_print(&wi);
+    // puts("WI after update size");
+    // wi_print(&wi);
     if (igt_ptr != NULL) {
         wi_intersect(&(*igt_ptr)->interval, &wi);
-        //puts("WI after intersect");
-        //wi_print(&(*igt_ptr)->interval);
+        // puts("WI after intersect");
+        // wi_print(&(*igt_ptr)->interval);
         return *igt_ptr;
     } else {
         *created_new = 1;
@@ -2381,7 +2381,7 @@ static inline int __check_range_constraint(fuzzy_ctx_t* ctx, Z3_ast expr)
     }
 
     // it is a range query!
-    has_zext = 0;
+    has_zext  = 0;
     optype op = __find_optype(decl_kind, const_operand, has_zext);
 
     set__interval_group_ptr* group_intervals =
