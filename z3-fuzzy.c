@@ -2289,14 +2289,11 @@ static inline int __check_range_constraint(fuzzy_ctx_t* ctx, Z3_ast expr)
         char approx = 0;
         int  input_group_ok =
             __detect_input_group(ctx, non_const_operand2, &ig, &approx);
-        if (!input_group_ok || approx) {
+        if (!input_group_ok || ig.n == 0 || approx) {
             // no input group or approximated group
             Z3_dec_ref(ctx->z3_ctx, non_const_operand2);
             goto END_FUN_2;
         }
-        ASSERT_OR_ABORT(ig.n > 0,
-                        "__check_range_constraint() - size of group is zero. "
-                        "It shouldn't happen");
 
         Z3_dec_ref(ctx->z3_ctx, non_const_operand);
         non_const_operand = non_const_operand2;
@@ -2305,12 +2302,9 @@ static inline int __check_range_constraint(fuzzy_ctx_t* ctx, Z3_ast expr)
         char approx = 0;
         int  input_group_ok =
             __detect_input_group(ctx, non_const_operand, &ig, &approx);
-        if (!input_group_ok || approx)
+        if (!input_group_ok || ig.n == 0 || approx)
             // no input group or approximated group
             goto END_FUN_2;
-        ASSERT_OR_ABORT(ig.n > 0,
-                        "__check_range_constraint() - size of group is zero. "
-                        "It shouldn't happen");
     }
 
     // it is a range query!
