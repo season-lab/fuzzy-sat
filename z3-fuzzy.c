@@ -2356,14 +2356,11 @@ static inline int __check_range_constraint(fuzzy_ctx_t* ctx, Z3_ast expr)
         char approx = 0;
         int  input_group_ok =
             __detect_input_group(ctx, non_const_operand2, &ig, &approx);
-        if (!input_group_ok || approx) {
+        if (!input_group_ok || ig.n == 0 || approx) {
             // no input group or approximated group
             Z3_dec_ref(ctx->z3_ctx, non_const_operand2);
             goto END_FUN_2;
         }
-        ASSERT_OR_ABORT(ig.n > 0,
-                        "__check_range_constraint() - size of group is zero. "
-                        "It shouldn't happen");
 
         Z3_dec_ref(ctx->z3_ctx, non_const_operand);
         non_const_operand = non_const_operand2;
@@ -2372,12 +2369,9 @@ static inline int __check_range_constraint(fuzzy_ctx_t* ctx, Z3_ast expr)
         char approx = 0;
         int  input_group_ok =
             __detect_input_group(ctx, non_const_operand, &ig, &approx);
-        if (!input_group_ok || approx)
+        if (!input_group_ok || ig.n == 0 || approx)
             // no input group or approximated group
             goto END_FUN_2;
-        ASSERT_OR_ABORT(ig.n > 0,
-                        "__check_range_constraint() - size of group is zero. "
-                        "It shouldn't happen");
     }
 
     // it is a range query!
@@ -5338,6 +5332,7 @@ int z3fuzz_query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
     int         res;
     testcase_t* curr_t = &ctx->testcases.data[0];
 
+    // just a mitigation. Remove for debugging
     *proof_size = 0;
 
     timer_start_wrapper(ctx);
@@ -5441,7 +5436,7 @@ int z3fuzz_query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
                 res = 0;
                 break;
             }
-            if (res) {
+            if (res == 1) {
                 // the PI is true, we have fixed the input
                 ctx->stats.multigoal++;
                 break;
@@ -5770,6 +5765,85 @@ unsigned long z3fuzz_minimize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_minimize,
 
     __gd_free_eval(&ew);
     return min_val;
+}
+
+void z3fuzz_find_all_values(fuzzy_ctx_t* ctx, Z3_ast expr, Z3_ast pi,
+                            void (*callback)(unsigned char const* out_bytes,
+                                             unsigned long out_bytes_len))
+{
+    Z3_inc_ref(ctx->z3_ctx, pi);
+    Z3_inc_ref(ctx->z3_ctx, expr);
+
+    testcase_t* current_testcase = &ctx->testcases.data[0];
+    memcpy(tmp_input, current_testcase->values,
+           current_testcase->values_len * sizeof(unsigned long));
+    __reset_ast_data();
+    detect_involved_inputs_wrapper(ctx, expr, &ast_data.inputs);
+
+    index_group_t* g;
+
+    set_reset_iter__index_group_t(&ast_data.inputs->index_groups, 1);
+    while (
+        set_iter_next__index_group_t(&ast_data.inputs->index_groups, 1, &g)) {
+
+        unsigned long original_val =
+            index_group_to_value(g, current_testcase->values);
+
+        set__interval_group_ptr* group_intervals =
+            (set__interval_group_ptr*)ctx->group_intervals;
+        wrapped_interval_t* interval =
+            interval_group_get_interval(group_intervals, g);
+
+        if (interval != NULL && wi_get_range(interval) < 256) {
+            // the group is within a (small) known interval, brute force it
+            wrapped_interval_iter_t it = wi_init_iter_values(interval);
+            uint64_t                val;
+            while (wi_iter_get_next(&it, &val)) {
+                set_tmp_input_group_to_value(g, val);
+                if (ctx->model_eval(ctx->z3_ctx, pi, tmp_input,
+                                    current_testcase->value_sizes,
+                                    current_testcase->values_len)) {
+                    __vals_long_to_char(tmp_input, tmp_proof,
+                                        current_testcase->testcase_len);
+                    callback(tmp_proof, current_testcase->testcase_len);
+                }
+            }
+        } else {
+            // greedy +1, -1
+            unsigned      max_iter = 5;
+            unsigned      i        = 0;
+            unsigned long val      = original_val + 1;
+            set_tmp_input_group_to_value(g, val);
+            while (ctx->model_eval(ctx->z3_ctx, pi, tmp_input,
+                                   current_testcase->value_sizes,
+                                   current_testcase->values_len) &&
+                   i++ < max_iter) {
+                set_tmp_input_group_to_value(g, val);
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                callback(tmp_proof, current_testcase->testcase_len);
+                val += 1;
+            }
+
+            val = original_val - 1;
+            i   = 0;
+            set_tmp_input_group_to_value(g, val);
+            while (ctx->model_eval(ctx->z3_ctx, pi, tmp_input,
+                                   current_testcase->value_sizes,
+                                   current_testcase->values_len) &&
+                   i++ < max_iter) {
+                set_tmp_input_group_to_value(g, val);
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                callback(tmp_proof, current_testcase->testcase_len);
+                val -= 1;
+            }
+        }
+        set_tmp_input_group_to_value(g, original_val);
+    }
+
+    Z3_dec_ref(ctx->z3_ctx, pi);
+    Z3_dec_ref(ctx->z3_ctx, expr);
 }
 
 void z3fuzz_notify_constraint(fuzzy_ctx_t* ctx, Z3_ast constraint)
