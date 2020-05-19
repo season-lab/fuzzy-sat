@@ -5701,6 +5701,9 @@ void z3fuzz_find_all_values(fuzzy_ctx_t* ctx, Z3_ast expr, Z3_ast pi,
                             void (*callback)(unsigned char const* out_bytes,
                                              unsigned long out_bytes_len))
 {
+    Z3_inc_ref(ctx->z3_ctx, pi);
+    Z3_inc_ref(ctx->z3_ctx, expr);
+
     testcase_t* current_testcase = &ctx->testcases.data[0];
     memcpy(tmp_input, current_testcase->values,
            current_testcase->values_len * sizeof(unsigned long));
@@ -5768,6 +5771,9 @@ void z3fuzz_find_all_values(fuzzy_ctx_t* ctx, Z3_ast expr, Z3_ast pi,
         }
         set_tmp_input_group_to_value(g, original_val);
     }
+
+    Z3_dec_ref(ctx->z3_ctx, pi);
+    Z3_dec_ref(ctx->z3_ctx, expr);
 }
 
 void z3fuzz_notify_constraint(fuzzy_ctx_t* ctx, Z3_ast constraint)
