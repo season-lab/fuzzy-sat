@@ -7,6 +7,7 @@ eval-driver
 fuzzy-solver
 fuzzy-solver-notify
 maxmin-driver
+findall-driver
 solver
 interval_test
 libZ3Fuzzy.a

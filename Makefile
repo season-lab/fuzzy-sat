@@ -4,7 +4,7 @@ CLIBS=-lz3
 CLIB_PATHS=-L./fuzzolic-z3/build
 CINCLUDE=-I./fuzzolic-z3/src/api -I./include
 
-all: solver fuzzy-solver fuzzy-solver-notify eval-driver maxmin-driver debug-eval
+all: solver fuzzy-solver fuzzy-solver-notify eval-driver maxmin-driver debug-eval findall-driver
 
 fuzzy-solver: fuzzy-lib
 	${CC} ${CFLAGS} fuzzy-solver.c ./utility/pretty-print.c libZ3Fuzzy.a -o fuzzy-solver ${CINCLUDE} ${CLIB_PATHS} ${CLIBS}
@@ -20,6 +20,9 @@ eval-driver: fuzzy-lib
 
 maxmin-driver: fuzzy-lib
 	${CC} ${CFLAGS} maxmin-driver.c ./utility/pretty-print.c libZ3Fuzzy.a -o maxmin-driver ${CINCLUDE} ${CLIB_PATHS} ${CLIBS}
+
+findall-driver: fuzzy-lib
+	${CC} ${CFLAGS} findall-driver.c libZ3Fuzzy.a -o findall-driver ${CINCLUDE} ${CLIB_PATHS} ${CLIBS}
 
 debug-eval: fuzzy-lib
 	${CC} ${CFLAGS} debug-eval.c ./utility/pretty-print.c libZ3Fuzzy.a -o debug-eval ${CINCLUDE} ${CLIB_PATHS} ${CLIBS}
@@ -38,7 +41,7 @@ interval-test:
 	${CC} ${CFLAGS} interval_test.c ./utility/wrapped_interval.c -o interval_test
 
 clean:
-	rm -f libZ3Fuzzy.a fuzzy-solver fuzzy-solver-notify solver eval-driver maxmin-driver debug-eval
+	rm -f libZ3Fuzzy.a fuzzy-solver fuzzy-solver-notify solver eval-driver maxmin-driver debug-eval findall-driver
 
 clean-tests:
 	rm tests/*
