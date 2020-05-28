@@ -63,7 +63,8 @@ typedef struct fuzzy_ctx_t {
     fuzzy_stats_t stats;
     Z3_ast*       assignments;
     unsigned      size_assignments;
-    uint64_t (*model_eval)(Z3_context, Z3_ast, uint64_t*, uint8_t*, size_t);
+    uint64_t (*model_eval)(Z3_context, Z3_ast, uint64_t*, uint8_t*, size_t,
+                           uint32_t*);
 
     // opaque fields
     void* testcases_a;
