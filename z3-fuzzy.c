@@ -81,8 +81,9 @@ static int check_unnecessary_eval = 1;
 // generate parametric data structures
 #include "z3-fuzzy-datastructures-gen.h"
 
-uint64_t Z3_API Z3_custom_eval(Z3_context c, Z3_ast e, uint64_t* data,
-                               uint8_t* data_sizes, size_t data_size);
+uint64_t Z3_API Z3_custom_eval_depth(Z3_context c, Z3_ast e, uint64_t* data,
+                                     uint8_t* data_sizes, size_t data_size,
+                                     uint32_t* depth);
 
 typedef struct ast_info_t {
     unsigned      linear_arithmetic_operations;
@@ -113,13 +114,13 @@ typedef ast_info_t* ast_info_ptr;
 #define DICT_DATA_T ast_info_ptr
 #include <dict.h>
 
-static unsigned long*                   tmp_input     = NULL;
-static unsigned long*                   tmp_opt_input = NULL;
-static unsigned char*                   tmp_proof     = NULL;
-static unsigned char*                   tmp_opt_proof = NULL;
-static int                              opt_found     = 0;
-__attribute__((unused)) static unsigned opt_num_sat   = 0;
-static ast_data_t                       ast_data      = {0};
+static unsigned long* tmp_input     = NULL;
+static unsigned long* tmp_opt_input = NULL;
+static unsigned char* tmp_proof     = NULL;
+static unsigned char* tmp_opt_proof = NULL;
+static int            opt_found     = 0;
+static unsigned       opt_num_sat   = 0;
+static ast_data_t     ast_data      = {0};
 
 static char* query_log_filename = "/tmp/fuzzy-log-info.csv";
 FILE*        query_log;
@@ -378,7 +379,7 @@ static unsigned long __gd_eval(unsigned long* x, int* should_exit)
     if (eval_ctx->check_pi_eval) {
         unsigned long pi_eval = eval_ctx->fctx->model_eval(
             eval_ctx->fctx->z3_ctx, eval_ctx->pi, tmp_input,
-            seed_testcase->value_sizes, seed_testcase->values_len);
+            seed_testcase->value_sizes, seed_testcase->values_len, NULL);
 
         if (!pi_eval)
             return 0x7fffffffffffffff;
@@ -386,7 +387,7 @@ static unsigned long __gd_eval(unsigned long* x, int* should_exit)
 
     unsigned long res = eval_ctx->fctx->model_eval(
         eval_ctx->fctx->z3_ctx, eval_ctx->ast, tmp_input,
-        seed_testcase->value_sizes, seed_testcase->values_len);
+        seed_testcase->value_sizes, seed_testcase->values_len, NULL);
     eval_ctx->fctx->stats.num_evaluate++;
     return res;
 }
@@ -695,7 +696,7 @@ static void init_config_params()
 void z3fuzz_init(fuzzy_ctx_t* fctx, Z3_context ctx, char* seed_filename,
                  char* testcase_path,
                  uint64_t (*model_eval)(Z3_context, Z3_ast, uint64_t*, uint8_t*,
-                                        size_t),
+                                        size_t, uint32_t*),
                  unsigned timeout)
 {
     init_config_params();
@@ -721,8 +722,8 @@ void z3fuzz_init(fuzzy_ctx_t* fctx, Z3_context ctx, char* seed_filename,
             "arith ops;non linear arith ops");
     }
 
-    fctx->model_eval    = model_eval != NULL ? model_eval : Z3_custom_eval;
-    fctx->z3_ctx        = ctx;
+    fctx->model_eval = model_eval != NULL ? model_eval : Z3_custom_eval_depth;
+    fctx->z3_ctx     = ctx;
     fctx->testcase_path = testcase_path;
     init_testcase_list(&fctx->testcases);
     load_testcase(&fctx->testcases, seed_filename, ctx);
@@ -918,39 +919,6 @@ static int __check_or_add_digest(set__digest_t* set, unsigned char* values,
     return 0;
 }
 
-__attribute__((unused)) static __always_inline int
-evaluate_pi(fuzzy_ctx_t* ctx, Z3_ast pi, unsigned long* values,
-            unsigned char* value_sizes, unsigned long n_values,
-            unsigned* num_sat)
-{
-    *num_sat = 0;
-    if (Z3_get_ast_kind(ctx->z3_ctx, pi) != Z3_APP_AST)
-        return 1; // only branch condition
-
-    Z3_app     app        = Z3_to_app(ctx->z3_ctx, pi);
-    unsigned   num_fields = Z3_get_app_num_args(ctx->z3_ctx, app);
-    set__ulong processed_asts;
-    set_init__ulong(&processed_asts, index_hash, index_equals);
-
-    unsigned num_skipped = 0;
-    unsigned i;
-    for (i = 0; i < num_fields; ++i) {
-        Z3_ast        child = Z3_get_app_arg(ctx->z3_ctx, app, i);
-        unsigned long hash  = Z3_get_ast_id(ctx->z3_ctx, child);
-        if (set_check__ulong(&processed_asts, hash)) {
-            num_skipped++;
-            continue;
-        }
-        set_add__ulong(&processed_asts, hash);
-
-        if (ctx->model_eval(ctx->z3_ctx, child, values, value_sizes, n_values))
-            *num_sat += 1;
-    }
-
-    set_free__ulong(&processed_asts, NULL);
-    return *num_sat == num_fields - num_skipped;
-}
-
 static __always_inline unsigned long index_group_to_value(index_group_t* ig,
                                                           unsigned long* values)
 {
@@ -1030,9 +998,10 @@ static inline int __evaluate_branch_query(fuzzy_ctx_t* ctx, Z3_ast query,
             return 0;
         }
 
-    int res;
+    int      res;
+    uint32_t depth;
     res = (int)ctx->model_eval(ctx->z3_ctx, branch_condition, values,
-                               value_sizes, n_values);
+                               value_sizes, n_values, &depth);
     if (res) {
 #if 0
         unsigned num_sat;
@@ -1046,15 +1015,16 @@ static inline int __evaluate_branch_query(fuzzy_ctx_t* ctx, Z3_ast query,
             __vals_long_to_char(values, tmp_opt_proof, t->testcase_len);
         }
 #else
-        if (!opt_found) {
+        if (!opt_found || depth > opt_num_sat) {
             testcase_t* t = &ctx->testcases.data[0];
             opt_found     = 1;
+            opt_num_sat   = depth;
             memcpy(tmp_opt_input, values,
                    t->values_len * sizeof(unsigned long));
             __vals_long_to_char(values, tmp_opt_proof, t->testcase_len);
         }
         res = (int)ctx->model_eval(ctx->z3_ctx, query, values, value_sizes,
-                                   n_values);
+                                   n_values, NULL);
 #endif
     }
     res = res > 0 ? 1 : 0;
@@ -5272,7 +5242,7 @@ int z3fuzz_query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
     for (i = 0; i < Z3_get_app_num_args(ctx->z3_ctx, __app); ++i) {
         if (!ctx->model_eval(ctx->z3_ctx, Z3_get_app_arg(ctx->z3_ctx, __app, i),
                              tmp_opt_input, curr_t->value_sizes,
-                             curr_t->values_len)) {
+                             curr_t->values_len, NULL)) {
             puts("this is UNSAT");
             z3fuzz_print_expr(ctx, Z3_get_app_arg(ctx->z3_ctx, __app, i));
         }
@@ -5334,7 +5304,7 @@ int z3fuzz_query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
     set_reset_iter__ulong(&local_conflicting_asts, 0);
     while (set_iter_next__ulong(&local_conflicting_asts, 0, (ulong**)&ast)) {
         if (ctx->model_eval(ctx->z3_ctx, *ast, tmp_input, curr_t->value_sizes,
-                            curr_t->values_len)) {
+                            curr_t->values_len, NULL)) {
             // conflicting AST is true
             continue;
         }
@@ -5378,7 +5348,7 @@ int z3fuzz_query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
                 for (i = 0; i < Z3_get_app_num_args(ctx->z3_ctx, __app); ++i) {
                     if (!ctx->model_eval(ctx->z3_ctx, Z3_get_app_arg(ctx->z3_ctx, __app, i),
                                         tmp_opt_input, curr_t->value_sizes,
-                                        curr_t->values_len)) {
+                                        curr_t->values_len, NULL)) {
                         puts("this is UNSAT");
                         z3fuzz_print_expr(ctx, Z3_get_app_arg(ctx->z3_ctx, __app, i));
                     }
@@ -5466,7 +5436,7 @@ void z3fuzz_add_assignment(fuzzy_ctx_t* ctx, int idx, Z3_ast assignment_value)
 
         unsigned long assignment_value_concrete =
             ctx->model_eval(ctx->z3_ctx, assignment_value, testcase->values,
-                            testcase->value_sizes, testcase->values_len);
+                            testcase->value_sizes, testcase->values_len, NULL);
 
         testcase->value_sizes[idx] = assignment_size;
         testcase->values[idx]      = assignment_value_concrete;
@@ -5509,7 +5479,7 @@ static inline unsigned long __minimize_maximize_inner_greedy(
     testcase_t*   current_testcase = &ctx->testcases.data[0];
     unsigned long max_min          = ctx->model_eval(
         ctx->z3_ctx, to_maximize_minimize, tmp_input,
-        current_testcase->value_sizes, current_testcase->values_len);
+        current_testcase->value_sizes, current_testcase->values_len, NULL);
     unsigned long tmp;
     unsigned long original_byte, max_min_byte, i, j;
     ulong*        p;
@@ -5534,12 +5504,12 @@ static inline unsigned long __minimize_maximize_inner_greedy(
             tmp_input[*p] = (unsigned long)i;
             if (!ctx->model_eval(ctx->z3_ctx, pi, tmp_input,
                                  current_testcase->value_sizes,
-                                 current_testcase->values_len))
+                                 current_testcase->values_len, NULL))
                 continue;
 
             tmp = ctx->model_eval(ctx->z3_ctx, to_maximize_minimize, tmp_input,
                                   current_testcase->value_sizes,
-                                  current_testcase->values_len);
+                                  current_testcase->values_len, NULL);
             if ((is_max && tmp > max_min) || (!is_max && tmp < max_min)) {
                 max_min_byte = i;
                 max_min      = tmp;
@@ -5599,7 +5569,7 @@ unsigned long z3fuzz_maximize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_maximize,
         // all inputs are fixed
         res = ctx->model_eval(ctx->z3_ctx, original_to_maximize, tmp_input,
                               current_testcase->value_sizes,
-                              current_testcase->values_len);
+                              current_testcase->values_len, NULL);
         __vals_long_to_char(tmp_input, tmp_proof,
                             current_testcase->testcase_len);
         *out_values = tmp_proof;
@@ -5615,7 +5585,7 @@ unsigned long z3fuzz_maximize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_maximize,
     if (unlikely(gd_exit == TIMEOUT_V)) {
         res = ctx->model_eval(ctx->z3_ctx, original_to_maximize, tmp_input,
                               current_testcase->value_sizes,
-                              current_testcase->values_len);
+                              current_testcase->values_len, NULL);
         __vals_long_to_char(tmp_input, tmp_proof,
                             current_testcase->testcase_len);
         *out_values = tmp_proof;
@@ -5625,7 +5595,7 @@ unsigned long z3fuzz_maximize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_maximize,
     __gd_fix_tmp_input(ew.input);
     res = ctx->model_eval(ctx->z3_ctx, original_to_maximize, tmp_input,
                           current_testcase->value_sizes,
-                          current_testcase->values_len);
+                          current_testcase->values_len, NULL);
     __vals_long_to_char(tmp_input, tmp_proof, *out_len);
     *out_values = tmp_proof;
 
@@ -5671,7 +5641,7 @@ unsigned long z3fuzz_minimize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_minimize,
         // all inputs are fixed
         unsigned long res = ctx->model_eval(ctx->z3_ctx, to_minimize, tmp_input,
                                             current_testcase->value_sizes,
-                                            current_testcase->values_len);
+                                            current_testcase->values_len, NULL);
         __vals_long_to_char(tmp_input, tmp_proof,
                             current_testcase->testcase_len);
         *out_values = tmp_proof;
@@ -5687,7 +5657,7 @@ unsigned long z3fuzz_minimize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_minimize,
     if (unlikely(gd_exit == TIMEOUT_V)) {
         res = ctx->model_eval(ctx->z3_ctx, to_minimize, tmp_input,
                               current_testcase->value_sizes,
-                              current_testcase->values_len);
+                              current_testcase->values_len, NULL);
         __vals_long_to_char(tmp_input, tmp_proof,
                             current_testcase->testcase_len);
         *out_values = tmp_proof;
@@ -5697,7 +5667,7 @@ unsigned long z3fuzz_minimize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_minimize,
     __gd_fix_tmp_input(ew.input);
     res = ctx->model_eval(ctx->z3_ctx, to_minimize_original, tmp_input,
                           current_testcase->value_sizes,
-                          current_testcase->values_len);
+                          current_testcase->values_len, NULL);
     __vals_long_to_char(tmp_input, tmp_proof, *out_len);
     *out_values = tmp_proof;
 OUT:
@@ -5743,13 +5713,13 @@ void z3fuzz_find_all_values(fuzzy_ctx_t* ctx, Z3_ast expr, Z3_ast pi,
                 set_tmp_input_group_to_value(g, val);
                 if (ctx->model_eval(ctx->z3_ctx, pi, tmp_input,
                                     current_testcase->value_sizes,
-                                    current_testcase->values_len)) {
+                                    current_testcase->values_len, NULL)) {
                     __vals_long_to_char(tmp_input, tmp_proof,
                                         current_testcase->testcase_len);
                     unsigned long expr_val =
                         ctx->model_eval(ctx->z3_ctx, expr, tmp_input,
                                         current_testcase->value_sizes,
-                                        current_testcase->values_len);
+                                        current_testcase->values_len, NULL);
                     int res = callback(
                         tmp_proof, current_testcase->testcase_len, expr_val);
                     if (res)
@@ -5764,14 +5734,14 @@ void z3fuzz_find_all_values(fuzzy_ctx_t* ctx, Z3_ast expr, Z3_ast pi,
             set_tmp_input_group_to_value(g, val);
             while (ctx->model_eval(ctx->z3_ctx, pi, tmp_input,
                                    current_testcase->value_sizes,
-                                   current_testcase->values_len) &&
+                                   current_testcase->values_len, NULL) &&
                    i++ < max_iter) {
                 set_tmp_input_group_to_value(g, val);
                 __vals_long_to_char(tmp_input, tmp_proof,
                                     current_testcase->testcase_len);
                 unsigned long expr_val = ctx->model_eval(
                     ctx->z3_ctx, expr, tmp_input, current_testcase->value_sizes,
-                    current_testcase->values_len);
+                    current_testcase->values_len, NULL);
                 int res = callback(tmp_proof, current_testcase->testcase_len,
                                    expr_val);
                 if (res)
@@ -5784,14 +5754,14 @@ void z3fuzz_find_all_values(fuzzy_ctx_t* ctx, Z3_ast expr, Z3_ast pi,
             set_tmp_input_group_to_value(g, val);
             while (ctx->model_eval(ctx->z3_ctx, pi, tmp_input,
                                    current_testcase->value_sizes,
-                                   current_testcase->values_len) &&
+                                   current_testcase->values_len, NULL) &&
                    i++ < max_iter) {
                 set_tmp_input_group_to_value(g, val);
                 __vals_long_to_char(tmp_input, tmp_proof,
                                     current_testcase->testcase_len);
                 unsigned long expr_val = ctx->model_eval(
                     ctx->z3_ctx, expr, tmp_input, current_testcase->value_sizes,
-                    current_testcase->values_len);
+                    current_testcase->values_len, NULL);
                 int res = callback(tmp_proof, current_testcase->testcase_len,
                                    expr_val);
                 if (res)
@@ -5857,14 +5827,14 @@ void z3fuzz_find_all_values_gd(fuzzy_ctx_t* ctx, Z3_ast expr, Z3_ast pi,
         __gd_fix_tmp_input(ew.input);
         if (!ctx->model_eval(ctx->z3_ctx, pi, tmp_input,
                              current_testcase->value_sizes,
-                             current_testcase->values_len))
+                             current_testcase->values_len, NULL))
             continue;
 
         at_least_once = 1;
         __gd_fix_tmp_input(ew.input);
         last_val = ctx->model_eval(ctx->z3_ctx, expr_original, tmp_input,
                                    current_testcase->value_sizes,
-                                   current_testcase->values_len);
+                                   current_testcase->values_len, NULL);
         __vals_long_to_char(tmp_input, tmp_proof,
                             current_testcase->testcase_len);
 
@@ -5953,9 +5923,9 @@ unsigned long z3fuzz_evaluate_expression(fuzzy_ctx_t* ctx, Z3_ast value,
 {
     __vals_char_to_long(values, tmp_input, ctx->testcases.data[0].values_len);
 
-    unsigned long res = ctx->model_eval(ctx->z3_ctx, value, tmp_input,
-                                        ctx->testcases.data[0].value_sizes,
-                                        ctx->testcases.data[0].values_len);
+    unsigned long res = ctx->model_eval(
+        ctx->z3_ctx, value, tmp_input, ctx->testcases.data[0].value_sizes,
+        ctx->testcases.data[0].values_len, NULL);
     return res;
 }
 
