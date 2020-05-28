@@ -15,7 +15,7 @@
 
 #define ASSERT_OR_ABORT(x, mex)                                                \
     if (unlikely(!(x))) {                                                      \
-        fprintf(stderr, "[interval ABORT] " mex "\n");                         \
+        fprintf(stderr, "[gd ABORT] " mex "\n");                               \
         abort();                                                               \
     }
 
@@ -23,6 +23,7 @@
 #define DEBUG_PARTIAL_DERIVATIVE 0
 #define DEBUG_DESCEND 0
 #define DEBUG_MINIMIZE 0
+#define DEBUG_DESC_TRANSF 0
 
 #define max(x, y) (x) > (y) ? (x) : (y)
 #define min(x, y) (x) < (y) ? (x) : (y)
@@ -155,6 +156,18 @@ static int compute_gradient(gradient_el_t* out_grad,
             return EXIT_ERROR;
         out_grad[i].pct = 0.0L;
     }
+#if DEBUG_GRADIENT
+    fprintf(stderr, ">>> GRADIENT RAW\n");
+    for (i = 0; i < n; ++i) {
+        if (i > 0)
+            fprintf(stderr, "\n");
+        fprintf(stderr,
+                "  grad[%d].value     = 0x%016lx\n"
+                "  grad[%d].direction = %u\n",
+                i, out_grad[i].value, i, out_grad[i].direction);
+    }
+    fprintf(stderr, "<<< END GRADIENT RAW\n");
+#endif
     return EXIT_OK;
 }
 
@@ -165,7 +178,6 @@ static uint64_t max_gradient(gradient_el_t* grad, uint32_t size)
     for (i = 0; i < size; ++i)
         if (grad[i].value > max)
             max = grad[i].value;
-
     return max;
 }
 
@@ -321,7 +333,8 @@ int gd_minimize(uint64_t (*function)(uint64_t*, int*), uint64_t* x0,
     for (j = 0; j < n; ++j) {
         fprintf(stderr, "x0[%u]: 0x%016lx\n", j, x0[j]);
     }
-    fprintf(stderr, "f0: 0x%016lx\n", function(x0));
+    int dummy;
+    fprintf(stderr, "f0: 0x%016lx\n", function(x0, &dummy));
 
 #endif
     int            res = EXIT_OK;
@@ -368,7 +381,7 @@ int gd_minimize(uint64_t (*function)(uint64_t*, int*), uint64_t* x0,
             }
             max_grad = max_gradient(gradient, n);
         }
-        if (i >= MAX_RANDOM_INPUT)
+        if (i > MAX_RANDOM_INPUT)
             break;
 
         normalize_gradient(gradient, n);
@@ -435,7 +448,9 @@ static void           init_tmp_gradient(uint32_t n)
 int gd_descend_transf(uint64_t (*function)(uint64_t*, int*), uint64_t* x0,
                       uint64_t* out_x, uint64_t* out_f, uint32_t n)
 {
-    // debug_dump_vector("x0 (desc)", x0, n);
+#if DEBUG_DESC_TRANSF
+    debug_dump_vector("x0 (desc)", x0, n);
+#endif
 
     int should_exit;
     init_tmp_gradient(n);
@@ -459,7 +474,9 @@ int gd_descend_transf(uint64_t (*function)(uint64_t*, int*), uint64_t* x0,
     if (unlikely(descend_res == EXIT_ERROR))
         return EXIT_ERROR;
 
-    // debug_dump_vector("out_x (desc)", out_x, n);
+#if DEBUG_DESC_TRANSF
+    debug_dump_vector("out_x (desc)", out_x, n);
+#endif
     return 0;
 }
 

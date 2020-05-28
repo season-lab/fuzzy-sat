@@ -335,15 +335,8 @@ typedef struct eval_wapper_ctx_t {
 } eval_wapper_ctx_t;
 
 static eval_wapper_ctx_t* eval_ctx;
-static eval_wapper_ctx_t* multi_eval_ctx;
-static unsigned           multi_eval_n;
 
 void eval_set_ctx(eval_wapper_ctx_t* c) { eval_ctx = c; }
-void eval_multi_set_ctx(eval_wapper_ctx_t* c, unsigned n)
-{
-    multi_eval_ctx = c;
-    multi_eval_n   = n;
-}
 
 static void __gd_fix_tmp_input(unsigned long* x)
 {
@@ -384,11 +377,11 @@ static unsigned long __gd_eval(unsigned long* x, int* should_exit)
 
     if (eval_ctx->check_pi_eval) {
         unsigned long pi_eval = eval_ctx->fctx->model_eval(
-            eval_ctx->fctx->z3_ctx, eval_ctx->pi, x, seed_testcase->value_sizes,
-            seed_testcase->values_len);
+            eval_ctx->fctx->z3_ctx, eval_ctx->pi, tmp_input,
+            seed_testcase->value_sizes, seed_testcase->values_len);
 
         if (!pi_eval)
-            return 0xffffffffffffffff;
+            return 0x7fffffffffffffff;
     }
 
     unsigned long res = eval_ctx->fctx->model_eval(
@@ -5595,20 +5588,22 @@ unsigned long z3fuzz_maximize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_maximize,
         to_maximize = Z3_mk_sign_ext(ctx->z3_ctx, 64 - sort_size, to_maximize);
         sort_size   = 64;
     }
+    to_maximize = Z3_mk_bvneg(ctx->z3_ctx, to_maximize);
+    Z3_inc_ref(ctx->z3_ctx, to_maximize);
 
+    unsigned long     res;
     eval_wapper_ctx_t ew;
 
-    to_maximize    = Z3_mk_bvneg(ctx->z3_ctx, to_maximize);
     int valid_eval = __gd_init_eval(ctx, pi, to_maximize, 1, 1, &ew);
     if (!valid_eval) {
         // all inputs are fixed
-        unsigned long res = ctx->model_eval(
-            ctx->z3_ctx, original_to_maximize, tmp_input,
-            current_testcase->value_sizes, current_testcase->values_len);
+        res = ctx->model_eval(ctx->z3_ctx, original_to_maximize, tmp_input,
+                              current_testcase->value_sizes,
+                              current_testcase->values_len);
         __vals_long_to_char(tmp_input, tmp_proof,
                             current_testcase->testcase_len);
         *out_values = tmp_proof;
-        return res;
+        goto OUT;
     }
 
     eval_set_ctx(&ew);
@@ -5618,27 +5613,29 @@ unsigned long z3fuzz_maximize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_maximize,
     int           gd_exit =
         gd_minimize(__gd_eval, ew.input, ew.input, &max_val, ew.mapping_size);
     if (unlikely(gd_exit == TIMEOUT_V)) {
-        unsigned long res = ctx->model_eval(
-            ctx->z3_ctx, original_to_maximize, tmp_input,
-            current_testcase->value_sizes, current_testcase->values_len);
+        res = ctx->model_eval(ctx->z3_ctx, original_to_maximize, tmp_input,
+                              current_testcase->value_sizes,
+                              current_testcase->values_len);
         __vals_long_to_char(tmp_input, tmp_proof,
                             current_testcase->testcase_len);
         *out_values = tmp_proof;
-        return res;
+        goto OUT;
     }
 
     __gd_fix_tmp_input(ew.input);
-    max_val = ctx->model_eval(ctx->z3_ctx, original_to_maximize, tmp_input,
-                              current_testcase->value_sizes,
-                              current_testcase->values_len);
+    res = ctx->model_eval(ctx->z3_ctx, original_to_maximize, tmp_input,
+                          current_testcase->value_sizes,
+                          current_testcase->values_len);
     __vals_long_to_char(tmp_input, tmp_proof, *out_len);
     *out_values = tmp_proof;
 
+OUT:
+    Z3_dec_ref(ctx->z3_ctx, to_maximize);
     Z3_dec_ref(ctx->z3_ctx, original_to_maximize);
     __gd_free_eval(&ew);
     memcpy(tmp_input, current_testcase->values,
            current_testcase->values_len * sizeof(unsigned long));
-    return max_val;
+    return res;
 }
 
 unsigned long z3fuzz_minimize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_minimize,
@@ -5666,6 +5663,7 @@ unsigned long z3fuzz_minimize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_minimize,
         to_minimize = Z3_mk_sign_ext(ctx->z3_ctx, 64 - sort_size, to_minimize);
         sort_size   = 64;
     }
+    Z3_inc_ref(ctx->z3_ctx, to_minimize);
 
     eval_wapper_ctx_t ew;
     int valid_eval = __gd_init_eval(ctx, pi, to_minimize, 1, 1, &ew);
@@ -5682,28 +5680,31 @@ unsigned long z3fuzz_minimize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_minimize,
     eval_set_ctx(&ew);
 
     timer_start_wrapper(ctx);
+    unsigned long res;
     unsigned long min_val;
     int           gd_exit =
         gd_minimize(__gd_eval, ew.input, ew.input, &min_val, ew.mapping_size);
     if (unlikely(gd_exit == TIMEOUT_V)) {
-        unsigned long res = ctx->model_eval(ctx->z3_ctx, to_minimize, tmp_input,
-                                            current_testcase->value_sizes,
-                                            current_testcase->values_len);
+        res = ctx->model_eval(ctx->z3_ctx, to_minimize, tmp_input,
+                              current_testcase->value_sizes,
+                              current_testcase->values_len);
         __vals_long_to_char(tmp_input, tmp_proof,
                             current_testcase->testcase_len);
         *out_values = tmp_proof;
-        return res;
+        goto OUT;
     }
 
     __gd_fix_tmp_input(ew.input);
+    res = ctx->model_eval(ctx->z3_ctx, to_minimize_original, tmp_input,
+                          current_testcase->value_sizes,
+                          current_testcase->values_len);
     __vals_long_to_char(tmp_input, tmp_proof, *out_len);
     *out_values = tmp_proof;
-
+OUT:
+    Z3_dec_ref(ctx->z3_ctx, to_minimize);
     Z3_dec_ref(ctx->z3_ctx, to_minimize_original);
     __gd_free_eval(&ew);
-    return ctx->model_eval(ctx->z3_ctx, to_minimize_original, tmp_input,
-                           current_testcase->value_sizes,
-                           current_testcase->values_len);
+    return res;
 }
 
 void z3fuzz_find_all_values(fuzzy_ctx_t* ctx, Z3_ast expr, Z3_ast pi,
@@ -5823,13 +5824,12 @@ void z3fuzz_find_all_values_gd(fuzzy_ctx_t* ctx, Z3_ast expr, Z3_ast pi,
     ASSERT_OR_ABORT(sort_size > 1,
                     "z3fuzz_find_all_values_gd unexpected sort size");
 
-    if (!to_min) {
-        if (sort_size < 64) {
-            expr      = Z3_mk_sign_ext(ctx->z3_ctx, 64 - sort_size, expr);
-            sort_size = 64;
-        }
-        expr = Z3_mk_bvneg(ctx->z3_ctx, expr);
+    if (sort_size < 64) {
+        expr      = Z3_mk_sign_ext(ctx->z3_ctx, 64 - sort_size, expr);
+        sort_size = 64;
     }
+    if (!to_min)
+        expr = Z3_mk_bvneg(ctx->z3_ctx, expr);
     Z3_inc_ref(ctx->z3_ctx, expr);
 
     eval_wapper_ctx_t ew;
@@ -5854,6 +5854,7 @@ void z3fuzz_find_all_values_gd(fuzzy_ctx_t* ctx, Z3_ast expr, Z3_ast pi,
         (__check_or_add_digest(&digest_set, (unsigned char*)ew.input,
                                ew.mapping_size * sizeof(unsigned long)) == 0)) {
 
+        __gd_fix_tmp_input(ew.input);
         if (!ctx->model_eval(ctx->z3_ctx, pi, tmp_input,
                              current_testcase->value_sizes,
                              current_testcase->values_len))
