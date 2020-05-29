@@ -5680,9 +5680,9 @@ OUT:
 }
 
 void z3fuzz_find_all_values(fuzzy_ctx_t* ctx, Z3_ast expr, Z3_ast pi,
-                            int (*callback)(unsigned char const* out_bytes,
-                                            unsigned long        out_bytes_len,
-                                            unsigned long        val))
+                            fuzzy_findall_res_t (*callback)(
+                                unsigned char const* out_bytes,
+                                unsigned long out_bytes_len, unsigned long val))
 {
     Z3_inc_ref(ctx->z3_ctx, pi);
     Z3_inc_ref(ctx->z3_ctx, expr);
@@ -5722,9 +5722,9 @@ void z3fuzz_find_all_values(fuzzy_ctx_t* ctx, Z3_ast expr, Z3_ast pi,
                         ctx->model_eval(ctx->z3_ctx, expr, tmp_input,
                                         current_testcase->value_sizes,
                                         current_testcase->values_len, NULL);
-                    int res = callback(
+                    fuzzy_findall_res_t res = callback(
                         tmp_proof, current_testcase->testcase_len, expr_val);
-                    if (res)
+                    if (res == Z3FUZZ_STOP)
                         goto END;
                 }
             }
@@ -5744,9 +5744,9 @@ void z3fuzz_find_all_values(fuzzy_ctx_t* ctx, Z3_ast expr, Z3_ast pi,
                 unsigned long expr_val = ctx->model_eval(
                     ctx->z3_ctx, expr, tmp_input, current_testcase->value_sizes,
                     current_testcase->values_len, NULL);
-                int res = callback(tmp_proof, current_testcase->testcase_len,
-                                   expr_val);
-                if (res)
+                fuzzy_findall_res_t res = callback(
+                    tmp_proof, current_testcase->testcase_len, expr_val);
+                if (res == Z3FUZZ_STOP)
                     goto END;
                 val += 1;
             }
@@ -5764,9 +5764,9 @@ void z3fuzz_find_all_values(fuzzy_ctx_t* ctx, Z3_ast expr, Z3_ast pi,
                 unsigned long expr_val = ctx->model_eval(
                     ctx->z3_ctx, expr, tmp_input, current_testcase->value_sizes,
                     current_testcase->values_len, NULL);
-                int res = callback(tmp_proof, current_testcase->testcase_len,
-                                   expr_val);
-                if (res)
+                fuzzy_findall_res_t res = callback(
+                    tmp_proof, current_testcase->testcase_len, expr_val);
+                if (res == Z3FUZZ_STOP)
                     goto END;
                 val -= 1;
             }
@@ -5779,11 +5779,11 @@ END:
     Z3_dec_ref(ctx->z3_ctx, expr);
 }
 
-void z3fuzz_find_all_values_gd(fuzzy_ctx_t* ctx, Z3_ast expr, Z3_ast pi,
-                               int to_min,
-                               int (*callback)(unsigned char const* out_bytes,
-                                               unsigned long out_bytes_len,
-                                               unsigned long val))
+void z3fuzz_find_all_values_gd(
+    fuzzy_ctx_t* ctx, Z3_ast expr, Z3_ast pi, int to_min,
+    fuzzy_findall_res_t (*callback)(unsigned char const* out_bytes,
+                                    unsigned long        out_bytes_len,
+                                    unsigned long        val))
 {
     Z3_inc_ref(ctx->z3_ctx, expr);
 
@@ -5843,10 +5843,11 @@ void z3fuzz_find_all_values_gd(fuzzy_ctx_t* ctx, Z3_ast expr, Z3_ast pi,
         if (no_callback)
             continue;
 
-        int res = callback(tmp_proof, current_testcase->testcase_len, last_val);
-        if (res == Z3FUZZ_FINDALL_STOP)
+        fuzzy_findall_res_t res =
+            callback(tmp_proof, current_testcase->testcase_len, last_val);
+        if (res == Z3FUZZ_STOP)
             goto OUT_1;
-        else if (res == Z3FUZZ_FINDALL_JUST_LAST)
+        else if (res == Z3FUZZ_JUST_LAST)
             no_callback = 1;
     }
 

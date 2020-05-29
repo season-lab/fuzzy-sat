@@ -1,3 +1,5 @@
+#define FUZZY_SOURCE
+
 #include <stdlib.h>
 #include <assert.h>
 #include <sys/time.h>

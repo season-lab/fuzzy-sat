@@ -7,9 +7,11 @@
 
 #include <z3.h>
 
-#define Z3FUZZ_FINDALL_GIVE_NEXT 0
-#define Z3FUZZ_FINDALL_STOP 1
-#define Z3FUZZ_FINDALL_JUST_LAST 2
+typedef enum fuzzy_findall_res_t {
+    Z3FUZZ_GIVE_NEXT,
+    Z3FUZZ_STOP,
+    Z3FUZZ_JUST_LAST
+} fuzzy_findall_res_t;
 
 typedef struct fuzzy_stats_t {
     unsigned long num_evaluate;
@@ -111,15 +113,16 @@ unsigned long z3fuzz_maximize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_maximize,
 unsigned long z3fuzz_minimize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_minimize,
                               unsigned char const** out_values,
                               unsigned long*        out_len);
-void          z3fuzz_find_all_values(fuzzy_ctx_t* ctx, Z3_ast expr, Z3_ast pi,
-                                     int (*callback)(unsigned char const* out_bytes,
-                                            unsigned long        out_bytes_len,
-                                            unsigned long        val));
-void z3fuzz_find_all_values_gd(fuzzy_ctx_t* ctx, Z3_ast expr, Z3_ast pi,
-                               int to_min,
-                               int (*callback)(unsigned char const* out_bytes,
-                                               unsigned long out_bytes_len,
-                                               unsigned long val));
+void          z3fuzz_find_all_values(
+             fuzzy_ctx_t* ctx, Z3_ast expr, Z3_ast pi,
+             fuzzy_findall_res_t (*callback)(unsigned char const* out_bytes,
+                                    unsigned long        out_bytes_len,
+                                    unsigned long        val));
+void z3fuzz_find_all_values_gd(
+    fuzzy_ctx_t* ctx, Z3_ast expr, Z3_ast pi, int to_min,
+    fuzzy_findall_res_t (*callback)(unsigned char const* out_bytes,
+                                    unsigned long        out_bytes_len,
+                                    unsigned long        val));
 void z3fuzz_add_assignment(fuzzy_ctx_t* ctx, int idx, Z3_ast assignment_value);
 
 void z3fuzz_notify_constraint(fuzzy_ctx_t* ctx, Z3_ast constraint);

@@ -23,11 +23,12 @@ static inline void usage(char* filename)
     exit(1);
 }
 
-static int findall_callback(const unsigned char* out_bytes,
-                            unsigned long out_bytes_len, unsigned long val)
+static fuzzy_findall_res_t findall_callback(const unsigned char* out_bytes,
+                                             unsigned long        out_bytes_len,
+                                             unsigned long        val)
 {
     printf("> found value 0x%016lx\n", val);
-    return Z3FUZZ_FINDALL_GIVE_NEXT;
+    return Z3FUZZ_GIVE_NEXT;
 }
 
 int main(int argc, char* argv[])
