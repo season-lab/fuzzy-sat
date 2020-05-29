@@ -1,7 +1,10 @@
 #ifndef Z3_FUZZY_H
 #define Z3_FUZZY_H
 
+#ifdef FUZZY_SOURCE
 #include "testcase-list.h"
+#endif
+
 #include <z3.h>
 
 #define Z3FUZZ_FINDALL_GIVE_NEXT 0
@@ -65,7 +68,13 @@ typedef struct fuzzy_ctx_t {
     unsigned      size_assignments;
     uint64_t (*model_eval)(Z3_context, Z3_ast, uint64_t*, uint8_t*, size_t,
                            uint32_t*);
+#ifdef FUZZY_SOURCE
     testcase_list_t testcases;
+#else
+    void* testcases_a;
+    void* testcases_b;
+    void* testcases_c;
+#endif
 
     // opaque fields
     void* univocally_defined_inputs;
