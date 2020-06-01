@@ -80,6 +80,7 @@ int main(int argc, char* argv[])
 
     Z3_ast_vector bv_asserts =
         Z3_parse_smtlib2_file(ctx, bv_filename, 0, 0, 0, 0, 0, 0);
+    Z3_ast_vector_inc_ref(ctx, bv_asserts);
     assert(Z3_ast_vector_size(ctx, bv_asserts) == 1 && "bv must be unique");
 
     // I can only parse asserts. So I assume something like (== BV whatever)
@@ -87,6 +88,7 @@ int main(int argc, char* argv[])
     Z3_app bv_tmp_app = Z3_to_app(ctx, bv_tmp);
     Z3_ast bv         = Z3_get_app_arg(ctx, bv_tmp_app, 0);
     bv = Z3_substitute(ctx, bv, fctx.n_symbols, str_symbols, fctx.symbols);
+    Z3_ast_vector_dec_ref(ctx, bv_asserts);
     puts("[+] BV loaded\n");
 
     gettimeofday(&start, NULL);
@@ -104,5 +106,7 @@ int main(int argc, char* argv[])
     printf("elapsed time: %.03Lf msec\n", elapsed_time / 1000.0l);
 
     z3fuzz_free(&fctx);
+    free(str_symbols);
+    Z3_del_config(cfg);
     return 0;
 }

@@ -5693,6 +5693,9 @@ void z3fuzz_find_all_values(fuzzy_ctx_t* ctx, Z3_ast expr, Z3_ast pi,
     __reset_ast_data();
     detect_involved_inputs_wrapper(ctx, expr, &ast_data.inputs);
 
+    set__ulong output_vals;
+    set_init__ulong(&output_vals, index_hash, index_equals);
+
     index_group_t* g;
 
     set_reset_iter__index_group_t(&ast_data.inputs->index_groups, 1);
@@ -5733,48 +5736,157 @@ void z3fuzz_find_all_values(fuzzy_ctx_t* ctx, Z3_ast expr, Z3_ast pi,
             unsigned      max_iter = 5;
             unsigned      i        = 0;
             unsigned long val      = original_val + 1;
+
+            // sum value
             set_tmp_input_group_to_value(g, val);
-            while (ctx->model_eval(ctx->z3_ctx, pi, tmp_input,
+            while (i++ < max_iter &&
+                   ctx->model_eval(ctx->z3_ctx, pi, tmp_input,
                                    current_testcase->value_sizes,
-                                   current_testcase->values_len, NULL) &&
-                   i++ < max_iter) {
-                set_tmp_input_group_to_value(g, val);
+                                   current_testcase->values_len, NULL)) {
                 __vals_long_to_char(tmp_input, tmp_proof,
                                     current_testcase->testcase_len);
                 unsigned long expr_val = ctx->model_eval(
                     ctx->z3_ctx, expr, tmp_input, current_testcase->value_sizes,
                     current_testcase->values_len, NULL);
+                if (set_check__ulong(&output_vals, expr_val))
+                    continue;
+                set_add__ulong(&output_vals, expr_val);
+
                 fuzzy_findall_res_t res = callback(
                     tmp_proof, current_testcase->testcase_len, expr_val);
                 if (res == Z3FUZZ_STOP)
                     goto END;
                 val += 1;
+                set_tmp_input_group_to_value(g, val);
             }
 
             val = original_val - 1;
             i   = 0;
+
+            // subtract value
             set_tmp_input_group_to_value(g, val);
-            while (ctx->model_eval(ctx->z3_ctx, pi, tmp_input,
+            while (i++ < max_iter &&
+                   ctx->model_eval(ctx->z3_ctx, pi, tmp_input,
                                    current_testcase->value_sizes,
-                                   current_testcase->values_len, NULL) &&
-                   i++ < max_iter) {
-                set_tmp_input_group_to_value(g, val);
+                                   current_testcase->values_len, NULL)) {
                 __vals_long_to_char(tmp_input, tmp_proof,
                                     current_testcase->testcase_len);
                 unsigned long expr_val = ctx->model_eval(
                     ctx->z3_ctx, expr, tmp_input, current_testcase->value_sizes,
                     current_testcase->values_len, NULL);
+                if (set_check__ulong(&output_vals, expr_val))
+                    continue;
+                set_add__ulong(&output_vals, expr_val);
+
                 fuzzy_findall_res_t res = callback(
                     tmp_proof, current_testcase->testcase_len, expr_val);
                 if (res == Z3FUZZ_STOP)
                     goto END;
                 val -= 1;
+                set_tmp_input_group_to_value(g, val);
+            }
+
+            // sum and subtract single byte
+            int j;
+            for (j = 0; j < g->n - 1; ++j) {
+                unsigned long original_val = tmp_input[g->indexes[j]];
+                unsigned long byte_val     = original_val + 1;
+                tmp_input[g->indexes[j]]   = byte_val;
+                i                          = 0;
+                while (i++ < max_iter &&
+                       ctx->model_eval(ctx->z3_ctx, pi, tmp_input,
+                                       current_testcase->value_sizes,
+                                       current_testcase->values_len, NULL)) {
+                    __vals_long_to_char(tmp_input, tmp_proof,
+                                        current_testcase->testcase_len);
+                    unsigned long expr_val =
+                        ctx->model_eval(ctx->z3_ctx, expr, tmp_input,
+                                        current_testcase->value_sizes,
+                                        current_testcase->values_len, NULL);
+                    if (set_check__ulong(&output_vals, expr_val))
+                        continue;
+                    set_add__ulong(&output_vals, expr_val);
+
+                    fuzzy_findall_res_t res = callback(
+                        tmp_proof, current_testcase->testcase_len, expr_val);
+                    if (res == Z3FUZZ_STOP)
+                        goto END;
+                    byte_val += 1;
+                    tmp_input[g->indexes[j]] = byte_val;
+                }
+
+                tmp_input[g->indexes[j]] = original_val;
+                byte_val                 = original_val - 1;
+                tmp_input[g->indexes[j]] = byte_val;
+                i                        = 0;
+                while (i++ < max_iter &&
+                       ctx->model_eval(ctx->z3_ctx, pi, tmp_input,
+                                       current_testcase->value_sizes,
+                                       current_testcase->values_len, NULL)) {
+                    __vals_long_to_char(tmp_input, tmp_proof,
+                                        current_testcase->testcase_len);
+                    unsigned long expr_val =
+                        ctx->model_eval(ctx->z3_ctx, expr, tmp_input,
+                                        current_testcase->value_sizes,
+                                        current_testcase->values_len, NULL);
+                    if (set_check__ulong(&output_vals, expr_val))
+                        continue;
+                    set_add__ulong(&output_vals, expr_val);
+
+                    fuzzy_findall_res_t res = callback(
+                        tmp_proof, current_testcase->testcase_len, expr_val);
+                    if (res == Z3FUZZ_STOP)
+                        goto END;
+                    byte_val -= 1;
+                    tmp_input[g->indexes[j]] = byte_val;
+                }
+            }
+
+            // set deterministic
+            for (j = 0; j < g->n; ++j)
+                tmp_input[g->indexes[j]] = 0;
+            if (ctx->model_eval(ctx->z3_ctx, pi, tmp_input,
+                                current_testcase->value_sizes,
+                                current_testcase->values_len, NULL)) {
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                unsigned long expr_val = ctx->model_eval(
+                    ctx->z3_ctx, expr, tmp_input, current_testcase->value_sizes,
+                    current_testcase->values_len, NULL);
+                if (set_check__ulong(&output_vals, expr_val))
+                    continue;
+                set_add__ulong(&output_vals, expr_val);
+
+                fuzzy_findall_res_t res = callback(
+                    tmp_proof, current_testcase->testcase_len, expr_val);
+                if (res == Z3FUZZ_STOP)
+                    goto END;
+            }
+            for (j = 0; j < g->n; ++j)
+                tmp_input[g->indexes[j]] = 0xff;
+            if (ctx->model_eval(ctx->z3_ctx, pi, tmp_input,
+                                current_testcase->value_sizes,
+                                current_testcase->values_len, NULL)) {
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                unsigned long expr_val = ctx->model_eval(
+                    ctx->z3_ctx, expr, tmp_input, current_testcase->value_sizes,
+                    current_testcase->values_len, NULL);
+                if (set_check__ulong(&output_vals, expr_val))
+                    continue;
+                set_add__ulong(&output_vals, expr_val);
+
+                fuzzy_findall_res_t res = callback(
+                    tmp_proof, current_testcase->testcase_len, expr_val);
+                if (res == Z3FUZZ_STOP)
+                    goto END;
             }
         }
         set_tmp_input_group_to_value(g, original_val);
     }
 
 END:
+    set_free__ulong(&output_vals, NULL);
     Z3_dec_ref(ctx->z3_ctx, pi);
     Z3_dec_ref(ctx->z3_ctx, expr);
 }
@@ -5812,6 +5924,25 @@ void z3fuzz_find_all_values_gd(
     eval_set_ctx(&ew);
     timer_start_wrapper(ctx);
 
+    uint64_t max_grad;
+    if (!gd_max_gradient(__gd_eval, ew.input, ew.mapping_size, &max_grad))
+        goto OUT_2;
+
+    if (max_grad == 0) {
+        int i;
+        for (i = 0; i < ew.mapping_size; ++i)
+            ew.input[i] = 0;
+        if (!gd_max_gradient(__gd_eval, ew.input, ew.mapping_size, &max_grad))
+            goto OUT_2;
+    }
+    if (max_grad == 0) {
+        int i;
+        for (i = 0; i < ew.mapping_size; ++i)
+            ew.input[i] = 0xff;
+        if (!gd_max_gradient(__gd_eval, ew.input, ew.mapping_size, &max_grad))
+            goto OUT_2;
+    }
+
     set__digest_t digest_set;
     set_init__digest_t(&digest_set, digest_64bit_hash, digest_equals);
 
@@ -5833,8 +5964,7 @@ void z3fuzz_find_all_values_gd(
             continue;
 
         at_least_once = 1;
-        __gd_fix_tmp_input(ew.input);
-        last_val = ctx->model_eval(ctx->z3_ctx, expr_original, tmp_input,
+        last_val      = ctx->model_eval(ctx->z3_ctx, expr_original, tmp_input,
                                    current_testcase->value_sizes,
                                    current_testcase->values_len, NULL);
         __vals_long_to_char(tmp_input, tmp_proof,

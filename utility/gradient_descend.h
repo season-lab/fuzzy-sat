@@ -11,5 +11,7 @@ int gd_minimize(uint64_t (*function)(uint64_t*, int*), uint64_t* x0,
 
 int gd_descend_transf(uint64_t (*function)(uint64_t*, int*), uint64_t* x0,
                       uint64_t* out_x, uint64_t* out_f, uint32_t n);
+int gd_max_gradient(uint64_t (*function)(uint64_t*, int*), uint64_t* x0,
+                    uint32_t n, uint64_t* v);
 
 #endif

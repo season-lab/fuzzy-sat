@@ -480,6 +480,25 @@ int gd_descend_transf(uint64_t (*function)(uint64_t*, int*), uint64_t* x0,
     return 0;
 }
 
+int gd_max_gradient(uint64_t (*function)(uint64_t*, int*), uint64_t* x0,
+                    uint32_t n, uint64_t* v)
+{
+    init_tmp_gradient(n);
+
+    int     should_exit;
+    int64_t f0 = function(x0, &should_exit);
+    if (unlikely(should_exit))
+        return 0;
+
+    gradient_el_t* gradient = __tmp_gradient;
+    int            grad_res = compute_gradient(gradient, function, f0, x0, n);
+    if (unlikely(grad_res == EXIT_ERROR))
+        return 0;
+
+    *v = max_gradient(gradient, n);
+    return 1;
+}
+
 void gd_init()
 {
     dev_urandom_fd = open("/dev/urandom", O_RDONLY);
