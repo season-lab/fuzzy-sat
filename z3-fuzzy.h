@@ -80,7 +80,6 @@ typedef struct fuzzy_ctx_t {
 
     // opaque fields
     void* univocally_defined_inputs;
-    void* assignment_inputs_cache;
     void* ast_info_cache;
     void* processed_constraints;
     void* conflicting_asts;
@@ -88,6 +87,15 @@ typedef struct fuzzy_ctx_t {
     void* index_to_group_intervals;
     void* timer;
 } fuzzy_ctx_t;
+
+typedef struct memory_impact_stats_t {
+    unsigned long univocally_defined_size;
+    unsigned long ast_info_cache_size;
+    unsigned long conflicting_ast_size;
+    unsigned long group_intervals_size;
+    unsigned long index_to_group_intervals_size;
+    unsigned long n_assignments;
+} memory_impact_stats_t;
 
 void z3fuzz_init(fuzzy_ctx_t* fctx, Z3_context ctx, char* seed_filename,
                  char* testcase_path,
@@ -129,4 +137,5 @@ void z3fuzz_notify_constraint(fuzzy_ctx_t* ctx, Z3_ast constraint);
 void z3fuzz_dump_proof(fuzzy_ctx_t* ctx, const char* filename,
                        unsigned char const* proof, unsigned long proof_size);
 
+void z3fuzz_get_mem_stats(fuzzy_ctx_t* ctx, memory_impact_stats_t* stats);
 #endif

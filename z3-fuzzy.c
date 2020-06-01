@@ -770,11 +770,6 @@ void z3fuzz_init(fuzzy_ctx_t* fctx, Z3_context ctx, char* seed_filename,
     dict_init__da__interval_group_ptr(index_to_group_intervals,
                                       &index_to_group_intervals_el_free);
 
-    fctx->assignment_inputs_cache = malloc(sizeof(dict__ast_info_ptr));
-    dict__ast_info_ptr* assignment_inputs_cache =
-        (dict__ast_info_ptr*)fctx->assignment_inputs_cache;
-    dict_init__ast_info_ptr(assignment_inputs_cache, ast_info_ptr_free);
-
     fctx->ast_info_cache = malloc(sizeof(dict__ast_info_ptr));
     dict__ast_info_ptr* ast_info_cache =
         (dict__ast_info_ptr*)fctx->ast_info_cache;
@@ -827,11 +822,6 @@ void z3fuzz_free(fuzzy_ctx_t* ctx)
     ctx->size_assignments = 0;
 
     ast_data_free(&ast_data);
-
-    dict__ast_info_ptr* assignment_inputs_cache =
-        (dict__ast_info_ptr*)ctx->assignment_inputs_cache;
-    dict_free__ast_info_ptr(assignment_inputs_cache);
-    free(ctx->assignment_inputs_cache);
 
     dict__ast_info_ptr* ast_info_cache =
         (dict__ast_info_ptr*)ctx->ast_info_cache;
@@ -1568,29 +1558,6 @@ static void ast_info_populate_with_blacklist(ast_info_ptr dst, ast_info_ptr src,
     }
 }
 
-static void __detect_assignment_involved_inputs(fuzzy_ctx_t* ctx,
-                                                unsigned     assignment_idx,
-                                                ast_info_ptr data)
-{
-    dict__ast_info_ptr* assignment_inputs_cache =
-        (dict__ast_info_ptr*)ctx->assignment_inputs_cache;
-
-    ast_info_ptr  cached_el;
-    ast_info_ptr* cached_el_ptr = dict_get_ref__ast_info_ptr(
-        assignment_inputs_cache, (unsigned long)assignment_idx);
-    if (cached_el_ptr != NULL) {
-        cached_el = *cached_el_ptr;
-    } else {
-        cached_el = (ast_info_ptr)malloc(sizeof(ast_info_t));
-        ast_info_init(cached_el);
-        detect_involved_inputs_wrapper(ctx, ctx->assignments[assignment_idx],
-                                       &cached_el);
-        dict_set__ast_info_ptr(assignment_inputs_cache,
-                               (unsigned long)assignment_idx, cached_el);
-    }
-    __union_ast_info(data, cached_el);
-}
-
 static inline void __detect_involved_inputs(fuzzy_ctx_t* ctx, Z3_ast v,
                                             ast_info_ptr* data)
 {
@@ -1668,9 +1635,10 @@ static inline void __detect_involved_inputs(fuzzy_ctx_t* ctx, Z3_ast v,
                     if (symbol_index >= ctx->testcases.data[0].testcase_len) {
                         // the symbol is indeed an assignment. Resolve the
                         // assignment
-
-                        __detect_assignment_involved_inputs(ctx, symbol_index,
-                                                            new_el);
+                        ast_info_ptr tmp;
+                        __detect_involved_inputs(
+                            ctx, ctx->assignments[symbol_index], &tmp);
+                        __union_ast_info(new_el, tmp);
                         break;
                     }
 
@@ -6099,4 +6067,19 @@ unsigned long z3fuzz_evaluate_expression_z3(fuzzy_ctx_t* ctx, Z3_ast query,
         res = Z3_get_bool_value(ctx->z3_ctx, solution) == Z3_L_TRUE ? 1UL : 0UL;
     Z3_dec_ref(ctx->z3_ctx, solution);
     return res;
+}
+
+void z3fuzz_get_mem_stats(fuzzy_ctx_t* ctx, memory_impact_stats_t* stats)
+{
+    stats->univocally_defined_size =
+        ((set__ulong*)ctx->univocally_defined_inputs)->size;
+    stats->ast_info_cache_size =
+        ((dict__ast_info_ptr*)ctx->ast_info_cache)->size;
+    stats->conflicting_ast_size =
+        ((dict__conflicting_ptr*)ctx->conflicting_asts)->size;
+    stats->group_intervals_size =
+        ((set__interval_group_ptr*)ctx->group_intervals)->size;
+    stats->index_to_group_intervals_size =
+        ((dict__da__interval_group_ptr*)ctx->index_to_group_intervals)->size;
+    stats->n_assignments = (unsigned long)ctx->size_assignments;
 }
