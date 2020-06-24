@@ -31,6 +31,8 @@
 #define rightmost_set_bit(x) ((x) != 0 ? __builtin_ctzl(x) : -1)
 #define leftmost_set_bit(x) ((x) != 0 ? (63 - __builtin_clzl(x)) : -1)
 
+#define HAVOC_C 10
+#define RANGE_MAX_WIDTH_BRUTE_FORCE 1024
 #define Z3_UNIQUE Z3_get_ast_hash // Z3_get_ast_id
 
 // #define PRINT_SAT
@@ -1804,6 +1806,14 @@ static void __detect_early_constants(fuzzy_ctx_t* ctx, Z3_ast v,
                     }
                     Z3_dec_ref(ctx->z3_ctx, child1);
                     Z3_dec_ref(ctx->z3_ctx, child2);
+                    break;
+                }
+                case Z3_OP_ITE: {
+                    // look in ite condition
+                    Z3_ast cond = Z3_get_app_arg(ctx->z3_ctx, app, 0);
+                    Z3_inc_ref(ctx->z3_ctx, cond);
+                    __detect_early_constants(ctx, cond, data);
+                    Z3_dec_ref(ctx->z3_ctx, cond);
                     break;
                 }
                 default: {
@@ -4688,8 +4698,8 @@ static __always_inline int PHASE_afl_havoc(fuzzy_ctx_t* ctx, Z3_ast query,
     havoc_res     = 0;
     mutation_pool = 5 + (ig_64_size + ig_32_size + ig_16_size > 0 ? 3 : 0) +
                     (ig_64_size + ig_32_size > 0 ? 3 : 0);
-    score = ast_data.inputs->indexes.size * 2; // 2 mutations per input (mean)
-    score = score > 1000 ? 1000 : score;       // no more than 1000 mutations
+    score = ast_data.inputs->indexes.size * HAVOC_C; // HAVOC_C mutations per input (mean)
+    score = score > 1000 ? 1000 : score;             // no more than 1000 mutations
     for (i = 0; i < score; ++i) {
         switch (UR(mutation_pool)) {
             case 0: {
@@ -5021,7 +5031,7 @@ PHASE_range_bruteforce(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
     if (interval == 0)
         return 0; // no interval
 
-    if (wi_get_range(interval) > 256)
+    if (wi_get_range(interval) > RANGE_MAX_WIDTH_BRUTE_FORCE)
         return 0; // range too wide
 
     wrapped_interval_iter_t it = wi_init_iter_values(interval);
