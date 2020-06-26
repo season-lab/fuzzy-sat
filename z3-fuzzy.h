@@ -18,9 +18,11 @@ typedef struct fuzzy_stats_t {
     unsigned long num_sat;
     unsigned long reuse;
     unsigned long input_to_state;
+    unsigned long simple_math;
     unsigned long input_to_state_ext;
     unsigned long brute_force;
     unsigned long range_brute_force;
+    unsigned long range_brute_force_opt;
     unsigned long gradient_descend;
     unsigned long flip1;
     unsigned long flip2;

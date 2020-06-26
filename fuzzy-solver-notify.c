@@ -66,56 +66,59 @@ static inline void print_status(unsigned long current_query,
                                 unsigned long num_queries)
 {
     pp_printf(0, 1, "query %ld/%ld", current_query, num_queries);
-    pp_printf(1, 1, "num_evaluate:        %ld", fctx.stats.num_evaluate);
-    pp_printf(2, 1, "num_sat:             %ld", fctx.stats.num_sat);
-    pp_printf(3, 1, "reuse:               %ld", fctx.stats.reuse);
-    pp_printf(4, 1, "input_to_state:      %ld", fctx.stats.input_to_state);
-    pp_printf(5, 1, "input_to_state_ext:  %ld", fctx.stats.input_to_state_ext);
-    pp_printf(6, 1, "brute_force:         %ld", fctx.stats.brute_force);
-    pp_printf(7, 1, "range_brute_force:   %ld", fctx.stats.range_brute_force);
-    pp_printf(8, 1, "gradient_descend:    %ld", fctx.stats.gradient_descend);
-    pp_printf(9, 1, "flip1:               %ld", fctx.stats.flip1);
-    pp_printf(10, 1, "flip2:               %ld", fctx.stats.flip2);
-    pp_printf(11, 1, "flip4:               %ld", fctx.stats.flip4);
-    pp_printf(12, 1, "flip8:               %ld", fctx.stats.flip8);
-    pp_printf(13, 1, "flip16:              %ld", fctx.stats.flip16);
-    pp_printf(14, 1, "flip32:              %ld", fctx.stats.flip32);
-    pp_printf(15, 1, "flip64:              %ld", fctx.stats.flip64);
-    pp_printf(16, 1, "arith8_sum:          %ld", fctx.stats.arith8_sum);
-    pp_printf(17, 1, "arith8_sub:          %ld", fctx.stats.arith8_sub);
-    pp_printf(18, 1, "arith16_sum_LE:      %ld", fctx.stats.arith16_sum_LE);
-    pp_printf(19, 1, "arith16_sum_BE:      %ld", fctx.stats.arith16_sum_BE);
-    pp_printf(20, 1, "arith16_sub_LE:      %ld", fctx.stats.arith16_sub_LE);
-    pp_printf(21, 1, "arith16_sub_BE:      %ld", fctx.stats.arith16_sub_BE);
-    pp_printf(22, 1, "arith32_sum_LE:      %ld", fctx.stats.arith32_sum_LE);
-    pp_printf(23, 1, "arith32_sum_BE:      %ld", fctx.stats.arith32_sum_BE);
-    pp_printf(24, 1, "arith32_sub_LE:      %ld", fctx.stats.arith32_sub_LE);
-    pp_printf(25, 1, "arith32_sub_BE:      %ld", fctx.stats.arith32_sub_BE);
-    pp_printf(26, 1, "arith64_sum_LE:      %ld", fctx.stats.arith64_sum_LE);
-    pp_printf(27, 1, "arith64_sum_BE:      %ld", fctx.stats.arith64_sum_BE);
-    pp_printf(28, 1, "arith64_sub_LE:      %ld", fctx.stats.arith64_sub_LE);
-    pp_printf(29, 1, "arith64_sub_BE:      %ld", fctx.stats.arith64_sub_BE);
-    pp_printf(30, 1, "int8:                %ld", fctx.stats.int8);
-    pp_printf(31, 1, "int16:               %ld", fctx.stats.int16);
-    pp_printf(32, 1, "int32:               %ld", fctx.stats.int32);
-    pp_printf(33, 1, "int64:               %ld", fctx.stats.int64);
-    pp_printf(34, 1, "havoc:               %ld", fctx.stats.havoc);
-    pp_printf(35, 1, "multigoal:           %ld", fctx.stats.multigoal);
-    pp_printf(36, 1, "sat_in_seed:         %ld", fctx.stats.sat_in_seed);
-    pp_printf(37, 1, "ast_info_cache_hits: %ld",
+    pp_printf(1, 1, "num_evaluate:          %ld", fctx.stats.num_evaluate);
+    pp_printf(2, 1, "num_sat:               %ld", fctx.stats.num_sat);
+    pp_printf(3, 1, "reuse:                 %ld", fctx.stats.reuse);
+    pp_printf(4, 1, "input_to_state:        %ld", fctx.stats.input_to_state);
+    pp_printf(5, 1, "simple_math:           %ld", fctx.stats.simple_math);
+    pp_printf(6, 1, "input_to_state_ext:    %ld",
+              fctx.stats.input_to_state_ext);
+    pp_printf(7, 1, "brute_force:           %ld", fctx.stats.brute_force);
+    pp_printf(8, 1, "range_brute_force:     %ld", fctx.stats.range_brute_force);
+    pp_printf(9, 1, "range_brute_force_opt: %ld", fctx.stats.range_brute_force_opt);
+    pp_printf(10, 1, "gradient_descend:      %ld", fctx.stats.gradient_descend);
+    pp_printf(11, 1, "flip1:                 %ld", fctx.stats.flip1);
+    pp_printf(12, 1, "flip2:                 %ld", fctx.stats.flip2);
+    pp_printf(13, 1, "flip4:                 %ld", fctx.stats.flip4);
+    pp_printf(14, 1, "flip8:                 %ld", fctx.stats.flip8);
+    pp_printf(15, 1, "flip16:                %ld", fctx.stats.flip16);
+    pp_printf(16, 1, "flip32:                %ld", fctx.stats.flip32);
+    pp_printf(17, 1, "flip64:                %ld", fctx.stats.flip64);
+    pp_printf(18, 1, "arith8_sum:            %ld", fctx.stats.arith8_sum);
+    pp_printf(19, 1, "arith8_sub:            %ld", fctx.stats.arith8_sub);
+    pp_printf(20, 1, "arith16_sum_LE:        %ld", fctx.stats.arith16_sum_LE);
+    pp_printf(21, 1, "arith16_sum_BE:        %ld", fctx.stats.arith16_sum_BE);
+    pp_printf(22, 1, "arith16_sub_LE:        %ld", fctx.stats.arith16_sub_LE);
+    pp_printf(23, 1, "arith16_sub_BE:        %ld", fctx.stats.arith16_sub_BE);
+    pp_printf(24, 1, "arith32_sum_LE:        %ld", fctx.stats.arith32_sum_LE);
+    pp_printf(25, 1, "arith32_sum_BE:        %ld", fctx.stats.arith32_sum_BE);
+    pp_printf(26, 1, "arith32_sub_LE:        %ld", fctx.stats.arith32_sub_LE);
+    pp_printf(27, 1, "arith32_sub_BE:        %ld", fctx.stats.arith32_sub_BE);
+    pp_printf(28, 1, "arith64_sum_LE:        %ld", fctx.stats.arith64_sum_LE);
+    pp_printf(29, 1, "arith64_sum_BE:        %ld", fctx.stats.arith64_sum_BE);
+    pp_printf(30, 1, "arith64_sub_LE:        %ld", fctx.stats.arith64_sub_LE);
+    pp_printf(31, 1, "arith64_sub_BE:        %ld", fctx.stats.arith64_sub_BE);
+    pp_printf(32, 1, "int8:                  %ld", fctx.stats.int8);
+    pp_printf(33, 1, "int16:                 %ld", fctx.stats.int16);
+    pp_printf(34, 1, "int32:                 %ld", fctx.stats.int32);
+    pp_printf(35, 1, "int64:                 %ld", fctx.stats.int64);
+    pp_printf(36, 1, "havoc:                 %ld", fctx.stats.havoc);
+    pp_printf(37, 1, "multigoal:             %ld", fctx.stats.multigoal);
+    pp_printf(38, 1, "sat_in_seed:           %ld", fctx.stats.sat_in_seed);
+    pp_printf(39, 1, "ast_info_cache_hits:   %ld",
               fctx.stats.ast_info_cache_hits);
-    pp_printf(38, 1, "num_univ_defined:    %ld",
+    pp_printf(40, 1, "num_univ_defined:      %ld",
               fctx.stats.num_univocally_defined);
-    pp_printf(39, 1, "num_conflicting:     %ld", fctx.stats.num_conflicting);
-    pp_printf(40, 1, "confl_fallbacks:     %ld",
+    pp_printf(41, 1, "num_conflicting:       %ld", fctx.stats.num_conflicting);
+    pp_printf(42, 1, "confl_fallbacks:       %ld",
               fctx.stats.conflicting_fallbacks);
-    pp_printf(41, 1, "confl_fall_noinp:    %ld",
+    pp_printf(43, 1, "confl_fall_noinp:      %ld",
               fctx.stats.conflicting_fallbacks_same_inputs);
-    pp_printf(42, 1, "confl_fall_notrue:   %ld",
+    pp_printf(44, 1, "confl_fall_notrue:     %ld",
               fctx.stats.conflicting_fallbacks_no_true);
-    pp_printf(43, 1, "num_timeouts:        %ld", fctx.stats.num_timeouts);
+    pp_printf(45, 1, "num_timeouts:          %ld", fctx.stats.num_timeouts);
     pp_set_col(0);
-    pp_set_line(45);
+    pp_set_line(47);
 }
 
 static inline void usage(char* filename)
