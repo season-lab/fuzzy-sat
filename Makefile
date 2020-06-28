@@ -4,13 +4,16 @@ CLIBS=-lz3
 CLIB_PATHS=-L./fuzzolic-z3/build
 CINCLUDE=-I./fuzzolic-z3/src/api -I./include
 
-all: solver fuzzy-solver fuzzy-solver-notify eval-driver maxmin-driver debug-eval findall-driver
+all: solver fuzzy-solver fuzzy-solver-notify fuzzy-solver-vs-z3 eval-driver maxmin-driver debug-eval findall-driver
 
 fuzzy-solver: fuzzy-lib
 	${CC} ${CFLAGS} fuzzy-solver.c ./utility/pretty-print.c libZ3Fuzzy.a -o fuzzy-solver ${CINCLUDE} ${CLIB_PATHS} ${CLIBS}
 
 fuzzy-solver-notify: fuzzy-lib
 	${CC} ${CFLAGS} fuzzy-solver-notify.c ./utility/pretty-print.c libZ3Fuzzy.a -o fuzzy-solver-notify ${CINCLUDE} ${CLIB_PATHS} ${CLIBS}
+
+fuzzy-solver-vs-z3: fuzzy-lib
+	${CC} ${CFLAGS} fuzzy-solver-vs-z3.c ./utility/pretty-print.c libZ3Fuzzy.a -o fuzzy-solver-vs-z3 ${CINCLUDE} ${CLIB_PATHS} ${CLIBS}
 
 solver:
 	${CC} ${CFLAGS} solver.c ./utility/pretty-print.c -o solver ${CINCLUDE} ${CLIB_PATHS} ${CLIBS}

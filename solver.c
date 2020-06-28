@@ -10,7 +10,7 @@
 // #define PRINT_STATS_ON_FILE
 // #define DUMP_SAT_QUERIES
 // #define DUMP_UNKNOWN_QUERIES
-// #define DUMP_PROOFS
+#define DUMP_PROOFS
 // #define EVAL_ONLY_BRANCH
 
 const char* sat_queries_filename = "solver-sat-queries.smt2";

@@ -2789,7 +2789,7 @@ static __always_inline int PHASE_input_to_state_extended(
         while (set_iter_next__index_group_t(&ast_data.inputs->index_groups, 0,
                                             &group)) {
             for (k = 0; k < group->n; ++k) {
-                unsigned int  index = group->indexes[group->n - k - 1];
+                unsigned int  index = group->indexes[k];
                 unsigned char b =
                     __extract_from_long(ast_data.values.data[i], k);
 
@@ -2826,7 +2826,7 @@ static __always_inline int PHASE_input_to_state_extended(
             }
             // restore tmp_input
             for (k = 0; k < group->n; ++k) {
-                index            = group->indexes[group->n - k - 1];
+                index            = group->indexes[k];
                 tmp_input[index] = current_testcase->values[index];
             }
         }

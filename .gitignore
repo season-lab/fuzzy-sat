@@ -2,10 +2,12 @@
 query_db/
 tests/
 *.o
+fuzzy_z3.csv
 debug-eval
 eval-driver
 fuzzy-solver
 fuzzy-solver-notify
+fuzzy-solver-vs-z3
 maxmin-driver
 findall-driver
 solver
