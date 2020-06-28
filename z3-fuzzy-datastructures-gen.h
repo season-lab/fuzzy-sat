@@ -6,6 +6,7 @@ typedef struct index_group_t {
     unsigned long indexes[MAX_GROUP_SIZE]; // indexes
 } index_group_t;
 
+#define SET_N_BUCKETS 8
 #define SET_DATA_T index_group_t
 #include <set.h>
 typedef set__index_group_t index_groups_t;
@@ -32,6 +33,7 @@ unsigned int index_group_equals(index_group_t* el1, index_group_t* el2)
 
 // ************* indexes set *************
 typedef unsigned long ulong;
+#define SET_N_BUCKETS 512
 #define SET_DATA_T ulong
 #include <set.h>
 unsigned long index_hash(unsigned long* el) { return *el; }

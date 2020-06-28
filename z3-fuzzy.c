@@ -78,6 +78,8 @@ static int skip_afl_havoc         = 1;
 static int use_greedy_mamin       = 0;
 static int check_unnecessary_eval = 1;
 
+static int max_ast_info_cache_size = 20000;
+
 #ifdef USE_MD5_HASH
 #include "utility/md5.h"
 #else
@@ -127,6 +129,7 @@ static unsigned char* tmp_opt_proof = NULL;
 static int            opt_found     = 0;
 static unsigned       opt_num_sat   = 0;
 static ast_data_t     ast_data      = {0};
+static char           notify_count  = 0;
 
 static char* query_log_filename = "/tmp/fuzzy-log-info.csv";
 FILE*        query_log;
@@ -456,8 +459,8 @@ static int __gd_init_eval(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast expr,
         out_ctx->mapping_size = ast_data.inputs->index_groups.size;
         out_ctx->mapping =
             (mapping_el_t*)malloc(sizeof(mapping_el_t) * out_ctx->mapping_size);
-        out_ctx->input =
-            (unsigned long*)calloc(sizeof(unsigned long), out_ctx->mapping_size);
+        out_ctx->input = (unsigned long*)calloc(sizeof(unsigned long),
+                                                out_ctx->mapping_size);
 
         index_group_t* g;
         set_reset_iter__index_group_t(&ast_data.inputs->index_groups, 0);
@@ -482,8 +485,8 @@ static int __gd_init_eval(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast expr,
         out_ctx->mapping_size = ast_data.inputs->indexes.size;
         out_ctx->mapping =
             (mapping_el_t*)malloc(sizeof(mapping_el_t) * out_ctx->mapping_size);
-        out_ctx->input =
-            (unsigned long*)calloc(sizeof(unsigned long), out_ctx->mapping_size);
+        out_ctx->input = (unsigned long*)calloc(sizeof(unsigned long),
+                                                out_ctx->mapping_size);
 
         ulong* i;
         set_reset_iter__ulong(&ast_data.inputs->indexes, 0);
@@ -6224,6 +6227,14 @@ void z3fuzz_notify_constraint(fuzzy_ctx_t* ctx, Z3_ast constraint)
     // this is a visit of the AST of the constraint... Too slow? I don't know
     if (unlikely(skip_notify))
         return;
+
+    if (unlikely(notify_count++ & 64)) {
+        notify_count = 0;
+        dict__ast_info_ptr* ast_info_cache =
+            (dict__ast_info_ptr*)ctx->ast_info_cache;
+        if (unlikely(ast_info_cache->size > max_ast_info_cache_size))
+            dict_remove_all__ast_info_ptr(ast_info_cache);
+    }
 
     unsigned long hash                = Z3_UNIQUE(ctx->z3_ctx, constraint);
     set__ulong* processed_constraints = (set__ulong*)ctx->processed_constraints;
