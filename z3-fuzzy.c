@@ -1579,7 +1579,7 @@ static void __union_ast_info(ast_info_ptr dst, ast_info_ptr src)
     for (i = 0; i < src->indexes_ud.size; ++i)
         if (!da_check_el__ulong(&dst->indexes_ud, src->indexes_ud.data[i]))
             da_add_item__ulong(&dst->indexes_ud, src->indexes_ud.data[i]);
-    for (i = 0; i < src->indexes_ud.size; ++i)
+    for (i = 0; i < src->index_groups_ud.size; ++i)
         if (!da_check_el__index_group_t(&dst->index_groups_ud,
                                         &src->index_groups_ud.data[i]))
             da_add_item__index_group_t(&dst->index_groups_ud,
@@ -1682,6 +1682,14 @@ static inline void __detect_involved_inputs(fuzzy_ctx_t* ctx, Z3_ast v,
                                 set_add__ulong(&new_el->indexes,
                                                group.indexes[i]);
                                 at_least_one = 1;
+                            } else if (!da_check_el__ulong(
+                                           &new_el->indexes_ud,
+                                           group.indexes[i])) { // linear check,
+                                                                // but it
+                                                                // should
+                                                                // be small...
+                                da_add_item__ulong(&new_el->indexes_ud,
+                                                   group.indexes[i]);
                             }
 
                         if (at_least_one)
