@@ -15,6 +15,7 @@ typedef enum fuzzy_findall_res_t {
 
 typedef struct fuzzy_stats_t {
     unsigned long num_evaluate;
+    unsigned long aggressive_opt_evaluate;
     unsigned long num_sat;
     unsigned long reuse;
     unsigned long input_to_state;

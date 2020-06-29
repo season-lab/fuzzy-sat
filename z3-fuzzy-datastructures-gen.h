@@ -29,6 +29,15 @@ unsigned int index_group_equals(index_group_t* el1, index_group_t* el2)
             return 0;
     return 1;
 }
+static inline int da_check_el__index_group_t(da__index_group_t* da,
+                                             index_group_t*     el)
+{
+    unsigned i;
+    for (i = 0; i < da->size; ++i)
+        if (index_group_equals(&da->data[i], el))
+            return 1;
+    return 0;
+}
 // ********* end index group set *********
 
 // ************* indexes set *************
@@ -42,6 +51,15 @@ unsigned int  index_equals(unsigned long* el1, unsigned long* el2)
     return *el1 == *el2;
 }
 typedef set__ulong indexes_t;
+
+static inline int da_check_el__ulong(da__ulong* da, ulong el)
+{
+    unsigned i;
+    for (i = 0; i < da->size; ++i)
+        if (da->data[i] == el)
+            return 1;
+    return 0;
+}
 // *********** end indexes set ***********
 
 // ************* values array ************

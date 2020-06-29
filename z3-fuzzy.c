@@ -44,6 +44,7 @@
 // #define USE_MD5_HASH
 
 #define USE_AFL_DET_GROUPS
+#define ENABLE_AGGRESSIVE_OPTIMISTIC
 
 static int log_query_stats = 0;
 static int skip_notify     = 0;
@@ -100,8 +101,10 @@ typedef struct ast_info_t {
     unsigned      approximated_groups;
     unsigned long query_size;
 
-    index_groups_t index_groups;
-    indexes_t      indexes;
+    index_groups_t    index_groups;
+    indexes_t         indexes;
+    da__index_group_t index_groups_ud;
+    da__ulong         indexes_ud;
 } ast_info_t;
 
 typedef struct ast_data_t {
@@ -290,6 +293,8 @@ static inline void ast_info_init(ast_info_ptr ptr)
     set_init__index_group_t(&ptr->index_groups, &index_group_hash,
                             &index_group_equals);
     set_init__ulong(&ptr->indexes, &index_hash, &index_equals);
+    da_init__ulong(&ptr->indexes_ud);
+    da_init__index_group_t(&ptr->index_groups_ud);
     ptr->linear_arithmetic_operations    = 0;
     ptr->nonlinear_arithmetic_operations = 0;
     ptr->input_extract_ops               = 0;
@@ -301,6 +306,8 @@ static inline void ast_info_ptr_free(ast_info_ptr* ptr)
 {
     set_free__index_group_t(&(*ptr)->index_groups, NULL);
     set_free__ulong(&(*ptr)->indexes, NULL);
+    da_free__ulong(&(*ptr)->indexes_ud, NULL);
+    da_free__index_group_t(&(*ptr)->index_groups_ud, NULL);
     free(*ptr);
 }
 
@@ -968,6 +975,8 @@ static __always_inline unsigned long index_group_to_value(index_group_t* ig,
     return res;
 }
 
+static int check_is_valid = 1;
+
 static __always_inline int is_valid_eval_index(fuzzy_ctx_t*   ctx,
                                                unsigned long  index,
                                                unsigned long* values,
@@ -977,6 +986,8 @@ static __always_inline int is_valid_eval_index(fuzzy_ctx_t*   ctx,
 #ifdef SKIP_IS_VALID_EVAL
     return 1;
 #else
+    if (unlikely(!check_is_valid))
+        return 1;
     // check validity of index eval
     dict__da__interval_group_ptr* index_to_group_intervals =
         (dict__da__interval_group_ptr*)ctx->index_to_group_intervals;
@@ -1007,6 +1018,8 @@ is_valid_eval_group(fuzzy_ctx_t* ctx, index_group_t* ig, unsigned long* values,
 #ifdef SKIP_IS_VALID_EVAL
     return 1;
 #else
+    if (unlikely(!check_is_valid))
+        return 1;
     // for every element in ig, check interval validity
     unsigned i;
     for (i = 0; i < ig->n; ++i)
@@ -1562,6 +1575,16 @@ static void __union_ast_info(ast_info_ptr dst, ast_info_ptr src)
         set_add__ulong(&dst->indexes, *p);
     }
 
+    unsigned long i;
+    for (i = 0; i < src->indexes_ud.size; ++i)
+        if (!da_check_el__ulong(&dst->indexes_ud, src->indexes_ud.data[i]))
+            da_add_item__ulong(&dst->indexes_ud, src->indexes_ud.data[i]);
+    for (i = 0; i < src->indexes_ud.size; ++i)
+        if (!da_check_el__index_group_t(&dst->index_groups_ud,
+                                        &src->index_groups_ud.data[i]))
+            da_add_item__index_group_t(&dst->index_groups_ud,
+                                       src->index_groups_ud.data[i]);
+
     dst->input_extract_ops += src->input_extract_ops;
     dst->linear_arithmetic_operations += src->linear_arithmetic_operations;
     dst->nonlinear_arithmetic_operations +=
@@ -1664,6 +1687,12 @@ static inline void __detect_involved_inputs(fuzzy_ctx_t* ctx, Z3_ast v,
                         if (at_least_one)
                             set_add__index_group_t(&new_el->index_groups,
                                                    group);
+                        else if (!da_check_el__index_group_t(
+                                     &new_el->index_groups_ud,
+                                     &group)) // linear check, but it should be
+                                              // small...
+                            da_add_item__index_group_t(&new_el->index_groups_ud,
+                                                       group);
 
                         goto FUN_END;
                     } else {
@@ -1696,6 +1725,14 @@ static inline void __detect_involved_inputs(fuzzy_ctx_t* ctx, Z3_ast v,
                             symbol_index)) {
                         set_add__index_group_t(&new_el->index_groups, group);
                         set_add__ulong(&new_el->indexes, symbol_index);
+                    } else if (!da_check_el__ulong(
+                                   &new_el->indexes_ud,
+                                   symbol_index)) { // linear check, but it
+                                                    // should
+                                                    // be small...
+                        da_add_item__ulong(&new_el->indexes_ud, symbol_index);
+                        da_add_item__index_group_t(&new_el->index_groups_ud,
+                                                   group);
                     }
                     goto FUN_END;
                 }
@@ -5447,6 +5484,57 @@ static int __query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
     return 0;
 }
 
+static inline int check_if_range_for_indexes(fuzzy_ctx_t* ctx,
+                                             set__ulong*  indexes)
+{
+    dict__da__interval_group_ptr* index_to_group_intervals =
+        (dict__da__interval_group_ptr*)ctx->index_to_group_intervals;
+
+    ulong* i;
+    set_reset_iter__ulong(indexes, 0);
+    while (set_iter_next__ulong(indexes, 0, &i)) {
+        if (dict_get_ref__da__interval_group_ptr(index_to_group_intervals,
+                                                 *i) != NULL)
+            return 1;
+    }
+    return 0;
+}
+
+static inline void aggressive_optimistic(fuzzy_ctx_t* ctx,
+                                         Z3_ast       branch_condition)
+{
+#ifndef ENABLE_AGGRESSIVE_OPTIMISTIC
+    return;
+#endif
+    if ((ast_data.inputs->indexes_ud.size |
+         ast_data.inputs->index_groups_ud.size) == 0 &&
+        !check_if_range_for_indexes(ctx, &ast_data.inputs->indexes))
+        return;
+
+    fuzzy_stats_t tmp_stats;
+    memcpy(&tmp_stats, &ctx->stats, sizeof(fuzzy_stats_t));
+
+    unsigned long i;
+    for (i = 0; i < ast_data.inputs->indexes_ud.size; ++i)
+        set_add__ulong(&ast_data.inputs->indexes,
+                       ast_data.inputs->indexes_ud.data[i]);
+    for (i = 0; i < ast_data.inputs->index_groups_ud.size; ++i)
+        set_add__index_group_t(&ast_data.inputs->index_groups,
+                               ast_data.inputs->index_groups_ud.data[i]);
+
+    check_is_valid = 0;
+    unsigned char const* dummy_proof;
+    unsigned long        dummy_proof_size;
+    __query_check_light(ctx, branch_condition, branch_condition, &dummy_proof,
+                        &dummy_proof_size);
+    check_is_valid = 1;
+
+    unsigned long delta_aggressive_opt_evaluate =
+        ctx->stats.num_evaluate - tmp_stats.num_evaluate;
+    memcpy(&ctx->stats, &tmp_stats, sizeof(fuzzy_stats_t));
+    ctx->stats.aggressive_opt_evaluate += delta_aggressive_opt_evaluate;
+}
+
 int z3fuzz_query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
                              Z3_ast                branch_condition,
                              unsigned char const** proof,
@@ -5479,8 +5567,13 @@ int z3fuzz_query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
         }
     }
 #endif
-    if (res || opt_found == 0)
-        // the query is SAT or we were not able to flip the branch condition
+    if (opt_found == 0) {
+        // we were not able to flip the branch condition, aggressive optimistic
+        // (ignore univocally defined and ranges)
+        aggressive_optimistic(ctx, branch_condition);
+        goto END_FUN_2;
+    } else if (res)
+        // the query is SAT
         goto END_FUN_2;
 
     // check if there are expressions (marked as conflicting) that operate on
