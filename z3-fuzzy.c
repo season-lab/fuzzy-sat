@@ -79,7 +79,7 @@ static int skip_afl_havoc         = 1;
 static int use_greedy_mamin       = 0;
 static int check_unnecessary_eval = 1;
 
-static int max_ast_info_cache_size = 20000;
+static int max_ast_info_cache_size = 14000;
 
 #ifdef USE_MD5_HASH
 #include "utility/md5.h"
@@ -6321,7 +6321,7 @@ void z3fuzz_notify_constraint(fuzzy_ctx_t* ctx, Z3_ast constraint)
     if (unlikely(skip_notify))
         return;
 
-    if (unlikely(notify_count++ & 64)) {
+    if (unlikely(notify_count++ & 16)) {
         notify_count = 0;
         dict__ast_info_ptr* ast_info_cache =
             (dict__ast_info_ptr*)ctx->ast_info_cache;

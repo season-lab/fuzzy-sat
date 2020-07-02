@@ -4,6 +4,7 @@
 #include "utility/pretty-print.h"
 #include "z3-fuzzy.h"
 
+#define NREP 10
 #define Z3_SOLVER_TIMEOUT "10000"
 #define FUZZY_SOLVER_TIMEOUT 1000
 
@@ -86,7 +87,7 @@ int main(int argc, char* argv[])
     Z3_sort              bsort = Z3_mk_bv_sort(ctx, 8);
     struct timeval       stop, start;
     double       elapsed_time = 0, cumulative_fuzzy = 0, cumulative_z3 = 0;
-    unsigned int i;
+    unsigned int i, k;
     int          n;
 
     pp_init();
@@ -128,61 +129,71 @@ int main(int argc, char* argv[])
         int is_unknown_z3 = 0;
 
         pp_printf(6, 1, "running fuzzy...");
-        gettimeofday(&start, NULL);
-        int j;
-        for (j = 0; j < n_assertions; ++j) {
-            assert(assertions[j] != NULL && "null assertion!");
-            z3fuzz_notify_constraint(&fctx, assertions[j]);
+        for (k = 0; k < NREP; ++k) {
+            is_sat_fuzzy = 0;
+            gettimeofday(&start, NULL);
+            int j;
+            for (j = 0; j < n_assertions; ++j) {
+                assert(assertions[j] != NULL && "null assertion!");
+                z3fuzz_notify_constraint(&fctx, assertions[j]);
+            }
+
+            if (z3fuzz_query_check_light(&fctx, query, branch_condition, &proof,
+                                         &proof_size))
+                is_sat_fuzzy = 1;
+
+            gettimeofday(&stop, NULL);
+            elapsed_time = compute_time_msec(&start, &stop);
+            cumulative_fuzzy += elapsed_time;
+            fuzzy_sat += is_sat_fuzzy;
+
+            fprintf(log_file, "%.3lf,%s,", elapsed_time,
+                    is_sat_fuzzy ? "sat" : "unknown");
         }
-
-        if (z3fuzz_query_check_light(&fctx, query, branch_condition, &proof,
-                                     &proof_size))
-            is_sat_fuzzy = 1;
-
-        gettimeofday(&stop, NULL);
-        elapsed_time = compute_time_msec(&start, &stop);
-        cumulative_fuzzy += elapsed_time;
-        fuzzy_sat += is_sat_fuzzy;
         free(assertions);
 
-        fprintf(log_file, "%.3lf,%s,", elapsed_time,
-                is_sat_fuzzy ? "sat" : "unknown");
-
-        Z3_lbool  query_result;
-        Z3_solver solver = Z3_mk_solver(ctx);
-        Z3_solver_inc_ref(ctx, solver);
-
         pp_printf(6, 1, "running z3...");
-        gettimeofday(&start, NULL);
-        Z3_solver_assert(ctx, solver, query);
-        switch ((query_result = Z3_solver_check(ctx, solver))) {
-            case Z3_L_FALSE:
-                break;
-            case Z3_L_UNDEF:
-                is_unknown_z3 = 1;
-                break;
-            case Z3_L_TRUE:
-                is_sat_z3 = 1;
-                break;
+
+        for (k = 0; k < NREP; ++k) {
+            is_sat_z3 = 0;
+            is_unknown_z3 = 0;
+
+            Z3_lbool  query_result;
+            Z3_solver solver = Z3_mk_solver(ctx);
+            Z3_solver_inc_ref(ctx, solver);
+
+            gettimeofday(&start, NULL);
+            Z3_solver_assert(ctx, solver, query);
+            switch ((query_result = Z3_solver_check(ctx, solver))) {
+                case Z3_L_FALSE:
+                    break;
+                case Z3_L_UNDEF:
+                    is_unknown_z3 = 1;
+                    break;
+                case Z3_L_TRUE:
+                    is_sat_z3 = 1;
+                    break;
+            }
+
+            gettimeofday(&stop, NULL);
+            elapsed_time = compute_time_msec(&start, &stop);
+            cumulative_z3 += elapsed_time;
+            z3_sat += is_sat_z3;
+
+            Z3_solver_dec_ref(ctx, solver);
+            fprintf(log_file, "%.3lf,%s", elapsed_time,
+                    is_sat_z3 ? "sat" : (is_unknown_z3 ? "unknown" : "unsat"));
         }
+        fprintf(log_file, "\n");
 
-        gettimeofday(&stop, NULL);
-        elapsed_time = compute_time_msec(&start, &stop);
-        cumulative_z3 += elapsed_time;
-        z3_sat += is_sat_z3;
-        Z3_solver_dec_ref(ctx, solver);
-
-        fprintf(log_file, "%.3lf,%s\n", elapsed_time,
-                is_sat_z3 ? "sat" : (is_unknown_z3 ? "unknown" : "unsat"));
-
-        pp_printf(1, 1, "cumulative z3     %.03lf msec", cumulative_z3);
-        pp_printf(2, 1, "cumulative fuzzy  %.03lf msec", cumulative_fuzzy);
-        pp_printf(3, 1, "sat fuzzy         %ld", fuzzy_sat);
-        pp_printf(4, 1, "sat z3            %ld", z3_sat);
+        pp_printf(1, 1, "cumulative z3     %.03lf msec", cumulative_z3 / NREP);
+        pp_printf(2, 1, "cumulative fuzzy  %.03lf msec", cumulative_fuzzy / NREP);
+        pp_printf(3, 1, "sat fuzzy         %ld", fuzzy_sat / NREP);
+        pp_printf(4, 1, "sat z3            %ld", z3_sat / NREP);
     }
 
     pp_printf(6, 1, "speedup   %.02lf x", cumulative_z3 / cumulative_fuzzy);
-    pp_printf(7, 1, "detected  %ld / %ld", fuzzy_sat, z3_sat);
+    pp_printf(7, 1, "detected  %ld / %ld", fuzzy_sat / NREP, z3_sat / NREP);
     puts("");
     Z3_ast_vector_dec_ref(ctx, queries);
     free(str_symbols);
