@@ -2836,8 +2836,9 @@ static __always_inline int PHASE_input_to_state_extended(
         set_reset_iter__index_group_t(&ast_data.inputs->index_groups, 0);
         while (set_iter_next__index_group_t(&ast_data.inputs->index_groups, 0,
                                             &group)) {
+            // little endian
             for (k = 0; k < group->n; ++k) {
-                unsigned int  index = group->indexes[k];
+                unsigned int  index = group->indexes[group->n - k - 1];
                 unsigned char b =
                     __extract_from_long(ast_data.values.data[i], k);
 
@@ -2852,6 +2853,43 @@ static __always_inline int PHASE_input_to_state_extended(
             int valid_eval = is_valid_eval_group(ctx, group, tmp_input,
                                                  current_testcase->value_sizes,
                                                  current_testcase->values_len);
+            if (valid_eval) {
+                int eval_v = __evaluate_branch_query(
+                    ctx, query, branch_condition, tmp_input,
+                    current_testcase->value_sizes,
+                    current_testcase->values_len);
+                if (eval_v == 1) {
+#ifdef PRINT_SAT
+                    Z3FUZZ_LOG("[check light - input to state extended] Query "
+                               "is SAT\n");
+#endif
+                    ctx->stats.input_to_state_ext++;
+                    ctx->stats.num_sat++;
+                    __vals_long_to_char(tmp_input, tmp_proof,
+                                        current_testcase->testcase_len);
+                    *proof      = tmp_proof;
+                    *proof_size = current_testcase->values_len;
+                    return 1;
+                } else if (unlikely(eval_v == TIMEOUT_V))
+                    return TIMEOUT_V;
+            }
+            // big endian
+            for (k = 0; k < group->n; ++k) {
+                unsigned int  index = group->indexes[k];
+                unsigned char b =
+                    __extract_from_long(ast_data.values.data[i], k);
+
+#ifdef DEBUG_CHECK_LIGHT
+                Z3FUZZ_LOG("L2 - inj byte: 0x%x @ %d\n", b, index);
+#endif
+                if (current_testcase->values[index] == (unsigned long)b)
+                    continue;
+
+                tmp_input[index] = b;
+            }
+            valid_eval = is_valid_eval_group(ctx, group, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len);
             if (valid_eval) {
                 int eval_v = __evaluate_branch_query(
                     ctx, query, branch_condition, tmp_input,
