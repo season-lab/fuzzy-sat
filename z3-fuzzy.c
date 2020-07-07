@@ -6544,6 +6544,20 @@ void z3fuzz_notify_constraint(fuzzy_ctx_t* ctx, Z3_ast constraint)
     // this is a visit of the AST of the constraint... Too slow? I don't know
     if (unlikely(skip_notify))
         return;
+    
+    if (is_and_constraint(ctx, constraint)) {
+        da__Z3_ast args;
+        da_init__Z3_ast(&args);
+        flatten_and_args(ctx, constraint, &args);
+        
+        unsigned i;
+        for (i = 0; i < args.size; ++i) {
+            z3fuzz_notify_constraint(ctx, args.data[i]);
+            Z3_dec_ref(ctx->z3_ctx, args.data[i]);
+        }
+        da_free__Z3_ast(&args, NULL);
+        return;
+    }
 
     if (unlikely(notify_count++ & 16)) {
         notify_count = 0;
