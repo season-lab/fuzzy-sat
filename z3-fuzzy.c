@@ -6545,20 +6545,6 @@ void z3fuzz_notify_constraint(fuzzy_ctx_t* ctx, Z3_ast constraint)
     if (unlikely(skip_notify))
         return;
     
-    if (is_and_constraint(ctx, constraint)) {
-        da__Z3_ast args;
-        da_init__Z3_ast(&args);
-        flatten_and_args(ctx, constraint, &args);
-        
-        unsigned i;
-        for (i = 0; i < args.size; ++i) {
-            z3fuzz_notify_constraint(ctx, args.data[i]);
-            Z3_dec_ref(ctx->z3_ctx, args.data[i]);
-        }
-        da_free__Z3_ast(&args, NULL);
-        return;
-    }
-
     if (unlikely(notify_count++ & 16)) {
         notify_count = 0;
         dict__ast_info_ptr* ast_info_cache =
@@ -6574,6 +6560,22 @@ void z3fuzz_notify_constraint(fuzzy_ctx_t* ctx, Z3_ast constraint)
     set_add__ulong(processed_constraints, hash);
 
     Z3_inc_ref(ctx->z3_ctx, constraint);
+
+    if (is_and_constraint(ctx, constraint)) {
+        da__Z3_ast args;
+        da_init__Z3_ast(&args);
+        flatten_and_args(ctx, constraint, &args);
+        
+        unsigned i;
+        for (i = 0; i < args.size; ++i) {
+            z3fuzz_notify_constraint(ctx, args.data[i]);
+            Z3_dec_ref(ctx->z3_ctx, args.data[i]);
+        }
+        da_free__Z3_ast(&args, NULL);
+
+        Z3_dec_ref(ctx->z3_ctx, constraint);
+        return;
+    }
 
     if (__check_univocally_defined(ctx, constraint)) {
         ctx->stats.num_univocally_defined++;
