@@ -2888,7 +2888,7 @@ static __always_inline int PHASE_input_to_state_extended(
 #ifdef DEBUG_CHECK_LIGHT
                 Z3FUZZ_LOG("L2 - inj byte: 0x%x @ %d\n", b, index);
 #endif
-                if (current_testcase->values[index] == (unsigned long)b)
+                if (tmp_input[index] == (unsigned long)b)
                     continue;
 
                 tmp_input[index] = b;
@@ -2925,7 +2925,7 @@ static __always_inline int PHASE_input_to_state_extended(
 #ifdef DEBUG_CHECK_LIGHT
                 Z3FUZZ_LOG("L2 - inj byte: 0x%x @ %d\n", b, index);
 #endif
-                if (current_testcase->values[index] == (unsigned long)b)
+                if (tmp_input[index] == (unsigned long)b)
                     continue;
 
                 tmp_input[index] = b;
@@ -6544,7 +6544,7 @@ void z3fuzz_notify_constraint(fuzzy_ctx_t* ctx, Z3_ast constraint)
     // this is a visit of the AST of the constraint... Too slow? I don't know
     if (unlikely(skip_notify))
         return;
-    
+
     if (unlikely(notify_count++ & 16)) {
         notify_count = 0;
         dict__ast_info_ptr* ast_info_cache =
@@ -6565,7 +6565,7 @@ void z3fuzz_notify_constraint(fuzzy_ctx_t* ctx, Z3_ast constraint)
         da__Z3_ast args;
         da_init__Z3_ast(&args);
         flatten_and_args(ctx, constraint, &args);
-        
+
         unsigned i;
         for (i = 0; i < args.size; ++i) {
             z3fuzz_notify_constraint(ctx, args.data[i]);
