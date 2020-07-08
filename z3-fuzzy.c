@@ -302,6 +302,19 @@ static inline void ast_info_init(ast_info_ptr ptr)
     ptr->approximated_groups             = 0;
 }
 
+static inline void ast_info_reset(ast_info_ptr ptr)
+{
+    set_remove_all__index_group_t(&ptr->index_groups, NULL);
+    set_remove_all__ulong(&ptr->indexes, NULL);
+    da_remove_all__ulong(&ptr->indexes_ud, NULL);
+    da_remove_all__index_group_t(&ptr->index_groups_ud, NULL);
+    ptr->linear_arithmetic_operations    = 0;
+    ptr->nonlinear_arithmetic_operations = 0;
+    ptr->input_extract_ops               = 0;
+    ptr->query_size                      = 0;
+    ptr->approximated_groups             = 0;
+}
+
 static inline void ast_info_ptr_free(ast_info_ptr* ptr)
 {
     set_free__index_group_t(&(*ptr)->index_groups, NULL);
@@ -1919,6 +1932,36 @@ static void __detect_early_constants(fuzzy_ctx_t* ctx, Z3_ast v,
     return;
 }
 
+__attribute__((unused)) static void
+__detect_all_constants(fuzzy_ctx_t* ctx, Z3_ast v, ast_data_t* data)
+{
+    switch (Z3_get_ast_kind(ctx->z3_ctx, v)) {
+        case Z3_APP_AST: {
+            Z3_app   app        = Z3_to_app(ctx->z3_ctx, v);
+            unsigned num_fields = Z3_get_app_num_args(ctx->z3_ctx, app);
+            unsigned i;
+            for (i = 0; i < num_fields; ++i) {
+                Z3_ast child = Z3_get_app_arg(ctx->z3_ctx, app, i);
+                __detect_all_constants(ctx, child, data);
+            }
+            break;
+        }
+        case Z3_NUMERAL_AST: {
+            unsigned long tmp_const;
+            Z3_bool       successGet =
+                Z3_get_numeral_uint64(ctx->z3_ctx, v, (uint64_t*)&tmp_const);
+            ASSERT_OR_ABORT(successGet == Z3_TRUE, "failed to get constant");
+            da_add_item__ulong(&data->values, tmp_const);
+            da_add_item__ulong(&data->values, tmp_const + 1);
+            da_add_item__ulong(&data->values, tmp_const - 1);
+        }
+        default: {
+            break;
+        }
+    }
+    return;
+}
+
 static inline int __check_conflicting_constraint(fuzzy_ctx_t* ctx, Z3_ast expr)
 {
     Z3_ast_kind kind = Z3_get_ast_kind(ctx->z3_ctx, expr);
@@ -2845,7 +2888,7 @@ static __always_inline int PHASE_input_to_state_extended(
 #ifdef DEBUG_CHECK_LIGHT
                 Z3FUZZ_LOG("L2 - inj byte: 0x%x @ %d\n", b, index);
 #endif
-                if (current_testcase->values[index] == (unsigned long)b)
+                if (tmp_input[index] == (unsigned long)b)
                     continue;
 
                 tmp_input[index] = b;
@@ -2882,7 +2925,7 @@ static __always_inline int PHASE_input_to_state_extended(
 #ifdef DEBUG_CHECK_LIGHT
                 Z3FUZZ_LOG("L2 - inj byte: 0x%x @ %d\n", b, index);
 #endif
-                if (current_testcase->values[index] == (unsigned long)b)
+                if (tmp_input[index] == (unsigned long)b)
                     continue;
 
                 tmp_input[index] = b;
@@ -5581,24 +5624,16 @@ static inline void aggressive_optimistic(fuzzy_ctx_t* ctx,
     ctx->stats.aggressive_opt_evaluate += delta_aggressive_opt_evaluate;
 }
 
-int z3fuzz_query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
-                             Z3_ast                branch_condition,
-                             unsigned char const** proof,
-                             unsigned long*        proof_size)
+static inline int query_check_light_and_multigoal(fuzzy_ctx_t* ctx,
+                                                  Z3_ast       query,
+                                                  Z3_ast       branch_condition,
+                                                  unsigned char const** proof,
+                                                  unsigned long* proof_size)
 {
-    Z3_inc_ref(ctx->z3_ctx, query);
-    Z3_inc_ref(ctx->z3_ctx, branch_condition);
-
-    int         res;
     testcase_t* curr_t = &ctx->testcases.data[0];
 
-    // just a mitigation. Remove for debugging
-    *proof_size = 0;
-
-    timer_start_wrapper(ctx);
-    __init_global_data(ctx, query, branch_condition);
-    // print_univocally_defined(ctx);
-    res = __query_check_light(ctx, query, branch_condition, proof, proof_size);
+    int res =
+        __query_check_light(ctx, query, branch_condition, proof, proof_size);
     if (unlikely(res == TIMEOUT_V))
         return 0;
 #if 0
@@ -5728,6 +5763,7 @@ int z3fuzz_query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
                        curr_t->values_len * sizeof(unsigned long));
                 while (set_iter_next__ulong(&ast_info->indexes, 0, &p))
                     set_add__ulong(&black_indexes, *p);
+                ast_info_reset(new_ast_info);
             } else {
                 // we are not able to make this AST true, quit
                 ctx->stats.conflicting_fallbacks_no_true++;
@@ -5747,6 +5783,148 @@ int z3fuzz_query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
 END_FUN_1:
     set_free__ulong(&local_conflicting_asts, NULL);
 END_FUN_2:
+    return res;
+}
+
+static inline int is_and_constraint(fuzzy_ctx_t* ctx, Z3_ast branch_condition)
+{
+    Z3_ast_kind node_kind = Z3_get_ast_kind(ctx->z3_ctx, branch_condition);
+    if (node_kind != Z3_APP_AST)
+        return 0;
+
+    Z3_app       node_app       = Z3_to_app(ctx->z3_ctx, branch_condition);
+    Z3_func_decl node_decl      = Z3_get_app_decl(ctx->z3_ctx, node_app);
+    Z3_decl_kind node_decl_kind = Z3_get_decl_kind(ctx->z3_ctx, node_decl);
+
+    if (node_decl_kind == Z3_OP_AND)
+        return 1;
+    return 0;
+}
+
+static inline void flatten_and_args(fuzzy_ctx_t* ctx, Z3_ast node,
+                                    da__Z3_ast* args)
+{
+    Z3_app   app        = Z3_to_app(ctx->z3_ctx, node);
+    unsigned num_fields = Z3_get_app_num_args(ctx->z3_ctx, app);
+
+    unsigned i;
+    for (i = 0; i < num_fields; ++i) {
+        Z3_ast child = Z3_get_app_arg(ctx->z3_ctx, app, i);
+        if (is_and_constraint(ctx, child))
+            flatten_and_args(ctx, child, args);
+        else {
+            Z3_inc_ref(ctx->z3_ctx, child);
+            da_add_item__Z3_ast(args, child);
+        }
+    }
+}
+
+static inline Z3_ast get_query_without_branch_condition(fuzzy_ctx_t* ctx,
+                                                        Z3_ast       query)
+{
+    if (!is_and_constraint(ctx, query)) {
+        return Z3_mk_true(ctx->z3_ctx);
+    }
+
+    Z3_app   app      = Z3_to_app(ctx->z3_ctx, query);
+    unsigned num_args = Z3_get_app_num_args(ctx->z3_ctx, app);
+    if (num_args < 2)
+        return Z3_mk_true(ctx->z3_ctx);
+
+    Z3_ast args[num_args - 1];
+
+    unsigned i;
+    for (i = 1; i < num_args; ++i) {
+        Z3_ast child = Z3_get_app_arg(ctx->z3_ctx, app, i);
+        args[i - 1]  = child;
+    }
+
+    return Z3_mk_and(ctx->z3_ctx, num_args - 1, args);
+}
+
+static inline int handle_and_constraint(fuzzy_ctx_t* ctx, Z3_ast query,
+                                        Z3_ast                branch_condition,
+                                        unsigned char const** proof,
+                                        unsigned long*        proof_size)
+{
+    int      res_opt = 1;
+    int      res     = 1;
+    unsigned i;
+
+    Z3_ast query_no_branch = get_query_without_branch_condition(ctx, query);
+    Z3_inc_ref(ctx->z3_ctx, query_no_branch);
+
+    ast_info_ptr new_ast_info = (ast_info_ptr)malloc(sizeof(ast_info_t));
+    ast_info_init(new_ast_info);
+
+    set__ulong black_indexes;
+    set_init__ulong(&black_indexes, index_hash, index_equals);
+
+    da__Z3_ast args;
+    da_init__Z3_ast(&args);
+
+    flatten_and_args(ctx, branch_condition, &args);
+    for (i = 0; i < args.size; ++i) {
+        Z3_ast node = args.data[i];
+
+        // detect groups with blacklist
+        opt_found = 0;
+        __reset_ast_data();
+        __detect_early_constants(ctx, node, &ast_data);
+        ast_info_ptr ast_info;
+        detect_involved_inputs_wrapper(ctx, node, &ast_info);
+        ast_info_populate_with_blacklist(new_ast_info, ast_info,
+                                         &black_indexes);
+        ast_data.inputs = new_ast_info;
+        if (ast_data.inputs == 0)
+            break;
+
+        res &= query_check_light_and_multigoal(
+            ctx, res_opt ? query_no_branch : node, node, proof, proof_size);
+        res_opt &= opt_found;
+        if (res == 0 && res_opt == 0)
+            break;
+
+        // update blacklist
+        ulong* p;
+        set_reset_iter__ulong(&ast_data.inputs->indexes, 0);
+        while (set_iter_next__ulong(&ast_data.inputs->indexes, 0, &p))
+            set_add__ulong(&black_indexes, *p);
+        ast_info_reset(new_ast_info);
+    }
+
+    ast_info_ptr_free(&new_ast_info);
+    set_free__ulong(&black_indexes, NULL);
+    for (i = 0; i < args.size; ++i)
+        Z3_dec_ref(ctx->z3_ctx, args.data[i]);
+    da_free__Z3_ast(&args, NULL);
+    Z3_dec_ref(ctx->z3_ctx, query_no_branch);
+
+    opt_found = res_opt;
+    return res;
+}
+
+int z3fuzz_query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
+                             Z3_ast                branch_condition,
+                             unsigned char const** proof,
+                             unsigned long*        proof_size)
+{
+    Z3_inc_ref(ctx->z3_ctx, query);
+    Z3_inc_ref(ctx->z3_ctx, branch_condition);
+
+    int res;
+    *proof_size = 0;
+
+    timer_start_wrapper(ctx);
+    __init_global_data(ctx, query, branch_condition);
+
+    if (is_and_constraint(ctx, branch_condition))
+        res = handle_and_constraint(ctx, query, branch_condition, proof,
+                                    proof_size);
+    else
+        res = query_check_light_and_multigoal(ctx, query, branch_condition,
+                                              proof, proof_size);
+
     Z3_dec_ref(ctx->z3_ctx, query);
     Z3_dec_ref(ctx->z3_ctx, branch_condition);
     return res;
@@ -6382,6 +6560,22 @@ void z3fuzz_notify_constraint(fuzzy_ctx_t* ctx, Z3_ast constraint)
     set_add__ulong(processed_constraints, hash);
 
     Z3_inc_ref(ctx->z3_ctx, constraint);
+
+    if (is_and_constraint(ctx, constraint)) {
+        da__Z3_ast args;
+        da_init__Z3_ast(&args);
+        flatten_and_args(ctx, constraint, &args);
+
+        unsigned i;
+        for (i = 0; i < args.size; ++i) {
+            z3fuzz_notify_constraint(ctx, args.data[i]);
+            Z3_dec_ref(ctx->z3_ctx, args.data[i]);
+        }
+        da_free__Z3_ast(&args, NULL);
+
+        Z3_dec_ref(ctx->z3_ctx, constraint);
+        return;
+    }
 
     if (__check_univocally_defined(ctx, constraint)) {
         ctx->stats.num_univocally_defined++;

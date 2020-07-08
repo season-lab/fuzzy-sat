@@ -24,4 +24,9 @@ int main()
     wi_update_cmp(&wi2, 0xb0, OP_UGT);
     wi_update_sub(&wi2, 0x0a);
     wi_print(&wi2);
+
+    wrapped_interval_t wi3 = wi_init(32);
+    wi_update_cmp(&wi3, 0xbbbbbbbb, OP_ULT);
+    wi_update_sub(&wi3, 0xaaaaaaaa);
+    wi_print(&wi3);
 }
