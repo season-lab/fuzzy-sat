@@ -121,6 +121,51 @@ static inline void print_status(unsigned long current_query,
     pp_set_line(47);
 }
 
+static inline void print_report()
+{
+    printf("*** REPORT ***\n\n");
+    printf("num_evaluate:          %ld\n", fctx.stats.num_evaluate);
+    printf("num_sat:               %ld\n", fctx.stats.num_sat);
+    printf("reuse:                 %ld\n", fctx.stats.reuse);
+    printf("input_to_state:        %ld\n", fctx.stats.input_to_state);
+    printf("simple_math:           %ld\n", fctx.stats.simple_math);
+    printf("input_to_state_ext:    %ld\n",
+              fctx.stats.input_to_state_ext);
+    printf("brute_force:           %ld\n", fctx.stats.brute_force);
+    printf("range_brute_force:     %ld\n", fctx.stats.range_brute_force);
+    printf("range_brute_force_opt: %ld\n", fctx.stats.range_brute_force_opt);
+    printf("gradient_descend:      %ld\n", fctx.stats.gradient_descend);
+    printf("flip1:                 %ld\n", fctx.stats.flip1);
+    printf("flip2:                 %ld\n", fctx.stats.flip2);
+    printf("flip4:                 %ld\n", fctx.stats.flip4);
+    printf("flip8:                 %ld\n", fctx.stats.flip8);
+    printf("flip16:                %ld\n", fctx.stats.flip16);
+    printf("flip32:                %ld\n", fctx.stats.flip32);
+    printf("flip64:                %ld\n", fctx.stats.flip64);
+    printf("arith8_sum:            %ld\n", fctx.stats.arith8_sum);
+    printf("arith8_sub:            %ld\n", fctx.stats.arith8_sub);
+    printf("arith16_sum_LE:        %ld\n", fctx.stats.arith16_sum_LE);
+    printf("arith16_sum_BE:        %ld\n", fctx.stats.arith16_sum_BE);
+    printf("arith16_sub_LE:        %ld\n", fctx.stats.arith16_sub_LE);
+    printf("arith16_sub_BE:        %ld\n", fctx.stats.arith16_sub_BE);
+    printf("arith32_sum_LE:        %ld\n", fctx.stats.arith32_sum_LE);
+    printf("arith32_sum_BE:        %ld\n", fctx.stats.arith32_sum_BE);
+    printf("arith32_sub_LE:        %ld\n", fctx.stats.arith32_sub_LE);
+    printf("arith32_sub_BE:        %ld\n", fctx.stats.arith32_sub_BE);
+    printf("arith64_sum_LE:        %ld\n", fctx.stats.arith64_sum_LE);
+    printf("arith64_sum_BE:        %ld\n", fctx.stats.arith64_sum_BE);
+    printf("arith64_sub_LE:        %ld\n", fctx.stats.arith64_sub_LE);
+    printf("arith64_sub_BE:        %ld\n", fctx.stats.arith64_sub_BE);
+    printf("int8:                  %ld\n", fctx.stats.int8);
+    printf("int16:                 %ld\n", fctx.stats.int16);
+    printf("int32:                 %ld\n", fctx.stats.int32);
+    printf("int64:                 %ld\n", fctx.stats.int64);
+    printf("havoc:                 %ld\n", fctx.stats.havoc);
+    printf("multigoal:             %ld\n", fctx.stats.multigoal);
+    printf("sat_in_seed:           %ld\n", fctx.stats.sat_in_seed);
+    printf("num_timeouts:          %ld\n", fctx.stats.num_timeouts);
+}
+
 static inline void usage(char* filename)
 {
     fprintf(stderr, "wrong argv. usage:\n%s query_filename seed [test_dir]\n",
@@ -213,6 +258,9 @@ int main(int argc, char* argv[])
 #endif
     }
 
+#ifndef PRINT_STATUS
+    print_report();
+#endif
     printf("\n"
            "num queries:      %lu\n"
            "fast sat queries: %lu\n"
