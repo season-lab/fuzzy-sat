@@ -32,17 +32,18 @@
 #define leftmost_set_bit(x) ((x) != 0 ? (63 - __builtin_clzl(x)) : -1)
 
 #define HAVOC_C 10
-#define RANGE_MAX_WIDTH_BRUTE_FORCE 1024
+#define RANGE_MAX_WIDTH_BRUTE_FORCE 2048
 #define Z3_UNIQUE Z3_get_ast_hash // Z3_get_ast_id
 
 // #define PRINT_SAT
 // #define DEBUG_RANGE
-// #define DEBUG_CHECK_LIGHT
+#define DEBUG_CHECK_LIGHT
 // #define DEBUG_DETECT_GROUP
 
 // #define SKIP_IS_VALID_EVAL
 // #define USE_MD5_HASH
 
+// #define USE_HAVOC_ON_WHOLE_PI
 #define USE_AFL_DET_GROUPS
 #define ENABLE_AGGRESSIVE_OPTIMISTIC
 
@@ -75,7 +76,7 @@ static int skip_afl_det_flip_long          = 0;
 static int skip_afl_det_arith64            = 0;
 static int skip_afl_det_int64              = 0;
 
-static int skip_afl_havoc         = 1;
+static int skip_afl_havoc         = 0;
 static int use_greedy_mamin       = 0;
 static int check_unnecessary_eval = 1;
 
@@ -423,7 +424,7 @@ static unsigned long __gd_eval(unsigned long* x, int* should_exit)
 
 static int __check_overlapping_groups()
 {
-    int        res = 1;
+    int        res = 0;
     set__ulong s;
     set_init__ulong(&s, &index_hash, &index_equals);
 
@@ -431,15 +432,16 @@ static int __check_overlapping_groups()
     set_reset_iter__index_group_t(&ast_data.inputs->index_groups, 0);
     while (
         set_iter_next__index_group_t(&ast_data.inputs->index_groups, 0, &g)) {
+        print_index_group(g);
         int i;
         for (i = 0; i < g->n; ++i) {
             if (set_check__ulong(&s, g->indexes[i])) {
-                res = 0;
+                res = 1;
                 break;
             }
             set_add__ulong(&s, g->indexes[i]);
         }
-        if (!res)
+        if (res)
             break;
     }
 
@@ -1066,7 +1068,7 @@ static inline int __evaluate_branch_query(fuzzy_ctx_t* ctx, Z3_ast query,
     int      res;
     uint32_t depth;
     res = (int)ctx->model_eval(ctx->z3_ctx, branch_condition, values,
-                               value_sizes, n_values, &depth);
+                               value_sizes, n_values, NULL);
     if (res) {
 #if 0
         unsigned num_sat;
@@ -1080,6 +1082,8 @@ static inline int __evaluate_branch_query(fuzzy_ctx_t* ctx, Z3_ast query,
             __vals_long_to_char(values, tmp_opt_proof, t->testcase_len);
         }
 #else
+        res = (int)ctx->model_eval(ctx->z3_ctx, query, values, value_sizes,
+                                   n_values, &depth);
         if (!opt_found || depth > opt_num_sat) {
             testcase_t* t = &ctx->testcases.data[0];
             opt_found     = 1;
@@ -1088,8 +1092,6 @@ static inline int __evaluate_branch_query(fuzzy_ctx_t* ctx, Z3_ast query,
                    t->values_len * sizeof(unsigned long));
             __vals_long_to_char(values, tmp_opt_proof, t->testcase_len);
         }
-        res = (int)ctx->model_eval(ctx->z3_ctx, query, values, value_sizes,
-                                   n_values, NULL);
 #endif
     }
     res = res > 0 ? 1 : 0;
@@ -1930,6 +1932,31 @@ static void __detect_early_constants(fuzzy_ctx_t* ctx, Z3_ast v,
         }
     }
     return;
+}
+
+static inline unsigned long get_group_value_in_tmp_input(index_group_t* group)
+{
+    unsigned long res = 0;
+    unsigned char k;
+    for (k = 0; k < group->n; ++k) {
+        unsigned long index = group->indexes[group->n - k - 1];
+        res |= tmp_input[index] << k;
+    }
+    return res;
+}
+
+static void
+__put_solutions_of_current_groups_to_early_constants(fuzzy_ctx_t* ctx,
+                                                     ast_data_t*  data,
+                                                     ast_info_ptr curr_groups)
+{
+    index_group_t* ig;
+    set_reset_iter__index_group_t(&curr_groups->index_groups, 0);
+    while (
+        set_iter_next__index_group_t(&curr_groups->index_groups, 0, &ig)) {
+        unsigned long val = get_group_value_in_tmp_input(ig);
+        da_add_item__ulong(&data->values, val);
+    }
 }
 
 __attribute__((unused)) static void
@@ -3025,6 +3052,8 @@ PHASE_gradient_descend(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
         __gradient_transf_init(ctx->z3_ctx, branch_condition, &out_ast);
     if (!valid_for_gd)
         return 0;
+    Z3FUZZ_LOG("after transformation:\n");
+    z3fuzz_print_expr(ctx, out_ast);
 
     int               res = 0;
     eval_wapper_ctx_t ew;
@@ -5281,6 +5310,399 @@ static __always_inline int PHASE_afl_havoc(fuzzy_ctx_t* ctx, Z3_ast query,
     return havoc_res;
 }
 
+static __always_inline int PHASE_afl_havoc_whole_pi(fuzzy_ctx_t* ctx,
+                                                    Z3_ast       query,
+                                                    Z3_ast branch_condition,
+                                                    unsigned char const** proof,
+                                                    unsigned long* proof_size)
+{
+
+    if (skip_afl_havoc)
+        return 0;
+
+#ifdef DEBUG_CHECK_LIGHT
+    Z3FUZZ_LOG("Trying AFL Havoc on whole PI\n");
+#endif
+
+    int             havoc_res;
+    index_group_t*  random_group;
+    unsigned long   random_index;
+    unsigned long   index_0;
+    unsigned long   index_1;
+    unsigned long   index_2;
+    unsigned long   index_3;
+    unsigned char   val_0;
+    unsigned char   val_1;
+    unsigned char   val_2;
+    unsigned char   val_3;
+    unsigned        tmp;
+    unsigned        random_tmp;
+    unsigned        mutation_pool;
+    unsigned        score;
+    unsigned long*  indexes;
+    unsigned long   indexes_size;
+    index_group_t** ig_16;
+    unsigned long   ig_16_size;
+    index_group_t** ig_32;
+    unsigned long   ig_32_size;
+    index_group_t** ig_64;
+    unsigned long   ig_64_size;
+    testcase_t*     current_testcase = &ctx->testcases.data[0];
+    index_group_t*  group;
+
+    unsigned i;
+    ulong*   p;
+
+    ast_info_ptr tmp_ast_info;
+    detect_involved_inputs_wrapper(ctx, query, &tmp_ast_info);
+
+    // initialize list input
+    indexes      = (unsigned long*)malloc(tmp_ast_info->indexes.size *
+                                     sizeof(unsigned long));
+    indexes_size = tmp_ast_info->indexes.size;
+    // initialize groups input
+    ig_16      = (index_group_t**)malloc(tmp_ast_info->index_groups.size *
+                                    sizeof(index_group_t*));
+    ig_16_size = 0;
+    ig_32      = (index_group_t**)malloc(tmp_ast_info->index_groups.size *
+                                    sizeof(index_group_t*));
+    ig_32_size = 0;
+    ig_64      = (index_group_t**)malloc(tmp_ast_info->index_groups.size *
+                                    sizeof(index_group_t*));
+    ig_64_size = 0;
+
+    i = 0;
+    set_reset_iter__ulong(&tmp_ast_info->indexes, 1);
+    while (set_iter_next__ulong(&tmp_ast_info->indexes, 1, &p)) {
+        indexes[i++] = *p;
+    }
+    set_reset_iter__index_group_t(&tmp_ast_info->index_groups, 1);
+    while (
+        set_iter_next__index_group_t(&tmp_ast_info->index_groups, 1, &group)) {
+        switch (group->n) {
+            case 1:
+                break;
+            case 2:
+                ig_16[ig_16_size++] = group;
+                break;
+            case 4:
+                ig_32[ig_32_size++] = group;
+                break;
+            case 8:
+                ig_64[ig_64_size++] = group;
+                break;
+        }
+    }
+
+#if 0
+    int g;
+    for (g = 0; g < indexes_size; ++g)
+        Z3FUZZ_LOG("pool: idx %ld\n", indexes[g]);
+    for (g = 0; g < ig_16_size; ++g) {
+        Z3FUZZ_LOG("in pool: \n");
+        print_index_group(ig_16[g]);
+    }
+    for (g = 0; g < ig_32_size; ++g) {
+        Z3FUZZ_LOG("in pool: \n");
+        print_index_group(ig_32[g]);
+    }
+    for (g = 0; g < ig_64_size; ++g) {
+        Z3FUZZ_LOG("in pool: \n");
+        print_index_group(ig_64[g]);
+    }
+#endif
+
+    havoc_res     = 0;
+    mutation_pool = 5 + (ig_64_size + ig_32_size + ig_16_size > 0 ? 3 : 0) +
+                    (ig_64_size + ig_32_size > 0 ? 3 : 0);
+    score = tmp_ast_info->indexes.size *
+            HAVOC_C;                     // HAVOC_C mutations per input (mean)
+    score = score > 1000 ? 1000 : score; // no more than 1000 mutations
+    for (i = 0; i < score; ++i) {
+        switch (UR(mutation_pool)) {
+            case 0: {
+                // flip bit
+                random_index = indexes[UR(indexes_size)];
+                tmp_input[random_index] =
+                    (unsigned long)FLIP_BIT(tmp_input[random_index], UR(8));
+                break;
+            }
+            case 1: {
+                // set interesting byte
+                random_index            = indexes[UR(indexes_size)];
+                tmp_input[random_index] = (unsigned long)
+                    interesting8[UR(sizeof(interesting8) / sizeof(char))];
+                break;
+            }
+            case 2: {
+                // random subtract byte
+                random_index = indexes[UR(indexes_size)];
+                tmp_input[random_index] -= (unsigned char)(UR(35) + 1);
+                break;
+            }
+            case 3: {
+                // random add byte
+                random_index = indexes[UR(indexes_size)];
+                tmp_input[random_index] += (unsigned char)(UR(35) + 1);
+                break;
+            }
+            case 4: {
+                // random, byte set
+                random_index = indexes[UR(indexes_size)];
+                tmp_input[random_index] ^= (unsigned char)(UR(255) + 1);
+                break;
+            }
+            case 5: {
+                // set interesting word
+                unsigned pool = UR(ig_16_size + ig_32_size + ig_64_size);
+                if (pool < ig_16_size) {
+                    // word group
+                    random_group = ig_16[pool];
+                    index_0      = random_group->indexes[0];
+                    index_1      = random_group->indexes[1];
+                } else if (pool < ig_32_size + ig_16_size) {
+                    // dword group
+                    random_group = ig_32[pool - ig_16_size];
+                    random_tmp   = UR(3);
+                    index_0      = random_group->indexes[random_tmp];
+                    index_1      = random_group->indexes[random_tmp + 1];
+                } else {
+                    // qword group
+                    random_group = ig_64[pool - ig_32_size - ig_16_size];
+                    random_tmp   = UR(7);
+                    index_0      = random_group->indexes[random_tmp];
+                    index_1      = random_group->indexes[random_tmp + 1];
+                }
+
+                short interesting_16 =
+                    interesting16[UR(sizeof(interesting16) / sizeof(short))];
+                val_0 = interesting_16 & 0xff;
+                val_1 = (interesting_16 >> 8) & 0xff;
+                if (UR(2)) {
+                    tmp     = index_0;
+                    index_0 = index_1;
+                    index_1 = tmp;
+                }
+                tmp_input[index_0] = val_0;
+                tmp_input[index_1] = val_1;
+                break;
+            }
+            case 6: {
+                // random subtract word
+                unsigned pool = UR(ig_16_size + ig_32_size + ig_64_size);
+                if (pool < ig_16_size) {
+                    // word group
+                    random_group = ig_16[pool];
+                    index_0      = random_group->indexes[0];
+                    index_1      = random_group->indexes[1];
+                } else if (pool < ig_32_size + ig_16_size) {
+                    // dword group
+                    random_group = ig_32[pool - ig_16_size];
+                    random_tmp   = UR(3);
+                    index_0      = random_group->indexes[random_tmp];
+                    index_1      = random_group->indexes[random_tmp + 1];
+                } else {
+                    // qword group
+                    random_group = ig_64[pool - ig_32_size - ig_16_size];
+                    random_tmp   = UR(7);
+                    index_0      = random_group->indexes[random_tmp];
+                    index_1      = random_group->indexes[random_tmp + 1];
+                }
+
+                if (UR(2)) {
+                    tmp     = index_0;
+                    index_0 = index_1;
+                    index_1 = tmp;
+                }
+                short val = (tmp_input[index_1] << 8) | tmp_input[index_0];
+                val -= UR(35) + 1;
+                tmp_input[index_0] = val & 0xff;
+                tmp_input[index_1] = (val >> 8) & 0xff;
+                break;
+            }
+            case 7: {
+                // random add word
+                unsigned pool = UR(ig_16_size + ig_32_size + ig_64_size);
+                if (pool < ig_16_size) {
+                    // word group
+                    random_group = ig_16[pool];
+                    index_0      = random_group->indexes[0];
+                    index_1      = random_group->indexes[1];
+                } else if (pool < ig_32_size + ig_16_size) {
+                    // dword group
+                    random_group = ig_32[pool - ig_16_size];
+                    random_tmp   = UR(3);
+                    index_0      = random_group->indexes[random_tmp];
+                    index_1      = random_group->indexes[random_tmp + 1];
+                } else {
+                    // qword group
+                    random_group = ig_64[pool - ig_32_size - ig_16_size];
+                    random_tmp   = UR(7);
+                    index_0      = random_group->indexes[random_tmp];
+                    index_1      = random_group->indexes[random_tmp + 1];
+                }
+
+                if (UR(2)) {
+                    tmp     = index_0;
+                    index_0 = index_1;
+                    index_1 = tmp;
+                }
+                short val = (tmp_input[index_1] << 8) | tmp_input[index_0];
+                val += UR(35) + 1;
+                tmp_input[index_0] = val & 0xff;
+                tmp_input[index_1] = (val >> 8) & 0xff;
+                break;
+            }
+            case 8: {
+                // set interesting dword
+                unsigned pool = UR(ig_32_size + ig_64_size);
+                if (pool < ig_32_size) {
+                    // dword group
+                    random_group = ig_32[pool];
+                    index_0      = random_group->indexes[0];
+                    index_1      = random_group->indexes[1];
+                    index_2      = random_group->indexes[2];
+                    index_3      = random_group->indexes[3];
+                } else {
+                    // qword group
+                    random_group = ig_64[pool - ig_32_size];
+                    random_tmp   = UR(5);
+                    index_0      = random_group->indexes[random_tmp];
+                    index_1      = random_group->indexes[random_tmp + 1];
+                    index_2      = random_group->indexes[random_tmp + 2];
+                    index_3      = random_group->indexes[random_tmp + 3];
+                }
+
+                int interesting_32 =
+                    interesting32[UR(sizeof(interesting32) / sizeof(int))];
+                val_0 = interesting_32 & 0xff;
+                val_1 = (interesting_32 >> 8) & 0xff;
+                val_2 = (interesting_32 >> 16) & 0xff;
+                val_3 = (interesting_32 >> 24) & 0xff;
+                if (UR(2)) {
+                    tmp     = index_0;
+                    index_0 = index_3;
+                    index_3 = tmp;
+
+                    tmp     = index_2;
+                    index_2 = index_3;
+                    index_3 = tmp;
+                }
+                tmp_input[index_0] = val_0;
+                tmp_input[index_1] = val_1;
+                tmp_input[index_2] = val_2;
+                tmp_input[index_3] = val_3;
+                break;
+            }
+            case 9: {
+                // random subtract dword
+                unsigned pool = UR(ig_32_size + ig_64_size);
+                if (pool < ig_32_size) {
+                    // dword group
+                    random_group = ig_32[pool];
+                    index_0      = random_group->indexes[0];
+                    index_1      = random_group->indexes[1];
+                    index_2      = random_group->indexes[2];
+                    index_3      = random_group->indexes[3];
+                } else {
+                    // qword group
+                    random_group = ig_64[pool - ig_32_size];
+                    random_tmp   = UR(5);
+                    index_0      = random_group->indexes[random_tmp];
+                    index_1      = random_group->indexes[random_tmp + 1];
+                    index_2      = random_group->indexes[random_tmp + 2];
+                    index_3      = random_group->indexes[random_tmp + 3];
+                }
+                if (UR(2)) {
+                    tmp     = index_0;
+                    index_0 = index_3;
+                    index_3 = tmp;
+
+                    tmp     = index_2;
+                    index_2 = index_3;
+                    index_3 = tmp;
+                }
+
+                int val = (tmp_input[index_3] << 24) |
+                          (tmp_input[index_2] << 16) |
+                          (tmp_input[index_1] << 8) | tmp_input[index_0];
+                val -= UR(35) + 1;
+                tmp_input[index_0] = val & 0xff;
+                tmp_input[index_1] = (val >> 8) & 0xff;
+                tmp_input[index_2] = (val >> 16) & 0xff;
+                tmp_input[index_3] = (val >> 24) & 0xff;
+                break;
+            }
+            case 10: {
+                // random add dword
+                unsigned pool = UR(ig_32_size + ig_64_size);
+                if (pool < ig_32_size) {
+                    // dword group
+                    random_group = ig_32[pool];
+                    index_0      = random_group->indexes[0];
+                    index_1      = random_group->indexes[1];
+                    index_2      = random_group->indexes[2];
+                    index_3      = random_group->indexes[3];
+                } else {
+                    // qword group
+                    random_group = ig_64[pool - ig_32_size];
+                    random_tmp   = UR(5);
+                    index_0      = random_group->indexes[random_tmp];
+                    index_1      = random_group->indexes[random_tmp + 1];
+                    index_2      = random_group->indexes[random_tmp + 2];
+                    index_3      = random_group->indexes[random_tmp + 3];
+                }
+                if (UR(2)) {
+                    tmp     = index_0;
+                    index_0 = index_3;
+                    index_3 = tmp;
+
+                    tmp     = index_2;
+                    index_2 = index_3;
+                    index_3 = tmp;
+                }
+
+                int val = (tmp_input[index_3] << 24) |
+                          (tmp_input[index_2] << 16) |
+                          (tmp_input[index_1] << 8) | tmp_input[index_0];
+                val += UR(35) + 1;
+                tmp_input[index_0] = val & 0xff;
+                tmp_input[index_1] = (val >> 8) & 0xff;
+                tmp_input[index_2] = (val >> 16) & 0xff;
+                tmp_input[index_3] = (val >> 24) & 0xff;
+                break;
+            }
+            default: {
+                ASSERT_OR_ABORT(0, "havoc default case");
+            }
+        }
+        // do evaluate
+        int eval_v = __evaluate_branch_query(
+            ctx, query, branch_condition, tmp_input,
+            current_testcase->value_sizes, current_testcase->values_len);
+        if (eval_v == 1) {
+#ifdef PRINT_SAT
+            Z3FUZZ_LOG("[havoc L5] "
+                       "Query is SAT\n");
+#endif
+            ctx->stats.havoc++;
+            ctx->stats.num_sat++;
+            __vals_long_to_char(tmp_input, tmp_proof,
+                                current_testcase->testcase_len);
+            *proof      = tmp_proof;
+            *proof_size = current_testcase->testcase_len;
+            havoc_res   = 1;
+        } else if (unlikely(eval_v == TIMEOUT_V))
+            return TIMEOUT_V;
+    }
+
+    free(indexes);
+    free(ig_16);
+    free(ig_32);
+    free(ig_64);
+    return havoc_res;
+}
+
 static inline void set_tmp_input_group_to_value(index_group_t* group,
                                                 uint64_t       v)
 {
@@ -5434,6 +5856,7 @@ static int __query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
                Z3_ast_to_string(ctx->z3_ctx, branch_condition));
     print_index_queue(ast_data.inputs);
     print_interval_groups(ctx);
+    print_univocally_defined(ctx);
 #endif
     testcase_t* current_testcase = &ctx->testcases.data[0];
     int         res;
@@ -5443,6 +5866,7 @@ static int __query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
         ctx, query, branch_condition, tmp_input, current_testcase->value_sizes,
         current_testcase->values_len);
     if (eval_v == 1) {
+        Z3FUZZ_LOG("sat in seed... [opt_found = %d]\n", opt_found);
         ctx->stats.sat_in_seed++;
         __vals_long_to_char(tmp_input, tmp_proof,
                             current_testcase->testcase_len);
@@ -5563,8 +5987,13 @@ static int __query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
     if (res)
         return 1;
 
-    // Afl Havoc Transformation
+        // Afl Havoc Transformation
+#ifndef USE_HAVOC_ON_WHOLE_PI
     res = PHASE_afl_havoc(ctx, query, branch_condition, proof, proof_size);
+#else
+    res = PHASE_afl_havoc_whole_pi(ctx, query, branch_condition, proof,
+                                   proof_size);
+#endif
     if (unlikely(res == TIMEOUT_V))
         return TIMEOUT_V;
     if (res)
@@ -5594,6 +6023,9 @@ static inline void aggressive_optimistic(fuzzy_ctx_t* ctx,
 {
 #ifndef ENABLE_AGGRESSIVE_OPTIMISTIC
     return;
+#endif
+#ifdef DEBUG_CHECK_LIGHT
+    Z3FUZZ_LOG("Trying aggressive optimistic\n");
 #endif
     if ((ast_data.inputs->indexes_ud.size |
          ast_data.inputs->index_groups_ud.size) == 0 &&
@@ -5648,14 +6080,15 @@ static inline int query_check_light_and_multigoal(fuzzy_ctx_t* ctx,
         }
     }
 #endif
+    if (res == 1)
+        // the query is SAT
+        goto END_FUN_2;
     if (opt_found == 0) {
         // we were not able to flip the branch condition, aggressive optimistic
         // (ignore univocally defined and ranges)
         aggressive_optimistic(ctx, branch_condition);
         goto END_FUN_2;
-    } else if (res)
-        // the query is SAT
-        goto END_FUN_2;
+    }
 
     // check if there are expressions (marked as conflicting) that operate on
     // the same inputs of the branch condition
@@ -5682,6 +6115,10 @@ static inline int query_check_light_and_multigoal(fuzzy_ctx_t* ctx,
     if (local_conflicting_asts.size == 0)
         // no conflicting AST
         goto END_FUN_1;
+
+#ifdef DEBUG_CHECK_LIGHT
+    Z3FUZZ_LOG("Trying multigoal\n");
+#endif
 
     // set tmp_input to the input that made the branch condition true
     memcpy(tmp_input, tmp_opt_input,
@@ -5718,6 +6155,8 @@ static inline int query_check_light_and_multigoal(fuzzy_ctx_t* ctx,
         opt_found = 0;
         __reset_ast_data();
         __detect_early_constants(ctx, *ast, &ast_data);
+        __put_solutions_of_current_groups_to_early_constants(ctx, &ast_data,
+                                                             branch_ast_info);
 
         // get involved inputs from query
         ast_info_ptr ast_info;
@@ -5751,11 +6190,13 @@ static inline int query_check_light_and_multigoal(fuzzy_ctx_t* ctx,
                 Z3_app   __app = Z3_to_app(ctx->z3_ctx, query);
                 unsigned i;
                 for (i = 0; i < Z3_get_app_num_args(ctx->z3_ctx, __app); ++i) {
-                    if (!ctx->model_eval(ctx->z3_ctx, Z3_get_app_arg(ctx->z3_ctx, __app, i),
-                                        tmp_opt_input, curr_t->value_sizes,
-                                        curr_t->values_len, NULL)) {
+                    if (!ctx->model_eval(ctx->z3_ctx,
+                                         Z3_get_app_arg(ctx->z3_ctx, __app, i),
+                                         tmp_opt_input, curr_t->value_sizes,
+                                         curr_t->values_len, NULL)) {
                         puts("this is UNSAT");
-                        z3fuzz_print_expr(ctx, Z3_get_app_arg(ctx->z3_ctx, __app, i));
+                        z3fuzz_print_expr(
+                            ctx, Z3_get_app_arg(ctx->z3_ctx, __app, i));
                     }
                 }
 #endif
@@ -5764,6 +6205,7 @@ static inline int query_check_light_and_multigoal(fuzzy_ctx_t* ctx,
                 while (set_iter_next__ulong(&ast_info->indexes, 0, &p))
                     set_add__ulong(&black_indexes, *p);
                 ast_info_reset(new_ast_info);
+                branch_ast_info = ast_info;
             } else {
                 // we are not able to make this AST true, quit
                 ctx->stats.conflicting_fallbacks_no_true++;
@@ -5847,11 +6289,12 @@ static inline int handle_and_constraint(fuzzy_ctx_t* ctx, Z3_ast query,
                                         unsigned char const** proof,
                                         unsigned long*        proof_size)
 {
-    int      res_opt = 1;
-    int      res     = 1;
-    unsigned i;
+    int res_opt = 1;
+    int res     = 1;
+    int i;
 
-    Z3_ast query_no_branch = get_query_without_branch_condition(ctx, query);
+    Z3_ast query_no_branch =
+        query; // get_query_without_branch_condition(ctx, query);
     Z3_inc_ref(ctx->z3_ctx, query_no_branch);
 
     ast_info_ptr new_ast_info = (ast_info_ptr)malloc(sizeof(ast_info_t));
@@ -5892,6 +6335,41 @@ static inline int handle_and_constraint(fuzzy_ctx_t* ctx, Z3_ast query,
             set_add__ulong(&black_indexes, *p);
         ast_info_reset(new_ast_info);
     }
+    if (!opt_found) {
+        // try with another order...
+        res     = 1;
+        res_opt = 1;
+        ast_info_reset(new_ast_info);
+        set_remove_all__ulong(&black_indexes, NULL);
+        for (i = args.size - 1; i >= 0; --i) {
+            Z3_ast node = args.data[i];
+
+            // detect groups with blacklist
+            opt_found = 0;
+            __reset_ast_data();
+            __detect_early_constants(ctx, node, &ast_data);
+            ast_info_ptr ast_info;
+            detect_involved_inputs_wrapper(ctx, node, &ast_info);
+            ast_info_populate_with_blacklist(new_ast_info, ast_info,
+                                             &black_indexes);
+            ast_data.inputs = new_ast_info;
+            if (ast_data.inputs == 0)
+                break;
+
+            res &= query_check_light_and_multigoal(
+                ctx, res_opt ? query_no_branch : node, node, proof, proof_size);
+            res_opt &= opt_found;
+            if (res == 0 && res_opt == 0)
+                break;
+
+            // update blacklist
+            ulong* p;
+            set_reset_iter__ulong(&ast_data.inputs->indexes, 0);
+            while (set_iter_next__ulong(&ast_data.inputs->indexes, 0, &p))
+                set_add__ulong(&black_indexes, *p);
+            ast_info_reset(new_ast_info);
+        }
+    }
 
     ast_info_ptr_free(&new_ast_info);
     set_free__ulong(&black_indexes, NULL);
@@ -5911,6 +6389,10 @@ int z3fuzz_query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
 {
     Z3_inc_ref(ctx->z3_ctx, query);
     Z3_inc_ref(ctx->z3_ctx, branch_condition);
+
+#ifdef DEBUG_CHECK_LIGHT
+    Z3FUZZ_LOG("Called z3fuzz_query_check_light\n");
+#endif
 
     int res;
     *proof_size = 0;

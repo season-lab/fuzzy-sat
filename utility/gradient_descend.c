@@ -24,6 +24,8 @@
 #define DEBUG_DESCEND 0
 #define DEBUG_MINIMIZE 0
 #define DEBUG_DESC_TRANSF 0
+#define ALLOW_RANDOM_RESTART 0
+#define RESTART_SCORE 4
 
 #define max(x, y) (x) > (y) ? (x) : (y)
 #define min(x, y) (x) < (y) ? (x) : (y)
@@ -230,6 +232,7 @@ static int descend(uint64_t (*function)(uint64_t*, int*), gradient_el_t* grad,
 #if DEBUG_DESCEND
     fprintf(stderr, ">>> DESCEND\n");
 #endif
+    int       should_exit;
     int       res    = EXIT_OK;
     int64_t   f_prev = f0;
     int64_t   f_next = f0;
@@ -237,7 +240,44 @@ static int descend(uint64_t (*function)(uint64_t*, int*), gradient_el_t* grad,
     uint64_t* x_next = out_x;
     memcpy(x_next, x0, sizeof(uint64_t) * n);
 
-    int      should_exit;
+#if ALLOW_RANDOM_RESTART
+    int64_t   f0_tmp = f_prev;
+    uint64_t* x0_tmp = (uint64_t*)malloc(sizeof(uint64_t) * n);
+    memcpy(x0_tmp, x_next, sizeof(uint64_t) * n);
+    int k = 0;
+    while (k++ < n * RESTART_SCORE) {
+        fprintf(stderr, "trying restart...\n");
+        switch (UR(4)) {
+            case 0:
+                x0_tmp[UR(n)] ^= UR(256) + 1;
+                break;
+            case 1:
+                x0_tmp[UR(n)] ^= (UR(256) + 1) << 8;
+                break;
+            case 2:
+                x0_tmp[UR(n)] ^= (UR(256) + 1) << 16;
+                break;
+            case 3:
+                x0_tmp[UR(n)] ^= (UR(256) + 1) << 24;
+                break;
+        }
+        int64_t f_val = function(x0_tmp, &should_exit);
+        if (unlikely(should_exit)) {
+            res = EXIT_ERROR;
+            goto OUT;
+        }
+        if (f_val < f0_tmp) {
+            f0_tmp = f_val;
+            f_prev = f_next = f0_tmp;
+            memcpy(x_next, x0_tmp, sizeof(uint64_t) * n);
+            fprintf(stderr, "random restart effective!\n");
+        } else {
+            memcpy(x0_tmp, x_next, sizeof(uint64_t) * n);
+        }
+    }
+    free(x0_tmp);
+#endif
+
     uint64_t step = 1;
     while (1) {
         memcpy(x_prev, x_next, sizeof(uint64_t) * n);

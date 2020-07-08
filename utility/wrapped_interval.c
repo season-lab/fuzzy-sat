@@ -304,10 +304,10 @@ const char* op_to_string(optype op)
 void wi_print(wrapped_interval_t* interval)
 {
     if (!is_wrapping(interval))
-        printf("[ %lu, %lu ] (%u)\n", interval->min, interval->max,
-               interval->size);
+        fprintf(stderr, "[ %lu, %lu ] (%u)\n", interval->min, interval->max,
+                interval->size);
     else
-        printf("[ %lu, %lu ] U [ %lu, %lu ] (%u)\n", interval->min,
-               get_size_mask(interval->size), 0UL, interval->max,
-               interval->size);
+        fprintf(stderr, "[ %lu, %lu ] U [ %lu, %lu ] (%u)\n", interval->min,
+                get_size_mask(interval->size), 0UL, interval->max,
+                interval->size);
 }
