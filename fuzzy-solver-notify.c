@@ -75,7 +75,8 @@ static inline void print_status(unsigned long current_query,
               fctx.stats.input_to_state_ext);
     pp_printf(7, 1, "brute_force:           %ld", fctx.stats.brute_force);
     pp_printf(8, 1, "range_brute_force:     %ld", fctx.stats.range_brute_force);
-    pp_printf(9, 1, "range_brute_force_opt: %ld", fctx.stats.range_brute_force_opt);
+    pp_printf(9, 1, "range_brute_force_opt: %ld",
+              fctx.stats.range_brute_force_opt);
     pp_printf(10, 1, "gradient_descend:      %ld", fctx.stats.gradient_descend);
     pp_printf(11, 1, "flip1:                 %ld", fctx.stats.flip1);
     pp_printf(12, 1, "flip2:                 %ld", fctx.stats.flip2);
@@ -129,8 +130,7 @@ static inline void print_report()
     printf("reuse:                 %ld\n", fctx.stats.reuse);
     printf("input_to_state:        %ld\n", fctx.stats.input_to_state);
     printf("simple_math:           %ld\n", fctx.stats.simple_math);
-    printf("input_to_state_ext:    %ld\n",
-              fctx.stats.input_to_state_ext);
+    printf("input_to_state_ext:    %ld\n", fctx.stats.input_to_state_ext);
     printf("brute_force:           %ld\n", fctx.stats.brute_force);
     printf("range_brute_force:     %ld\n", fctx.stats.range_brute_force);
     printf("range_brute_force_opt: %ld\n", fctx.stats.range_brute_force_opt);

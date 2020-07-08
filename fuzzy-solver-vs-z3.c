@@ -4,7 +4,7 @@
 #include "utility/pretty-print.h"
 #include "z3-fuzzy.h"
 
-#define NREP 10
+#define NREP 1
 #define Z3_SOLVER_TIMEOUT "10000"
 #define FUZZY_SOLVER_TIMEOUT 1000
 
@@ -155,7 +155,7 @@ int main(int argc, char* argv[])
         pp_printf(6, 1, "running z3...");
 
         for (k = 0; k < NREP; ++k) {
-            is_sat_z3 = 0;
+            is_sat_z3     = 0;
             is_unknown_z3 = 0;
 
             Z3_lbool  query_result;
@@ -187,7 +187,8 @@ int main(int argc, char* argv[])
         fprintf(log_file, "\n");
 
         pp_printf(1, 1, "cumulative z3     %.03lf msec", cumulative_z3 / NREP);
-        pp_printf(2, 1, "cumulative fuzzy  %.03lf msec", cumulative_fuzzy / NREP);
+        pp_printf(2, 1, "cumulative fuzzy  %.03lf msec",
+                  cumulative_fuzzy / NREP);
         pp_printf(3, 1, "sat fuzzy         %ld", fuzzy_sat / NREP);
         pp_printf(4, 1, "sat z3            %ld", z3_sat / NREP);
     }

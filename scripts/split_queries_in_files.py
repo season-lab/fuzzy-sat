@@ -48,11 +48,11 @@ if not os.path.exists(directory):
 
 i = 0
 for query in queries:
-    query = deduplicate_query(query)
+    # query = deduplicate_query(query)
     filename = "query_%03d_@_0x%x.smt2" % (i, addresses[i] if has_address else 0)
     fout = open(directory + "/" + filename, "w")
     for inp in find_inputs(query):
         fout.write("(declare-const %s (_ BitVec 8))\n" % inp)
-    fout.write("(assert \n" + query.sexpr() + "\n)\n")
+    fout.write("(assert \n" + query.sexpr() + "\n)\n(check-sat)")
     fout.close()
     i += 1
