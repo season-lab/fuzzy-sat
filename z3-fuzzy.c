@@ -37,7 +37,7 @@
 
 // #define PRINT_SAT
 // #define DEBUG_RANGE
-#define DEBUG_CHECK_LIGHT
+// #define DEBUG_CHECK_LIGHT
 // #define DEBUG_DETECT_GROUP
 
 // #define SKIP_IS_VALID_EVAL
@@ -432,7 +432,6 @@ static int __check_overlapping_groups()
     set_reset_iter__index_group_t(&ast_data.inputs->index_groups, 0);
     while (
         set_iter_next__index_group_t(&ast_data.inputs->index_groups, 0, &g)) {
-        print_index_group(g);
         int i;
         for (i = 0; i < g->n; ++i) {
             if (set_check__ulong(&s, g->indexes[i])) {
@@ -3052,8 +3051,6 @@ PHASE_gradient_descend(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
         __gradient_transf_init(ctx->z3_ctx, branch_condition, &out_ast);
     if (!valid_for_gd)
         return 0;
-    Z3FUZZ_LOG("after transformation:\n");
-    z3fuzz_print_expr(ctx, out_ast);
 
     int               res = 0;
     eval_wapper_ctx_t ew;
@@ -6293,8 +6290,7 @@ static inline int handle_and_constraint(fuzzy_ctx_t* ctx, Z3_ast query,
     int res     = 1;
     int i;
 
-    Z3_ast query_no_branch =
-        query; // get_query_without_branch_condition(ctx, query);
+    Z3_ast query_no_branch = get_query_without_branch_condition(ctx, query);
     Z3_inc_ref(ctx->z3_ctx, query_no_branch);
 
     ast_info_ptr new_ast_info = (ast_info_ptr)malloc(sizeof(ast_info_t));
