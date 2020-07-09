@@ -1214,7 +1214,7 @@ static int __detect_input_group(fuzzy_ctx_t* ctx, Z3_ast node,
                         goto BVAND_EXIT;
                     }
                     if (mask == 0) {
-                        res = 1; // and with 0 -> no group, it is always 0
+                        res = 0; // and with 0 -> no group, it is always 0
                         goto BVAND_EXIT;
                     }
 
@@ -1306,21 +1306,8 @@ static int __detect_input_group(fuzzy_ctx_t* ctx, Z3_ast node,
                                 Z3_inc_ref(ctx->z3_ctx, child_2);
 
                                 Z3_ast subexpr = NULL;
-                                if (Z3_get_ast_kind(ctx->z3_ctx, child_1) ==
+                                if (Z3_get_ast_kind(ctx->z3_ctx, child_2) ==
                                     Z3_NUMERAL_AST) {
-                                    Z3_bool successGet = Z3_get_numeral_uint64(
-                                        ctx->z3_ctx, child_1,
-                                        (uint64_t*)&shift_val);
-                                    if (!successGet)
-                                        res = 0; // constant is too big
-                                    else {
-                                        subexpr = child_2;
-                                        res     = 1;
-                                    }
-
-                                } else if (Z3_get_ast_kind(ctx->z3_ctx,
-                                                           child_2) ==
-                                           Z3_NUMERAL_AST) {
                                     Z3_bool successGet = Z3_get_numeral_uint64(
                                         ctx->z3_ctx, child_2,
                                         (uint64_t*)&shift_val);
@@ -1343,16 +1330,28 @@ static int __detect_input_group(fuzzy_ctx_t* ctx, Z3_ast node,
                                 printf("> shift val: 0x%016lx\n", shift_val);
 #endif
 
-                                if (((0xff << shift_val) & shift_mask) != 0) {
+                                unsigned char prev_n = ig->n;
+                                res = __detect_input_group(ctx, subexpr, ig,
+                                                           approx);
+                                if (ig->n == prev_n) {
                                     res = 0;
                                     Z3_dec_ref(ctx->z3_ctx, child_1);
                                     Z3_dec_ref(ctx->z3_ctx, child_2);
                                     break;
                                 }
-                                shift_mask |= 0xff << shift_val;
+                                // TODO: fix this. `Concat(k!0, 0x00) << 8` <-
+                                // mispredicted
+                                unsigned long curr_mask =
+                                    (2UL << ((ig->n - prev_n) * 8 - 1)) - 1;
+                                if (((curr_mask << shift_val) & shift_mask) !=
+                                    0) {
+                                    res = 0;
+                                    Z3_dec_ref(ctx->z3_ctx, child_1);
+                                    Z3_dec_ref(ctx->z3_ctx, child_2);
+                                    break;
+                                }
+                                shift_mask |= curr_mask << shift_val;
 
-                                res = __detect_input_group(ctx, subexpr, ig,
-                                                           approx);
                                 Z3_dec_ref(ctx->z3_ctx, child_1);
                                 Z3_dec_ref(ctx->z3_ctx, child_2);
 
@@ -1417,14 +1416,9 @@ static int __detect_input_group(fuzzy_ctx_t* ctx, Z3_ast node,
                             already_in = 1;
                     }
 
-                    if (!already_in) {
-                        if (ig->n >= MAX_GROUP_SIZE) {
-                            res = 0;
-                            break;
-                        }
-
+                    if (!already_in)
                         ig->indexes[ig->n++] = symbol_index;
-                    }
+
                     res = 1;
                     break;
                 }
@@ -6287,11 +6281,11 @@ static inline int handle_and_constraint(fuzzy_ctx_t* ctx, Z3_ast query,
     int res     = 1;
     int i;
 
-#ifdef SYMCC_SOURCE
-    Z3_ast query_no_branch = query;
-#else
-    Z3_ast query_no_branch = get_query_without_branch_condition(ctx, query);
+#ifdef DEBUG_CHECK_LIGHT
+    Z3FUZZ_LOG("In handle_and_constraint\n");
 #endif
+
+    Z3_ast query_no_branch = query;
     Z3_inc_ref(ctx->z3_ctx, query_no_branch);
 
     ast_info_ptr new_ast_info = (ast_info_ptr)malloc(sizeof(ast_info_t));
