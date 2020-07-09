@@ -1944,15 +1944,12 @@ static inline unsigned long get_group_value_in_tmp_input(index_group_t* group)
     return res;
 }
 
-static void
-__put_solutions_of_current_groups_to_early_constants(fuzzy_ctx_t* ctx,
-                                                     ast_data_t*  data,
-                                                     ast_info_ptr curr_groups)
+static void __put_solutions_of_current_groups_to_early_constants(
+    fuzzy_ctx_t* ctx, ast_data_t* data, ast_info_ptr curr_groups)
 {
     index_group_t* ig;
     set_reset_iter__index_group_t(&curr_groups->index_groups, 0);
-    while (
-        set_iter_next__index_group_t(&curr_groups->index_groups, 0, &ig)) {
+    while (set_iter_next__index_group_t(&curr_groups->index_groups, 0, &ig)) {
         unsigned long val = get_group_value_in_tmp_input(ig);
         da_add_item__ulong(&data->values, val);
     }
@@ -6290,7 +6287,11 @@ static inline int handle_and_constraint(fuzzy_ctx_t* ctx, Z3_ast query,
     int res     = 1;
     int i;
 
+#ifdef SYMCC_SOURCE
+    Z3_ast query_no_branch = query;
+#else
     Z3_ast query_no_branch = get_query_without_branch_condition(ctx, query);
+#endif
     Z3_inc_ref(ctx->z3_ctx, query_no_branch);
 
     ast_info_ptr new_ast_info = (ast_info_ptr)malloc(sizeof(ast_info_t));
