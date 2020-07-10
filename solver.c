@@ -55,7 +55,7 @@ static inline void dump_proof(Z3_context ctx, Z3_model m,
 
         int     solution_byte = 0;
         Z3_bool successGet = Z3_get_numeral_int(ctx, solution, &solution_byte);
-        assert (successGet == Z3_TRUE);
+        assert(successGet == Z3_TRUE);
         fwrite(&solution_byte, sizeof(char), 1, fp);
     }
     fclose(fp);

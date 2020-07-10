@@ -1876,6 +1876,7 @@ static void __detect_early_constants(fuzzy_ctx_t* ctx, Z3_ast v,
                     break;
                 }
                 case Z3_OP_BSUB:
+                case Z3_OP_BADD:
                 case Z3_OP_BAND: {
                     // look for constant
                     child1 = Z3_get_app_arg(ctx->z3_ctx, app, 0);
