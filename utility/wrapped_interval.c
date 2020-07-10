@@ -211,6 +211,15 @@ int wi_update_cmp(wrapped_interval_t* src, uint64_t c, optype op)
             res      = wi_intersect(src, &cint);
             break;
         }
+        case OP_EQ: {
+            if (!wi_contains_element(src, c)) {
+                res = 0;
+                break;
+            }
+            src->min = c;
+            src->max = c;
+            break;
+        }
 
         default:
             ASSERT_OR_ABORT(0, "INTERVAL_H interval_update_cmp() - invalid op");

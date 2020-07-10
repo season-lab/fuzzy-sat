@@ -1939,6 +1939,32 @@ static inline unsigned long get_group_value_in_tmp_input(index_group_t* group)
     return res;
 }
 
+static inline unsigned char __extract_from_long(long value, unsigned int i)
+{
+    return (value >> i * 8) & 0xff;
+}
+
+static inline void set_tmp_input_group_to_value(index_group_t* group,
+                                                uint64_t       v)
+{
+    unsigned char k;
+    for (k = 0; k < group->n; ++k) {
+        unsigned long index = group->indexes[group->n - k - 1];
+        unsigned char b     = __extract_from_long(v, k);
+        tmp_input[index]    = b;
+    }
+}
+
+static inline void restore_tmp_input_group(index_group_t* group,
+                                           unsigned long* vals)
+{
+    unsigned char k;
+    for (k = 0; k < group->n; ++k) {
+        unsigned long index = group->indexes[group->n - k - 1];
+        tmp_input[index]    = vals[index];
+    }
+}
+
 static void __put_solutions_of_current_groups_to_early_constants(
     fuzzy_ctx_t* ctx, ast_data_t* data, ast_info_ptr curr_groups)
 {
@@ -2112,6 +2138,8 @@ static inline optype __find_optype(Z3_decl_kind dk, int is_const_at_right,
                 return OP_UGT;
             else
                 return OP_ULT;
+        case Z3_OP_EQ:
+            return OP_EQ;
         default:
             break;
     }
@@ -2297,7 +2325,11 @@ static inline int __check_if_range(fuzzy_ctx_t* ctx, Z3_ast expr,
     if (decl_kind != Z3_OP_SLEQ && decl_kind != Z3_OP_ULEQ &&
         decl_kind != Z3_OP_SLT && decl_kind != Z3_OP_ULT &&
         decl_kind != Z3_OP_SGEQ && decl_kind != Z3_OP_UGEQ &&
-        decl_kind != Z3_OP_SGT && decl_kind != Z3_OP_UGT)
+        decl_kind != Z3_OP_SGT && decl_kind != Z3_OP_UGT &&
+        decl_kind != Z3_OP_EQ)
+        goto END_FUN_1;
+    if (is_not && decl_kind == Z3_OP_EQ)
+        // could be extended...
         goto END_FUN_1;
     if (is_not)
         decl_kind = get_opposite_decl_kind(decl_kind);
@@ -2480,7 +2512,16 @@ static inline int get_range(fuzzy_ctx_t* ctx, Z3_ast expr, index_group_t* ig,
                           &sub_constant, &add_sub_const_size, &const_size))
         goto OUT;
 
-    *wi = wi_init(const_size);
+    set__interval_group_ptr* group_intervals =
+        (set__interval_group_ptr*)ctx->group_intervals;
+
+    const wrapped_interval_t* cached_wi =
+        interval_group_get_interval(group_intervals, ig);
+    if (cached_wi == NULL)
+        *wi = wi_init(const_size);
+    else
+        *wi = *cached_wi;
+
     wi_update_cmp(wi, constant, op);
     if (add_constant > 0) {
         wi_modify_size(wi, add_sub_const_size);
@@ -2699,11 +2740,6 @@ static inline void __init_global_data(fuzzy_ctx_t* ctx, Z3_ast query,
            current_testcase->values_len * sizeof(unsigned long));
 }
 
-static inline unsigned char __extract_from_long(long value, unsigned int i)
-{
-    return (value >> i * 8) & 0xff;
-}
-
 static __always_inline int PHASE_reuse(fuzzy_ctx_t* ctx, Z3_ast query,
                                        Z3_ast                branch_condition,
                                        unsigned char const** proof,
@@ -2825,6 +2861,34 @@ static __always_inline int PHASE_simple_math(fuzzy_ctx_t* ctx, Z3_ast query,
     testcase_t*   current_testcase = &ctx->testcases.data[0];
     unsigned long c;
     int           i, j, k;
+
+    if (wi_get_range(&wi) > RANGE_MAX_WIDTH_BRUTE_FORCE)
+        goto TRY_MIN_MAX; // range too wide
+
+    wrapped_interval_iter_t it = wi_init_iter_values(&wi);
+    uint64_t                val;
+    while (wi_iter_get_next(&it, &val)) {
+        set_tmp_input_group_to_value(&ig, val);
+        int eval_v = __evaluate_branch_query(
+            ctx, query, branch_condition, tmp_input,
+            current_testcase->value_sizes, current_testcase->values_len);
+        if (eval_v == 1) {
+#ifdef PRINT_SAT
+            Z3FUZZ_LOG("[check light - simple math] Query is SAT\n");
+#endif
+            ctx->stats.simple_math++;
+            ctx->stats.num_sat++;
+            __vals_long_to_char(tmp_input, tmp_proof,
+                                current_testcase->testcase_len);
+            *proof      = tmp_proof;
+            *proof_size = current_testcase->testcase_len;
+            return 1;
+        } else if (unlikely(eval_v == TIMEOUT_V))
+            return TIMEOUT_V;
+    }
+    return 2;
+
+TRY_MIN_MAX:
     for (j = 0; j < 2; ++j) {
         if (j == 0)
             c = wi.min;
@@ -5692,27 +5756,6 @@ static __always_inline int PHASE_afl_havoc_whole_pi(fuzzy_ctx_t* ctx,
     return havoc_res;
 }
 
-static inline void set_tmp_input_group_to_value(index_group_t* group,
-                                                uint64_t       v)
-{
-    unsigned char k;
-    for (k = 0; k < group->n; ++k) {
-        unsigned long index = group->indexes[group->n - k - 1];
-        unsigned char b     = __extract_from_long(v, k);
-        tmp_input[index]    = b;
-    }
-}
-
-static inline void restore_tmp_input_group(index_group_t* group,
-                                           unsigned long* vals)
-{
-    unsigned char k;
-    for (k = 0; k < group->n; ++k) {
-        unsigned long index = group->indexes[group->n - k - 1];
-        tmp_input[index]    = vals[index];
-    }
-}
-
 static __always_inline int
 PHASE_range_bruteforce(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
                        unsigned char const** proof, unsigned long* proof_size)
@@ -5736,7 +5779,7 @@ PHASE_range_bruteforce(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
     set_iter_next__index_group_t(&ast_data.inputs->index_groups, 0, &ig);
     ASSERT_OR_ABORT(
         ig->n > 0,
-        "PHASE_range_bruteforce() - group size < 0. It shouldn't happen");
+        "PHASE_range_bruteforce() - group size <= 0. It shouldn't happen");
 
     wrapped_interval_t* interval =
         interval_group_get_interval(group_intervals, ig);
@@ -5913,8 +5956,10 @@ static int __query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
     res = PHASE_simple_math(ctx, query, branch_condition, proof, proof_size);
     if (unlikely(res == TIMEOUT_V))
         return TIMEOUT_V;
-    if (res)
+    if (res == 1)
         return 1;
+    if (res == 2)
+        return 0;
 
     // Range bruteforce
     res =

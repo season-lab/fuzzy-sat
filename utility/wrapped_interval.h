@@ -11,6 +11,7 @@
 #define OP_SGT 5
 #define OP_UGE 6
 #define OP_SGE 7
+#define OP_EQ  8
 
 typedef int optype;
 

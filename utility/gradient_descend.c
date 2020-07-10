@@ -246,7 +246,7 @@ static int descend(uint64_t (*function)(uint64_t*, int*), gradient_el_t* grad,
     memcpy(x0_tmp, x_next, sizeof(uint64_t) * n);
     int k = 0;
     while (k++ < n * RESTART_SCORE) {
-        fprintf(stderr, "trying restart...\n");
+        // fprintf(stderr, "trying restart...\n");
         switch (UR(4)) {
             case 0:
                 x0_tmp[UR(n)] ^= UR(256) + 1;
@@ -270,7 +270,7 @@ static int descend(uint64_t (*function)(uint64_t*, int*), gradient_el_t* grad,
             f0_tmp = f_val;
             f_prev = f_next = f0_tmp;
             memcpy(x_next, x0_tmp, sizeof(uint64_t) * n);
-            fprintf(stderr, "random restart effective!\n");
+            // fprintf(stderr, "random restart effective!\n");
         } else {
             memcpy(x0_tmp, x_next, sizeof(uint64_t) * n);
         }
