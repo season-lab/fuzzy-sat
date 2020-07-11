@@ -2050,10 +2050,12 @@ static inline int __check_conflicting_constraint(fuzzy_ctx_t* ctx, Z3_ast expr)
 
     ast_info_ptr inputs;
     detect_involved_inputs_wrapper(ctx, expr, &inputs);
+#if 0
     if (inputs->index_groups.size > 5) {
         res = 0;
         goto OUT;
     }
+#endif
 
     // Take note of groups
     dict__conflicting_ptr* conflicting_asts =
@@ -2465,6 +2467,8 @@ static inline int __check_range_constraint(fuzzy_ctx_t* ctx, Z3_ast expr)
                           &sub_constant, &add_sub_const_size, &const_size)) {
         goto OUT;
     }
+    if (const_size > 64)
+        goto OUT;
 
     set__interval_group_ptr* group_intervals =
         (set__interval_group_ptr*)ctx->group_intervals;
@@ -5898,7 +5902,9 @@ static int __query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
         ctx, query, branch_condition, tmp_input, current_testcase->value_sizes,
         current_testcase->values_len);
     if (eval_v == 1) {
+#ifdef DEBUG_CHECK_LIGHT
         Z3FUZZ_LOG("sat in seed... [opt_found = %d]\n", opt_found);
+#endif
         ctx->stats.sat_in_seed++;
         __vals_long_to_char(tmp_input, tmp_proof,
                             current_testcase->testcase_len);
@@ -7063,6 +7069,10 @@ void z3fuzz_notify_constraint(fuzzy_ctx_t* ctx, Z3_ast constraint)
     // this is a visit of the AST of the constraint... Too slow? I don't know
     if (unlikely(skip_notify))
         return;
+
+#ifdef DEBUG_CHECK_LIGHT
+    Z3FUZZ_LOG("Called z3fuzz_notify_constraint\n");
+#endif
 
     if (unlikely(notify_count++ & 16)) {
         notify_count = 0;

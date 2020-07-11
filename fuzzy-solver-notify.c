@@ -273,6 +273,7 @@ int main(int argc, char* argv[])
     free(str_symbols);
     z3fuzz_free(&fctx);
     Z3_del_config(cfg);
+    Z3_del_context(ctx);
 #ifdef DUMP_SAT_QUERIES
     fclose(sat_queries_file);
 #endif
