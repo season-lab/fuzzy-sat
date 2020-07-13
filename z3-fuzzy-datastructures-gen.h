@@ -97,7 +97,8 @@ typedef struct ast_ptr {
     Z3_context ctx;
     Z3_ast     ast;
 } ast_ptr;
-#define SET_DATA_T ast_ptr
+#define SET_N_BUCKETS 256
+#define SET_DATA_T    ast_ptr
 #include <set.h>
 
 typedef set__ast_ptr* conflicting_ptr;

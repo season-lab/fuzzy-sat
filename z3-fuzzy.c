@@ -246,7 +246,7 @@ static inline int timer_check_wrapper(fuzzy_ctx_t* ctx)
     if (ctx->timer == NULL)
         return 0;
     static int i = 0;
-    if (unlikely(++i & 64)) {
+    if (unlikely(++i & 16)) {
         i = 0;
         return check_timer(ctx->timer);
     }
@@ -676,7 +676,6 @@ PRE_SWITCH:
 
     Z3_dec_ref(ctx, arg1);
     Z3_dec_ref(ctx, arg2);
-    Z3_inc_ref(ctx, res);
     *out_exp = res;
     return 1;
 }
@@ -2050,8 +2049,8 @@ static inline int __check_conflicting_constraint(fuzzy_ctx_t* ctx, Z3_ast expr)
 
     ast_info_ptr inputs;
     detect_involved_inputs_wrapper(ctx, expr, &inputs);
-#if 0
-    if (inputs->index_groups.size > 5) {
+#if 1
+    if (inputs->query_size > 1020) {
         res = 0;
         goto OUT;
     }
@@ -5356,8 +5355,10 @@ static __always_inline int PHASE_afl_havoc(fuzzy_ctx_t* ctx, Z3_ast query,
             *proof      = tmp_proof;
             *proof_size = current_testcase->testcase_len;
             havoc_res   = 1;
-        } else if (unlikely(eval_v == TIMEOUT_V))
-            return TIMEOUT_V;
+        } else if (unlikely(eval_v == TIMEOUT_V)) {
+            havoc_res = TIMEOUT_V;
+            break;
+        }
     }
 
     free(indexes);

@@ -65,6 +65,10 @@ static inline void divide_query_in_assertions(Z3_ast query, Z3_ast** assertions,
 static inline void print_status(unsigned long current_query,
                                 unsigned long num_queries)
 {
+
+    memory_impact_stats_t m_stats;
+    z3fuzz_get_mem_stats(&fctx, &m_stats);
+
     pp_printf(0, 1, "query %ld/%ld", current_query, num_queries);
     pp_printf(1, 1, "num_evaluate:          %ld", fctx.stats.num_evaluate);
     pp_printf(2, 1, "num_sat:               %ld", fctx.stats.num_sat);
@@ -118,8 +122,10 @@ static inline void print_status(unsigned long current_query,
     pp_printf(44, 1, "confl_fall_notrue:     %ld",
               fctx.stats.conflicting_fallbacks_no_true);
     pp_printf(45, 1, "num_timeouts:          %ld", fctx.stats.num_timeouts);
+    pp_printf(46, 1, "conflicting size:      %ld", m_stats.conflicting_ast_size);
+    pp_printf(47, 1, "ast info cache size:   %ld", m_stats.ast_info_cache_size);
     pp_set_col(0);
-    pp_set_line(47);
+    pp_set_line(49);
 }
 
 static inline void print_report()
