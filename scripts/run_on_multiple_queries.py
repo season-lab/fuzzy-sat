@@ -8,7 +8,7 @@ import os
 SCRIPT_PATH = os.path.dirname(os.path.realpath(__file__))
 
 def usage():
-    print("%s <queries-dir> <seed> <logfile>" % sys.argv[0])
+    print("%s <queries-dir> <seed> <logfile> {fuzzy/jsf}" % sys.argv[0])
     exit(1)
 
 def iterate_files(path):
@@ -102,12 +102,17 @@ def exp_fuzzy(queries_dir, seed, logfile):
 
     f.close()
 
-if len(sys.argv) < 4:
+if len(sys.argv) < 5:
     usage()
 
 queries_dir = sys.argv[1]
 seed        = sys.argv[2]
 logfile     = sys.argv[3]
+program     = sys.argv[4]
 
-# exp_jfs(queries_dir, logfile)
-exp_fuzzy(queries_dir, seed, logfile)
+assert program in ["jfs", "fuzzy"]
+
+if program == "jfs":
+    exp_jfs(queries_dir, logfile)
+else:
+    exp_fuzzy(queries_dir, seed, logfile)

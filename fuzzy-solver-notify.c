@@ -122,7 +122,8 @@ static inline void print_status(unsigned long current_query,
     pp_printf(44, 1, "confl_fall_notrue:     %ld",
               fctx.stats.conflicting_fallbacks_no_true);
     pp_printf(45, 1, "num_timeouts:          %ld", fctx.stats.num_timeouts);
-    pp_printf(46, 1, "conflicting size:      %ld", m_stats.conflicting_ast_size);
+    pp_printf(46, 1, "conflicting size:      %ld",
+              m_stats.conflicting_ast_size);
     pp_printf(47, 1, "ast info cache size:   %ld", m_stats.ast_info_cache_size);
     pp_set_col(0);
     pp_set_line(49);
@@ -195,9 +196,10 @@ int main(int argc, char* argv[])
     char                 var_name[128];
     Z3_sort              bsort = Z3_mk_bv_sort(ctx, 8);
     struct timeval       stop, start;
-    unsigned long        elapsed_time = 0, elapsed_time_fast_sat = 0;
-    unsigned int         i;
-    int                  n;
+    unsigned long        elapsed_time = 0, elapsed_time_fast_sat = 0,
+                  elapsed_time_parsing = 0;
+    unsigned int i;
+    int          n;
 
     z3fuzz_init(&fctx, ctx, seed_filename, tests_dir, NULL, TIMEOUT);
 #ifdef DUMP_SAT_QUERIES
@@ -218,9 +220,12 @@ int main(int argc, char* argv[])
         str_symbols[i] = s_bv;
     }
 
+    gettimeofday(&start, NULL);
     Z3_ast_vector queries =
         Z3_parse_smtlib2_file(ctx, query_filename, 0, 0, 0, 0, 0, 0);
     Z3_ast_vector_inc_ref(ctx, queries);
+    gettimeofday(&stop, NULL);
+    elapsed_time_parsing += compute_time_msec(&start, &stop);
 
     num_queries = Z3_ast_vector_size(ctx, queries);
     for (i = 0; i < num_queries; ++i) {
@@ -271,9 +276,11 @@ int main(int argc, char* argv[])
            "num queries:      %lu\n"
            "fast sat queries: %lu\n"
            "elaps time:       %.3lf s\n"
-           "elaps time sat:   %.3lf s\n",
+           "elaps time sat:   %.3lf s\n"
+           "elaps time + par: %.3lf msec\n",
            num_queries, sat_queries, (double)elapsed_time / 1000,
-           (double)elapsed_time_fast_sat / 1000);
+           (double)elapsed_time_fast_sat / 1000,
+           (double)(elapsed_time + elapsed_time_parsing));
 
     Z3_ast_vector_dec_ref(ctx, queries);
     free(str_symbols);
