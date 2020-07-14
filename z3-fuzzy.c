@@ -38,7 +38,7 @@
 
 // #define PRINT_SAT
 // #define DEBUG_RANGE
-// #define DEBUG_CHECK_LIGHT
+#define DEBUG_CHECK_LIGHT
 // #define DEBUG_DETECT_GROUP
 
 // #define SKIP_IS_VALID_EVAL
@@ -6630,16 +6630,16 @@ static inline int query_check_light_and_multigoal(fuzzy_ctx_t* ctx,
             } else {
                 // we are not able to make this AST true, quit
                 ctx->stats.conflicting_fallbacks_no_true++;
-
-                // if we are here, we populated 'opt_proof' at least one time,
-                // we do not want to prevent the user to ask for the optimistic
-                // solution
-                opt_found = 1;
                 break;
             }
         } else
             ctx->stats.conflicting_fallbacks_same_inputs++;
     }
+
+    // if we are here, we populated 'opt_proof' at least one time,
+    // we do not want to prevent the user to ask for the optimistic
+    // solution
+    opt_found = 1;
 
     set_free__ulong(&black_indexes, NULL);
     ast_info_ptr_free(&new_ast_info);
