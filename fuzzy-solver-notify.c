@@ -1,3 +1,5 @@
+#define FUZZY_SOURCE
+
 #include <stdlib.h>
 #include <assert.h>
 #include <sys/time.h>
@@ -6,6 +8,7 @@
 
 #define BOLD(s) "\033[1m\033[37m" s "\033[0m"
 
+#define CHECK_CONSISTENCY
 #define PRINT_STATUS
 // #define DUMP_PROOFS
 // #define DUMP_SAT_QUERIES
@@ -64,81 +67,96 @@ static inline void divide_query_in_assertions(Z3_ast query, Z3_ast** assertions,
     }
 }
 
-__attribute__((unused)) static inline void
-print_status(unsigned long current_query, unsigned long num_queries)
+static Z3_func_decl* fdecl_cache         = NULL;
+static size_t        fdecl_cache_size    = 0;
+static Z3_ast        byte_val_cache[256] = {0};
+
+__attribute__((unused)) static uint64_t Z3_eval(Z3_context ctx, Z3_ast query,
+                                                uint64_t* data,
+                                                uint8_t*  symbols_sizes,
+                                                size_t    size)
 {
+    uint64_t res;
+    Z3_model z3_m = Z3_mk_model(ctx);
+    Z3_model_inc_ref(ctx, z3_m);
+    Z3_ast* z3_vals = (Z3_ast*)calloc(sizeof(Z3_ast), size);
 
-    memory_impact_stats_t m_stats;
-    z3fuzz_get_mem_stats(&fctx, &m_stats);
+    if (fdecl_cache == NULL) {
+        fdecl_cache      = (Z3_func_decl*)calloc(sizeof(Z3_func_decl), size);
+        fdecl_cache_size = size;
+    } else if (fdecl_cache_size < size) {
+        fdecl_cache =
+            (Z3_func_decl*)realloc(fdecl_cache, size * sizeof(Z3_func_decl));
+        size_t i;
+        for (i = fdecl_cache_size; i < size; ++i)
+            fdecl_cache[i] = 0;
+        fdecl_cache_size = size;
+    }
 
-    pp_printf(0, 1, "query %ld/%ld", current_query, num_queries);
-    pp_printf(1, 1, "num_evaluate:          %ld", fctx.stats.num_evaluate);
-    pp_printf(2, 1, "num_sat:               %ld", fctx.stats.num_sat);
-    pp_printf(3, 1, "reuse:                 %ld", fctx.stats.reuse);
-    pp_printf(4, 1, "input_to_state:        %ld", fctx.stats.input_to_state);
-    pp_printf(5, 1, "simple_math:           %ld", fctx.stats.simple_math);
-    pp_printf(6, 1, "input_to_state_ext:    %ld",
-              fctx.stats.input_to_state_ext);
-    pp_printf(7, 1, "brute_force:           %ld", fctx.stats.brute_force);
-    pp_printf(8, 1, "range_brute_force:     %ld", fctx.stats.range_brute_force);
-    pp_printf(9, 1, "range_brute_force_opt: %ld",
-              fctx.stats.range_brute_force_opt);
-    pp_printf(10, 1, "gradient_descend:      %ld", fctx.stats.gradient_descend);
-    pp_printf(11, 1, "flip1:                 %ld", fctx.stats.flip1);
-    pp_printf(12, 1, "flip2:                 %ld", fctx.stats.flip2);
-    pp_printf(13, 1, "flip4:                 %ld", fctx.stats.flip4);
-    pp_printf(14, 1, "flip8:                 %ld", fctx.stats.flip8);
-    pp_printf(15, 1, "flip16:                %ld", fctx.stats.flip16);
-    pp_printf(16, 1, "flip32:                %ld", fctx.stats.flip32);
-    pp_printf(17, 1, "flip64:                %ld", fctx.stats.flip64);
-    pp_printf(18, 1, "arith8_sum:            %ld", fctx.stats.arith8_sum);
-    pp_printf(19, 1, "arith8_sub:            %ld", fctx.stats.arith8_sub);
-    pp_printf(20, 1, "arith16_sum_LE:        %ld", fctx.stats.arith16_sum_LE);
-    pp_printf(21, 1, "arith16_sum_BE:        %ld", fctx.stats.arith16_sum_BE);
-    pp_printf(22, 1, "arith16_sub_LE:        %ld", fctx.stats.arith16_sub_LE);
-    pp_printf(23, 1, "arith16_sub_BE:        %ld", fctx.stats.arith16_sub_BE);
-    pp_printf(24, 1, "arith32_sum_LE:        %ld", fctx.stats.arith32_sum_LE);
-    pp_printf(25, 1, "arith32_sum_BE:        %ld", fctx.stats.arith32_sum_BE);
-    pp_printf(26, 1, "arith32_sub_LE:        %ld", fctx.stats.arith32_sub_LE);
-    pp_printf(27, 1, "arith32_sub_BE:        %ld", fctx.stats.arith32_sub_BE);
-    pp_printf(28, 1, "arith64_sum_LE:        %ld", fctx.stats.arith64_sum_LE);
-    pp_printf(29, 1, "arith64_sum_BE:        %ld", fctx.stats.arith64_sum_BE);
-    pp_printf(30, 1, "arith64_sub_LE:        %ld", fctx.stats.arith64_sub_LE);
-    pp_printf(31, 1, "arith64_sub_BE:        %ld", fctx.stats.arith64_sub_BE);
-    pp_printf(32, 1, "int8:                  %ld", fctx.stats.int8);
-    pp_printf(33, 1, "int16:                 %ld", fctx.stats.int16);
-    pp_printf(34, 1, "int32:                 %ld", fctx.stats.int32);
-    pp_printf(35, 1, "int64:                 %ld", fctx.stats.int64);
-    pp_printf(36, 1, "havoc:                 %ld", fctx.stats.havoc);
-    pp_printf(37, 1, "multigoal:             %ld", fctx.stats.multigoal);
-    pp_printf(38, 1, "sat_in_seed:           %ld", fctx.stats.sat_in_seed);
-    pp_printf(39, 1, "ast_info_cache_hits:   %ld",
-              fctx.stats.ast_info_cache_hits);
-    pp_printf(40, 1, "num_univ_defined:      %ld",
-              fctx.stats.num_univocally_defined);
-    pp_printf(41, 1, "num_conflicting:       %ld", fctx.stats.num_conflicting);
-    pp_printf(42, 1, "confl_fallbacks:       %ld",
-              fctx.stats.conflicting_fallbacks);
-    pp_printf(43, 1, "confl_fall_noinp:      %ld",
-              fctx.stats.conflicting_fallbacks_same_inputs);
-    pp_printf(44, 1, "confl_fall_notrue:     %ld",
-              fctx.stats.conflicting_fallbacks_no_true);
-    pp_printf(45, 1, "num_timeouts:          %ld", fctx.stats.num_timeouts);
-    pp_printf(46, 1, "conflicting size:      %ld",
-              m_stats.conflicting_ast_size);
-    pp_printf(47, 1, "ast info cache size:   %ld", m_stats.ast_info_cache_size);
-    pp_set_col(0);
-    pp_set_line(49);
+    unsigned i;
+    for (i = 0; i < size; ++i) {
+        Z3_ast e;
+        if (symbols_sizes[i] == 8 && byte_val_cache[data[i]] != NULL)
+            e = byte_val_cache[data[i] & 0xff];
+        else {
+            Z3_sort sort = Z3_mk_bv_sort(ctx, symbols_sizes[i]);
+            e            = Z3_mk_unsigned_int64(ctx, data[i], sort);
+            Z3_inc_ref(ctx, e);
+            if (symbols_sizes[i] == 8)
+                byte_val_cache[data[i] & 0xff] = e;
+            else
+                z3_vals[i] = e;
+        }
+
+        Z3_func_decl decl;
+        if (fdecl_cache[i] != NULL)
+            decl = fdecl_cache[i];
+        else {
+            Z3_sort   sort = Z3_mk_bv_sort(ctx, symbols_sizes[i]);
+            Z3_symbol s    = Z3_mk_int_symbol(ctx, i);
+            decl           = Z3_mk_func_decl(ctx, s, 0, NULL, sort);
+            fdecl_cache[i] = decl;
+        }
+
+        Z3_add_const_interp(ctx, z3_m, decl, e);
+    }
+
+    // evaluate the query in the model
+    Z3_ast  solution;
+    Z3_bool successfulEval =
+        Z3_model_eval(ctx, z3_m, query, Z3_TRUE, &solution);
+    if (!successfulEval) {
+        puts("Failed to evaluate model");
+        exit(1);
+    }
+
+    Z3_model_dec_ref(ctx, z3_m);
+    if (Z3_get_ast_kind(ctx, solution) == Z3_NUMERAL_AST) {
+        Z3_bool successGet = Z3_get_numeral_uint64(ctx, solution, &res);
+        if (successGet != Z3_TRUE) {
+            puts("Z3_get_numeral_uint64() failed to get constant");
+            exit(1);
+        }
+    } else {
+        res = Z3_get_bool_value(ctx, solution) == Z3_L_TRUE ? 1UL : 0UL;
+    }
+
+    for (i = 0; i < size; ++i)
+        if (z3_vals[i] != NULL)
+            Z3_dec_ref(ctx, z3_vals[i]);
+    free(z3_vals);
+
+    return res;
 }
 
-static inline void print_status_new(unsigned long current_query,
-                                    unsigned long num_queries)
+static inline void print_status(unsigned long current_query,
+                                unsigned long num_queries)
 {
 
     memory_impact_stats_t m_stats;
     z3fuzz_get_mem_stats(&fctx, &m_stats);
 
-    pp_printf(0, 5, BOLD("query") " %ld/%ld", current_query, num_queries);
+    pp_printf(0, 4, BOLD("query") " %ld/%ld", current_query, num_queries);
     pp_print_string(
         1, 2,
         "o-------------------------------------------------------------o");
@@ -343,6 +361,16 @@ int main(int argc, char* argv[])
             fprintf(sat_queries_file, "(assert\n%s\n)\n",
                     Z3_ast_to_string(ctx, query));
 #endif
+#ifdef CHECK_CONSISTENCY
+            testcase_t* curr_t    = &fctx.testcases.data[0];
+            uint64_t*   tmp_proof = malloc(sizeof(uint64_t) * proof_size);
+            for (j = 0; j < proof_size; ++j)
+                tmp_proof[j] = proof[j];
+            assert(Z3_eval(ctx, query, tmp_proof, curr_t->value_sizes,
+                           proof_size) &&
+                   "Invalid solution!");
+            free(tmp_proof);
+#endif
         } else
             gettimeofday(&stop, NULL);
 
@@ -350,12 +378,12 @@ int main(int argc, char* argv[])
         free(assertions);
 
 #ifdef PRINT_STATUS
-        print_status_new(i, num_queries);
+        print_status(i, num_queries);
 #endif
     }
 
 #ifdef PRINT_STATUS
-    print_status_new(i, num_queries);
+    print_status(i, num_queries);
 #else
     print_report();
 #endif
@@ -371,6 +399,7 @@ int main(int argc, char* argv[])
 
     Z3_ast_vector_dec_ref(ctx, queries);
     free(str_symbols);
+    free(fdecl_cache);
     z3fuzz_free(&fctx);
     Z3_del_config(cfg);
     Z3_del_context(ctx);

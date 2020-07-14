@@ -126,9 +126,9 @@ int main(int argc, char* argv[])
     unsigned int i, k;
     int          n;
 
-    FILE* log_file = fopen(log_filename, "w");
+    log_file = fopen(log_filename, "w");
     setvbuf(log_file, NULL, _IONBF, 0);
-    FILE* flip_info_file = fopen(flip_info_filename, "w");
+    flip_info_file = fopen(flip_info_filename, "w");
     setvbuf(flip_info_file, NULL, _IONBF, 0);
 
     z3fuzz_init(&fctx, ctx, seed_filename, tests_dir, NULL,
