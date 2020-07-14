@@ -4,6 +4,8 @@
 #include "utility/pretty-print.h"
 #include "z3-fuzzy.h"
 
+#define BOLD(s) "\033[1m\033[37m" s "\033[0m"
+
 #define PRINT_STATUS
 // #define DUMP_PROOFS
 // #define DUMP_SAT_QUERIES
@@ -62,8 +64,8 @@ static inline void divide_query_in_assertions(Z3_ast query, Z3_ast** assertions,
     }
 }
 
-static inline void print_status(unsigned long current_query,
-                                unsigned long num_queries)
+__attribute__((unused)) static inline void
+print_status(unsigned long current_query, unsigned long num_queries)
 {
 
     memory_impact_stats_t m_stats;
@@ -127,6 +129,89 @@ static inline void print_status(unsigned long current_query,
     pp_printf(47, 1, "ast info cache size:   %ld", m_stats.ast_info_cache_size);
     pp_set_col(0);
     pp_set_line(49);
+}
+
+static inline void print_status_new(unsigned long current_query,
+                                    unsigned long num_queries)
+{
+
+    memory_impact_stats_t m_stats;
+    z3fuzz_get_mem_stats(&fctx, &m_stats);
+
+    pp_printf(0, 5, BOLD("query") " %ld/%ld", current_query, num_queries);
+    pp_print_string(
+        1, 2,
+        "o-------------------------------------------------------------o");
+    pp_printf(2, 2, "| " BOLD("num eval:") "   %ld", fctx.stats.num_evaluate);
+    pp_print_string(3, 2, "| ");
+    pp_printf(4, 2, "| " BOLD("its:") "        %ld", fctx.stats.input_to_state);
+    pp_printf(5, 2, "| " BOLD("sm:") "         %ld", fctx.stats.simple_math);
+    pp_printf(6, 2, "| " BOLD("rbf:") "        %ld",
+              fctx.stats.range_brute_force);
+    pp_printf(7, 2, "| " BOLD("gd:") "         %ld",
+              fctx.stats.gradient_descend);
+    pp_printf(8, 2, "| " BOLD("bit flips:") "  %ld, %ld, %ld", fctx.stats.flip1,
+              fctx.stats.flip2, fctx.stats.flip4);
+    pp_printf(9, 2, "| " BOLD("arithms:") "    %ld",
+              fctx.stats.arith8_sum + fctx.stats.arith8_sub +
+                  fctx.stats.arith16_sum_LE + fctx.stats.arith16_sum_BE +
+                  fctx.stats.arith16_sub_LE + fctx.stats.arith16_sub_BE +
+                  fctx.stats.arith32_sum_LE + fctx.stats.arith32_sum_BE +
+                  fctx.stats.arith32_sub_LE + fctx.stats.arith32_sub_BE +
+                  fctx.stats.arith64_sum_LE + fctx.stats.arith64_sum_BE +
+                  fctx.stats.arith64_sub_LE + fctx.stats.arith64_sub_BE);
+    pp_printf(10, 2, "| " BOLD("multigoal:") "  %ld", fctx.stats.multigoal);
+    pp_print_string(11, 2, "| ");
+    pp_printf(12, 2, "| " BOLD("# confl:") "          %ld",
+              fctx.stats.num_conflicting);
+    pp_printf(13, 2, "| " BOLD("confl cache size:") " %ld",
+              m_stats.conflicting_ast_size);
+    pp_printf(14, 2, "| " BOLD("num timeouts:") "     %ld",
+              fctx.stats.num_timeouts);
+
+    pp_printf(2, 30, BOLD("sat:") "        %ld (%ld)", fctx.stats.num_sat,
+              fctx.stats.sat_in_seed);
+    pp_print_string(2, 64, "|");
+    pp_print_string(3, 64, "|");
+    pp_printf(4, 30, BOLD("its ext:") "    %ld", fctx.stats.input_to_state_ext);
+    pp_print_string(4, 64, "|");
+    pp_printf(5, 30, BOLD("bf:") "         %ld", fctx.stats.brute_force);
+    pp_print_string(5, 64, "|");
+    pp_printf(6, 30, BOLD("rbf opt:") "    %ld",
+              fctx.stats.range_brute_force_opt);
+    pp_print_string(6, 64, "|");
+    pp_printf(7, 30, BOLD("havoc:") "      %ld", fctx.stats.havoc);
+    pp_print_string(7, 64, "|");
+    pp_printf(8, 30, BOLD("byte flips:") " %ld, %ld, %ld, %ld",
+              fctx.stats.flip8, fctx.stats.flip16, fctx.stats.flip32,
+              fctx.stats.flip64);
+    pp_print_string(8, 64, "|");
+    pp_printf(9, 30, BOLD("ints:") "       %ld",
+              fctx.stats.int8 + fctx.stats.int16 + fctx.stats.int32 +
+                  fctx.stats.int64);
+    pp_print_string(9, 64, "|");
+    pp_printf(10, 30, BOLD("fallbacks:") "  %ld (%ld)si (%ld)nt",
+              fctx.stats.conflicting_fallbacks,
+              fctx.stats.conflicting_fallbacks_same_inputs,
+              fctx.stats.conflicting_fallbacks_no_true);
+    pp_print_string(10, 64, "|");
+    pp_print_string(11, 64, "|");
+    pp_printf(12, 30, BOLD("# univ def:") "          %ld",
+              fctx.stats.num_univocally_defined);
+    pp_print_string(12, 64, "|");
+    pp_printf(13, 30, BOLD("ast info cache size:") " %ld",
+              m_stats.ast_info_cache_size);
+    pp_print_string(13, 64, "|");
+    pp_printf(14, 30, BOLD("ast info cache hits:") " %ld",
+              fctx.stats.ast_info_cache_hits);
+    pp_print_string(14, 64, "|");
+
+    pp_print_string(
+        15, 2,
+        "o-------------------------------------------------------------o");
+
+    pp_set_col(0);
+    pp_set_line(18);
 }
 
 static inline void print_report()
@@ -265,11 +350,13 @@ int main(int argc, char* argv[])
         free(assertions);
 
 #ifdef PRINT_STATUS
-        print_status(i, num_queries);
+        print_status_new(i, num_queries);
 #endif
     }
 
-#ifndef PRINT_STATUS
+#ifdef PRINT_STATUS
+    print_status_new(i, num_queries);
+#else
     print_report();
 #endif
     printf("\n"
@@ -277,10 +364,10 @@ int main(int argc, char* argv[])
            "fast sat queries: %lu\n"
            "elaps time:       %.3lf s\n"
            "elaps time sat:   %.3lf s\n"
-           "elaps time + par: %.3lf msec\n",
+           "elaps time + par: %.3lf s\n",
            num_queries, sat_queries, (double)elapsed_time / 1000,
            (double)elapsed_time_fast_sat / 1000,
-           (double)(elapsed_time + elapsed_time_parsing));
+           (double)(elapsed_time + elapsed_time_parsing) / 1000);
 
     Z3_ast_vector_dec_ref(ctx, queries);
     free(str_symbols);

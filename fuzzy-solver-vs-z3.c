@@ -11,6 +11,8 @@
 fuzzy_ctx_t fctx;
 const char* log_filename = "fuzzy_z3.csv";
 FILE*       log_file;
+const char* flip_info_filename = "fuzzy_flip_info.csv";
+FILE*       flip_info_file;
 
 static inline double compute_time_msec(struct timeval* start,
                                        struct timeval* end)
@@ -62,6 +64,40 @@ static inline void divide_query_in_assertions(Z3_ast query, Z3_ast** assertions,
     }
 }
 
+static inline void dump_flip_info()
+{
+    fprintf(flip_info_file,
+            "%ld," // input to state
+            "%ld," // extended input to state
+            "%ld," // interval analysis (brute force + range brute force + range
+                   // brute force opt + simple math)
+            "%ld," // gradient descent
+            "%ld," // flips
+            "%ld," // arithms
+            "%ld," // interesting
+            "%ld," // havoc
+            "%ld," // multigoal
+            "%ld," // sat in seed
+            ,
+            fctx.stats.input_to_state, fctx.stats.input_to_state_ext,
+            fctx.stats.brute_force + fctx.stats.range_brute_force +
+                fctx.stats.range_brute_force_opt + fctx.stats.simple_math,
+            fctx.stats.gradient_descend,
+            fctx.stats.flip1 + fctx.stats.flip2 + fctx.stats.flip4 +
+                fctx.stats.flip8 + fctx.stats.flip16 + fctx.stats.flip32 +
+                fctx.stats.flip64,
+            fctx.stats.arith8_sum + fctx.stats.arith8_sub +
+                fctx.stats.arith16_sum_LE + fctx.stats.arith16_sum_BE +
+                fctx.stats.arith16_sub_LE + fctx.stats.arith16_sub_BE +
+                fctx.stats.arith32_sum_LE + fctx.stats.arith32_sum_BE +
+                fctx.stats.arith32_sub_LE + fctx.stats.arith32_sub_BE +
+                fctx.stats.arith64_sum_LE + fctx.stats.arith64_sum_BE +
+                fctx.stats.arith64_sub_LE + fctx.stats.arith64_sub_BE,
+            fctx.stats.int8 + fctx.stats.int16 + fctx.stats.int32 +
+                fctx.stats.int64,
+            fctx.stats.havoc, fctx.stats.multigoal, fctx.stats.sat_in_seed);
+}
+
 static inline void usage(char* filename)
 {
     fprintf(stderr, "wrong argv. usage:\n%s query_filename seed [test_dir]\n",
@@ -90,12 +126,15 @@ int main(int argc, char* argv[])
     unsigned int i, k;
     int          n;
 
-    pp_init();
     FILE* log_file = fopen(log_filename, "w");
     setvbuf(log_file, NULL, _IONBF, 0);
+    FILE* flip_info_file = fopen(flip_info_filename, "w");
+    setvbuf(flip_info_file, NULL, _IONBF, 0);
 
     z3fuzz_init(&fctx, ctx, seed_filename, tests_dir, NULL,
                 FUZZY_SOLVER_TIMEOUT);
+
+    pp_init();
 
     Z3_ast* str_symbols = (Z3_ast*)malloc(sizeof(Z3_ast) * fctx.n_symbols);
     for (i = 0; i < fctx.n_symbols; ++i) {
@@ -193,6 +232,8 @@ int main(int argc, char* argv[])
         pp_printf(4, 1, "sat z3            %ld", z3_sat / NREP);
     }
 
+    dump_flip_info();
+
     pp_printf(6, 1, "speedup   %.02lf x", cumulative_z3 / cumulative_fuzzy);
     pp_printf(7, 1, "detected  %ld / %ld", fuzzy_sat / NREP, z3_sat / NREP);
     puts("");
@@ -200,6 +241,8 @@ int main(int argc, char* argv[])
     free(str_symbols);
     z3fuzz_free(&fctx);
     Z3_del_config(cfg);
+    Z3_del_context(ctx);
     fclose(log_file);
+    fclose(flip_info_file);
     return 0;
 }

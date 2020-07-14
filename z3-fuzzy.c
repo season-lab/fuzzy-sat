@@ -31,7 +31,8 @@
 #define rightmost_set_bit(x) ((x) != 0 ? __builtin_ctzl(x) : -1)
 #define leftmost_set_bit(x) ((x) != 0 ? (63 - __builtin_clzl(x)) : -1)
 
-#define HAVOC_C 10
+#define HAVOC_STACK_POW2 7
+#define HAVOC_C 20
 #define RANGE_MAX_WIDTH_BRUTE_FORCE 2048
 #define Z3_UNIQUE Z3_get_ast_hash // Z3_get_ast_id
 
@@ -44,6 +45,7 @@
 // #define USE_MD5_HASH
 
 // #define USE_HAVOC_ON_WHOLE_PI
+// #define USE_HAVOC_MOD
 #define USE_AFL_DET_GROUPS
 #define ENABLE_AGGRESSIVE_OPTIMISTIC
 
@@ -4995,10 +4997,10 @@ PHASE_afl_deterministic(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
     return 0;
 }
 
-static __always_inline int PHASE_afl_havoc(fuzzy_ctx_t* ctx, Z3_ast query,
-                                           Z3_ast branch_condition,
-                                           unsigned char const** proof,
-                                           unsigned long*        proof_size)
+static __always_inline int PHASE_afl_havoc_mod(fuzzy_ctx_t* ctx, Z3_ast query,
+                                               Z3_ast branch_condition,
+                                               unsigned char const** proof,
+                                               unsigned long*        proof_size)
 {
 
     if (skip_afl_havoc)
@@ -5355,6 +5357,381 @@ static __always_inline int PHASE_afl_havoc(fuzzy_ctx_t* ctx, Z3_ast query,
             *proof      = tmp_proof;
             *proof_size = current_testcase->testcase_len;
             havoc_res   = 1;
+        } else if (unlikely(eval_v == TIMEOUT_V)) {
+            havoc_res = TIMEOUT_V;
+            break;
+        }
+    }
+
+    free(indexes);
+    free(ig_16);
+    free(ig_32);
+    free(ig_64);
+    return havoc_res;
+}
+
+static __always_inline int PHASE_afl_havoc(fuzzy_ctx_t* ctx, Z3_ast query,
+                                           Z3_ast branch_condition,
+                                           unsigned char const** proof,
+                                           unsigned long*        proof_size)
+{
+
+    if (skip_afl_havoc)
+        return 0;
+
+#ifdef DEBUG_CHECK_LIGHT
+    Z3FUZZ_LOG("Trying AFL Havoc\n");
+#endif
+
+    int             havoc_res;
+    index_group_t*  random_group;
+    unsigned long   random_index;
+    unsigned long   index_0;
+    unsigned long   index_1;
+    unsigned long   index_2;
+    unsigned long   index_3;
+    unsigned char   val_0;
+    unsigned char   val_1;
+    unsigned char   val_2;
+    unsigned char   val_3;
+    unsigned        tmp;
+    unsigned        random_tmp;
+    unsigned        mutation_pool;
+    unsigned        score;
+    unsigned long*  indexes;
+    unsigned long   indexes_size;
+    index_group_t** ig_16;
+    unsigned long   ig_16_size;
+    index_group_t** ig_32;
+    unsigned long   ig_32_size;
+    index_group_t** ig_64;
+    unsigned long   ig_64_size;
+    testcase_t*     current_testcase = &ctx->testcases.data[0];
+    index_group_t*  group;
+
+    unsigned i, j;
+    ulong*   p;
+
+    // initialize list input
+    indexes      = (unsigned long*)malloc(ast_data.inputs->indexes.size *
+                                     sizeof(unsigned long));
+    indexes_size = ast_data.inputs->indexes.size;
+    // initialize groups input
+    ig_16      = (index_group_t**)malloc(ast_data.inputs->index_groups.size *
+                                    sizeof(index_group_t*));
+    ig_16_size = 0;
+    ig_32      = (index_group_t**)malloc(ast_data.inputs->index_groups.size *
+                                    sizeof(index_group_t*));
+    ig_32_size = 0;
+    ig_64      = (index_group_t**)malloc(ast_data.inputs->index_groups.size *
+                                    sizeof(index_group_t*));
+    ig_64_size = 0;
+
+    i = 0;
+    set_reset_iter__ulong(&ast_data.inputs->indexes, 1);
+    while (set_iter_next__ulong(&ast_data.inputs->indexes, 1, &p)) {
+        indexes[i++] = *p;
+    }
+    set_reset_iter__index_group_t(&ast_data.inputs->index_groups, 1);
+    while (set_iter_next__index_group_t(&ast_data.inputs->index_groups, 1,
+                                        &group)) {
+        switch (group->n) {
+            case 1:
+                break;
+            case 2:
+                ig_16[ig_16_size++] = group;
+                break;
+            case 4:
+                ig_32[ig_32_size++] = group;
+                break;
+            case 8:
+                ig_64[ig_64_size++] = group;
+                break;
+        }
+    }
+
+    havoc_res     = 0;
+    mutation_pool = 5 + (ig_64_size + ig_32_size + ig_16_size > 0 ? 3 : 0) +
+                    (ig_64_size + ig_32_size > 0 ? 3 : 0);
+    score = ast_data.inputs->indexes.size * HAVOC_C;
+    for (i = 0; i < score; ++i) {
+        unsigned K = 1 << (1 + UR(HAVOC_STACK_POW2));
+        for (j = 0; j < K; ++j) {
+            switch (UR(mutation_pool)) {
+                case 0: {
+                    // flip bit
+                    random_index = indexes[UR(indexes_size)];
+                    tmp_input[random_index] =
+                        (unsigned long)FLIP_BIT(tmp_input[random_index], UR(8));
+                    break;
+                }
+                case 1: {
+                    // set interesting byte
+                    random_index            = indexes[UR(indexes_size)];
+                    tmp_input[random_index] = (unsigned long)
+                        interesting8[UR(sizeof(interesting8) / sizeof(char))];
+                    break;
+                }
+                case 2: {
+                    // random subtract byte
+                    random_index = indexes[UR(indexes_size)];
+                    tmp_input[random_index] -= (unsigned char)(UR(35) + 1);
+                    break;
+                }
+                case 3: {
+                    // random add byte
+                    random_index = indexes[UR(indexes_size)];
+                    tmp_input[random_index] += (unsigned char)(UR(35) + 1);
+                    break;
+                }
+                case 4: {
+                    // random, byte set
+                    random_index = indexes[UR(indexes_size)];
+                    tmp_input[random_index] ^= (unsigned char)(UR(255) + 1);
+                    break;
+                }
+                case 5: {
+                    // set interesting word
+                    unsigned pool = UR(ig_16_size + ig_32_size + ig_64_size);
+                    if (pool < ig_16_size) {
+                        // word group
+                        random_group = ig_16[pool];
+                        index_0      = random_group->indexes[0];
+                        index_1      = random_group->indexes[1];
+                    } else if (pool < ig_32_size + ig_16_size) {
+                        // dword group
+                        random_group = ig_32[pool - ig_16_size];
+                        random_tmp   = UR(3);
+                        index_0      = random_group->indexes[random_tmp];
+                        index_1      = random_group->indexes[random_tmp + 1];
+                    } else {
+                        // qword group
+                        random_group = ig_64[pool - ig_32_size - ig_16_size];
+                        random_tmp   = UR(7);
+                        index_0      = random_group->indexes[random_tmp];
+                        index_1      = random_group->indexes[random_tmp + 1];
+                    }
+
+                    short interesting_16 = interesting16[UR(
+                        sizeof(interesting16) / sizeof(short))];
+                    val_0                = interesting_16 & 0xff;
+                    val_1                = (interesting_16 >> 8) & 0xff;
+                    if (UR(2)) {
+                        tmp     = index_0;
+                        index_0 = index_1;
+                        index_1 = tmp;
+                    }
+                    tmp_input[index_0] = val_0;
+                    tmp_input[index_1] = val_1;
+                    break;
+                }
+                case 6: {
+                    // random subtract word
+                    unsigned pool = UR(ig_16_size + ig_32_size + ig_64_size);
+                    if (pool < ig_16_size) {
+                        // word group
+                        random_group = ig_16[pool];
+                        index_0      = random_group->indexes[0];
+                        index_1      = random_group->indexes[1];
+                    } else if (pool < ig_32_size + ig_16_size) {
+                        // dword group
+                        random_group = ig_32[pool - ig_16_size];
+                        random_tmp   = UR(3);
+                        index_0      = random_group->indexes[random_tmp];
+                        index_1      = random_group->indexes[random_tmp + 1];
+                    } else {
+                        // qword group
+                        random_group = ig_64[pool - ig_32_size - ig_16_size];
+                        random_tmp   = UR(7);
+                        index_0      = random_group->indexes[random_tmp];
+                        index_1      = random_group->indexes[random_tmp + 1];
+                    }
+
+                    if (UR(2)) {
+                        tmp     = index_0;
+                        index_0 = index_1;
+                        index_1 = tmp;
+                    }
+                    short val = (tmp_input[index_1] << 8) | tmp_input[index_0];
+                    val -= UR(35) + 1;
+                    tmp_input[index_0] = val & 0xff;
+                    tmp_input[index_1] = (val >> 8) & 0xff;
+                    break;
+                }
+                case 7: {
+                    // random add word
+                    unsigned pool = UR(ig_16_size + ig_32_size + ig_64_size);
+                    if (pool < ig_16_size) {
+                        // word group
+                        random_group = ig_16[pool];
+                        index_0      = random_group->indexes[0];
+                        index_1      = random_group->indexes[1];
+                    } else if (pool < ig_32_size + ig_16_size) {
+                        // dword group
+                        random_group = ig_32[pool - ig_16_size];
+                        random_tmp   = UR(3);
+                        index_0      = random_group->indexes[random_tmp];
+                        index_1      = random_group->indexes[random_tmp + 1];
+                    } else {
+                        // qword group
+                        random_group = ig_64[pool - ig_32_size - ig_16_size];
+                        random_tmp   = UR(7);
+                        index_0      = random_group->indexes[random_tmp];
+                        index_1      = random_group->indexes[random_tmp + 1];
+                    }
+
+                    if (UR(2)) {
+                        tmp     = index_0;
+                        index_0 = index_1;
+                        index_1 = tmp;
+                    }
+                    short val = (tmp_input[index_1] << 8) | tmp_input[index_0];
+                    val += UR(35) + 1;
+                    tmp_input[index_0] = val & 0xff;
+                    tmp_input[index_1] = (val >> 8) & 0xff;
+                    break;
+                }
+                case 8: {
+                    // set interesting dword
+                    unsigned pool = UR(ig_32_size + ig_64_size);
+                    if (pool < ig_32_size) {
+                        // dword group
+                        random_group = ig_32[pool];
+                        index_0      = random_group->indexes[0];
+                        index_1      = random_group->indexes[1];
+                        index_2      = random_group->indexes[2];
+                        index_3      = random_group->indexes[3];
+                    } else {
+                        // qword group
+                        random_group = ig_64[pool - ig_32_size];
+                        random_tmp   = UR(5);
+                        index_0      = random_group->indexes[random_tmp];
+                        index_1      = random_group->indexes[random_tmp + 1];
+                        index_2      = random_group->indexes[random_tmp + 2];
+                        index_3      = random_group->indexes[random_tmp + 3];
+                    }
+
+                    int interesting_32 =
+                        interesting32[UR(sizeof(interesting32) / sizeof(int))];
+                    val_0 = interesting_32 & 0xff;
+                    val_1 = (interesting_32 >> 8) & 0xff;
+                    val_2 = (interesting_32 >> 16) & 0xff;
+                    val_3 = (interesting_32 >> 24) & 0xff;
+                    if (UR(2)) {
+                        tmp     = index_0;
+                        index_0 = index_3;
+                        index_3 = tmp;
+
+                        tmp     = index_2;
+                        index_2 = index_3;
+                        index_3 = tmp;
+                    }
+                    tmp_input[index_0] = val_0;
+                    tmp_input[index_1] = val_1;
+                    tmp_input[index_2] = val_2;
+                    tmp_input[index_3] = val_3;
+                    break;
+                }
+                case 9: {
+                    // random subtract dword
+                    unsigned pool = UR(ig_32_size + ig_64_size);
+                    if (pool < ig_32_size) {
+                        // dword group
+                        random_group = ig_32[pool];
+                        index_0      = random_group->indexes[0];
+                        index_1      = random_group->indexes[1];
+                        index_2      = random_group->indexes[2];
+                        index_3      = random_group->indexes[3];
+                    } else {
+                        // qword group
+                        random_group = ig_64[pool - ig_32_size];
+                        random_tmp   = UR(5);
+                        index_0      = random_group->indexes[random_tmp];
+                        index_1      = random_group->indexes[random_tmp + 1];
+                        index_2      = random_group->indexes[random_tmp + 2];
+                        index_3      = random_group->indexes[random_tmp + 3];
+                    }
+                    if (UR(2)) {
+                        tmp     = index_0;
+                        index_0 = index_3;
+                        index_3 = tmp;
+
+                        tmp     = index_2;
+                        index_2 = index_3;
+                        index_3 = tmp;
+                    }
+
+                    int val = (tmp_input[index_3] << 24) |
+                              (tmp_input[index_2] << 16) |
+                              (tmp_input[index_1] << 8) | tmp_input[index_0];
+                    val -= UR(35) + 1;
+                    tmp_input[index_0] = val & 0xff;
+                    tmp_input[index_1] = (val >> 8) & 0xff;
+                    tmp_input[index_2] = (val >> 16) & 0xff;
+                    tmp_input[index_3] = (val >> 24) & 0xff;
+                    break;
+                }
+                case 10: {
+                    // random add dword
+                    unsigned pool = UR(ig_32_size + ig_64_size);
+                    if (pool < ig_32_size) {
+                        // dword group
+                        random_group = ig_32[pool];
+                        index_0      = random_group->indexes[0];
+                        index_1      = random_group->indexes[1];
+                        index_2      = random_group->indexes[2];
+                        index_3      = random_group->indexes[3];
+                    } else {
+                        // qword group
+                        random_group = ig_64[pool - ig_32_size];
+                        random_tmp   = UR(5);
+                        index_0      = random_group->indexes[random_tmp];
+                        index_1      = random_group->indexes[random_tmp + 1];
+                        index_2      = random_group->indexes[random_tmp + 2];
+                        index_3      = random_group->indexes[random_tmp + 3];
+                    }
+                    if (UR(2)) {
+                        tmp     = index_0;
+                        index_0 = index_3;
+                        index_3 = tmp;
+
+                        tmp     = index_2;
+                        index_2 = index_3;
+                        index_3 = tmp;
+                    }
+
+                    int val = (tmp_input[index_3] << 24) |
+                              (tmp_input[index_2] << 16) |
+                              (tmp_input[index_1] << 8) | tmp_input[index_0];
+                    val += UR(35) + 1;
+                    tmp_input[index_0] = val & 0xff;
+                    tmp_input[index_1] = (val >> 8) & 0xff;
+                    tmp_input[index_2] = (val >> 16) & 0xff;
+                    tmp_input[index_3] = (val >> 24) & 0xff;
+                    break;
+                }
+                default: {
+                    ASSERT_OR_ABORT(0, "havoc default case");
+                }
+            }
+        }
+        // do evaluate
+        int eval_v = __evaluate_branch_query(
+            ctx, query, branch_condition, tmp_input,
+            current_testcase->value_sizes, current_testcase->values_len);
+        if (eval_v == 1) {
+#ifdef PRINT_SAT
+            Z3FUZZ_LOG("[havoc L5] "
+                       "Query is SAT\n");
+#endif
+            ctx->stats.havoc++;
+            ctx->stats.num_sat++;
+            __vals_long_to_char(tmp_input, tmp_proof,
+                                current_testcase->testcase_len);
+            *proof      = tmp_proof;
+            *proof_size = current_testcase->testcase_len;
+            havoc_res   = 1;
+            break;
         } else if (unlikely(eval_v == TIMEOUT_V)) {
             havoc_res = TIMEOUT_V;
             break;
@@ -6031,6 +6408,8 @@ static int __query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
         // Afl Havoc Transformation
 #ifndef USE_HAVOC_ON_WHOLE_PI
     res = PHASE_afl_havoc(ctx, query, branch_condition, proof, proof_size);
+#elif USE_HAVOC_MOD
+    res = PHASE_afl_havoc_mod(ctx, query, branch_condition, proof, proof_size);
 #else
     res = PHASE_afl_havoc_whole_pi(ctx, query, branch_condition, proof,
                                    proof_size);

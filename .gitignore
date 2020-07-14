@@ -1,8 +1,10 @@
 .vscode/
 query_db/
+exp_logs/
 tests/
 *.o
 fuzzy_z3.csv
+fuzzy_flip_info.csv
 debug-eval
 eval-driver
 fuzzy-solver

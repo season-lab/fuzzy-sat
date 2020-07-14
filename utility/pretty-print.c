@@ -15,11 +15,10 @@ static int col_idx  = 0;
 static int num_cols = 0;
 
 static inline void __clear_line() {
-  pp_set_col(0);
-
   int i;
-  for (i = 0; i < num_cols; ++i)
+  for (i = 0; i < num_cols - col_idx - 1; ++i)
     putchar(' ');
+
   LEFT(num_cols - col_idx);
 }
 
@@ -38,8 +37,8 @@ void pp_init() {
   struct winsize w;
   ioctl(0, TIOCGWINSZ, &w);
 
-  num_rows = w.ws_row;
-  num_cols = w.ws_col;
+  num_rows = w.ws_row - 1;
+  num_cols = w.ws_col - 1;
 
   int i;
   for (i = 0; i < num_rows; ++i)
@@ -71,7 +70,6 @@ void pp_set_col(int i) {
 void pp_print_string(int row, int col, const char* s) {
   pp_set_line(row);
   pp_set_col(col);
-  __clear_line();
 
   int j;
   for (j = 0; j < num_cols - col && s[j] != 0; ++j)
@@ -81,6 +79,8 @@ void pp_print_string(int row, int col, const char* s) {
     } else {
       assert (0 && "no newline allowed");
     }
+  
+  __reset_cursor();
 }
 
 void pp_printf(int row, int col, const char *format, ...) {
