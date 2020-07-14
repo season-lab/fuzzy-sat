@@ -2527,6 +2527,7 @@ static inline int get_range(fuzzy_ctx_t* ctx, Z3_ast expr, index_group_t* ig,
     else
         *wi = *cached_wi;
 
+    wi_modify_size(wi, const_size);
     wi_update_cmp(wi, constant, op);
     if (add_constant > 0) {
         wi_modify_size(wi, add_sub_const_size);

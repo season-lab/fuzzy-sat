@@ -77,7 +77,7 @@ static inline void dump_flip_info()
             "%ld," // interesting
             "%ld," // havoc
             "%ld," // multigoal
-            "%ld," // sat in seed
+            "%ld" // sat in seed
             ,
             fctx.stats.input_to_state, fctx.stats.input_to_state_ext,
             fctx.stats.brute_force + fctx.stats.range_brute_force +
