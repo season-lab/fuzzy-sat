@@ -84,6 +84,8 @@ static int check_unnecessary_eval = 1;
 
 static int max_ast_info_cache_size = 14000;
 
+static int performing_aggressive_optimistic = 0;
+
 #ifdef USE_MD5_HASH
 #include "utility/md5.h"
 #else
@@ -2522,7 +2524,7 @@ static inline int get_range(fuzzy_ctx_t* ctx, Z3_ast expr, index_group_t* ig,
 
     const wrapped_interval_t* cached_wi =
         interval_group_get_interval(group_intervals, ig);
-    if (cached_wi == NULL)
+    if (performing_aggressive_optimistic || cached_wi == NULL)
         *wi = wi_init(const_size);
     else
         *wi = *cached_wi;
@@ -6145,6 +6147,8 @@ PHASE_range_bruteforce(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
 {
     if (unlikely(skip_range_brute_force))
         return 0;
+    if (performing_aggressive_optimistic)
+        return 0;
 
 #ifdef DEBUG_CHECK_LIGHT
     Z3FUZZ_LOG("Trying range bruteforce\n");
@@ -6464,12 +6468,14 @@ static inline void aggressive_optimistic(fuzzy_ctx_t* ctx,
         set_add__index_group_t(&ast_data.inputs->index_groups,
                                ast_data.inputs->index_groups_ud.data[i]);
 
-    check_is_valid = 0;
+    check_is_valid                   = 0;
+    performing_aggressive_optimistic = 1;
     unsigned char const* dummy_proof;
     unsigned long        dummy_proof_size;
     __query_check_light(ctx, branch_condition, branch_condition, &dummy_proof,
                         &dummy_proof_size);
-    check_is_valid = 1;
+    performing_aggressive_optimistic = 0;
+    check_is_valid                   = 1;
 
     unsigned long delta_aggressive_opt_evaluate =
         ctx->stats.num_evaluate - tmp_stats.num_evaluate;
@@ -6830,6 +6836,9 @@ int z3fuzz_query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
     else
         res = query_check_light_and_multigoal(ctx, query, branch_condition,
                                               proof, proof_size);
+
+    if (opt_found)
+        ctx->stats.opt_sat += 1;
 
     Z3_dec_ref(ctx->z3_ctx, query);
     Z3_dec_ref(ctx->z3_ctx, branch_condition);

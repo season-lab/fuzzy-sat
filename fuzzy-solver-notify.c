@@ -187,8 +187,8 @@ static inline void print_status(unsigned long current_query,
     pp_printf(14, 2, "| " BOLD("num timeouts:") "     %ld",
               fctx.stats.num_timeouts);
 
-    pp_printf(2, 30, BOLD("sat:") "        %ld (%ld)", fctx.stats.num_sat,
-              fctx.stats.sat_in_seed);
+    pp_printf(2, 30, BOLD("sat:") "        %ld (%ld) [%ld opt]",
+              fctx.stats.num_sat, fctx.stats.sat_in_seed, fctx.stats.opt_sat);
     pp_print_string(2, 64, "|");
     pp_print_string(3, 64, "|");
     pp_printf(4, 30, BOLD("its ext:") "    %ld", fctx.stats.input_to_state_ext);
@@ -237,6 +237,7 @@ static inline void print_report()
     printf("*** REPORT ***\n\n");
     printf("num_evaluate:          %ld\n", fctx.stats.num_evaluate);
     printf("num_sat:               %ld\n", fctx.stats.num_sat);
+    printf("num_sat_opt:           %ld\n", fctx.stats.opt_sat);
     printf("reuse:                 %ld\n", fctx.stats.reuse);
     printf("input_to_state:        %ld\n", fctx.stats.input_to_state);
     printf("simple_math:           %ld\n", fctx.stats.simple_math);
