@@ -56,7 +56,7 @@ static inline uint64_t get_signed_max(uint32_t size)
     return get_signed_min(size) - 1;
 }
 
-static inline int is_wrapping(wrapped_interval_t* interval)
+static inline int is_wrapping(const wrapped_interval_t* interval)
 {
     return interval->min > interval->max;
 }
@@ -72,8 +72,8 @@ static inline int is_left_of(uint64_t v1, uint64_t v2, uint32_t size)
     return !is_right_of(v1, v2, size);
 }
 
-static inline int wi_check_intersect(wrapped_interval_t* int1,
-                                     wrapped_interval_t* int2)
+static inline int wi_check_intersect(const wrapped_interval_t* int1,
+                                     const wrapped_interval_t* int2)
 {
     if (is_wrapping(int1) && is_wrapping(int2))
         return 1;
@@ -84,7 +84,7 @@ static inline int wi_check_intersect(wrapped_interval_t* int1,
     return _max(int1->min, int2->min) <= _min(int2->max, int2->max);
 }
 
-int wi_intersect(wrapped_interval_t* int1, wrapped_interval_t* int2)
+int wi_intersect(wrapped_interval_t* int1, const wrapped_interval_t* int2)
 {
     // Overapproximation
     // -> side-effect on int1
@@ -250,7 +250,7 @@ void wi_modify_size(wrapped_interval_t* src, uint32_t new_size)
     src->size = new_size;
 }
 
-int wi_contains_element(wrapped_interval_t* interval, uint64_t value)
+int wi_contains_element(const wrapped_interval_t* interval, uint64_t value)
 {
     if (is_wrapping(interval))
         return (interval->min <= value &&
@@ -259,7 +259,7 @@ int wi_contains_element(wrapped_interval_t* interval, uint64_t value)
     return interval->min <= value && value <= interval->max;
 }
 
-uint64_t wi_get_range(wrapped_interval_t* interval)
+uint64_t wi_get_range(const wrapped_interval_t* interval)
 {
     uint64_t mask  = get_size_mask(interval->size);
     uint64_t range = (interval->max & mask) - (interval->min & mask);

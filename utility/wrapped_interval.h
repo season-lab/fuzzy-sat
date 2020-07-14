@@ -33,9 +33,9 @@ int      wi_update_cmp(wrapped_interval_t* src, uint64_t c, optype op);
 void     wi_update_add(wrapped_interval_t* src, uint64_t c);
 void     wi_update_sub(wrapped_interval_t* src, uint64_t c);
 void     wi_modify_size(wrapped_interval_t* src, uint32_t new_size);
-int      wi_intersect(wrapped_interval_t* int1, wrapped_interval_t* int2);
-int      wi_contains_element(wrapped_interval_t* interval, uint64_t value);
-uint64_t wi_get_range(wrapped_interval_t* interval);
+int      wi_intersect(wrapped_interval_t* int1, const wrapped_interval_t* int2);
+int      wi_contains_element(const wrapped_interval_t* interval, uint64_t value);
+uint64_t wi_get_range(const wrapped_interval_t* interval);
 void     wi_print(wrapped_interval_t* interval);
 
 wrapped_interval_iter_t wi_init_iter_values(wrapped_interval_t* interval);

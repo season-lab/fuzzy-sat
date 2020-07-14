@@ -2493,7 +2493,7 @@ static inline int __check_range_constraint(fuzzy_ctx_t* ctx, Z3_ast expr)
 
 #ifdef DEBUG_RANGE
     puts("+++++++++++++++++++++++++++++++++++++");
-    z3fuzz_print_expr(ctx, original_expr);
+    z3fuzz_print_expr(ctx, expr);
     print_interval_groups(ctx);
     puts("+++++++++++++++++++++++++++++++++++++");
 #endif
@@ -2522,12 +2522,7 @@ static inline int get_range(fuzzy_ctx_t* ctx, Z3_ast expr, index_group_t* ig,
     set__interval_group_ptr* group_intervals =
         (set__interval_group_ptr*)ctx->group_intervals;
 
-    const wrapped_interval_t* cached_wi =
-        interval_group_get_interval(group_intervals, ig);
-    if (performing_aggressive_optimistic || cached_wi == NULL)
-        *wi = wi_init(const_size);
-    else
-        *wi = *cached_wi;
+    *wi = wi_init(const_size);
 
     wi_modify_size(wi, const_size);
     wi_update_cmp(wi, constant, op);
@@ -2540,6 +2535,11 @@ static inline int get_range(fuzzy_ctx_t* ctx, Z3_ast expr, index_group_t* ig,
         wi_update_add(wi, add_constant);
     }
     wi_modify_size(wi, ig->n * 8);
+
+    const wrapped_interval_t* cached_wi =
+        interval_group_get_interval(group_intervals, ig);
+    if (!performing_aggressive_optimistic && cached_wi != NULL)
+        wi_intersect(wi, cached_wi);
 
     res = 1;
 OUT:
@@ -2560,12 +2560,28 @@ static inline int __check_univocally_defined(fuzzy_ctx_t* ctx, Z3_ast expr)
     if (decl_kind != Z3_OP_EQ)
         return 0;
 
-    ast_info_ptr inputs;
-    detect_involved_inputs_wrapper(ctx, expr, &inputs);
-    if (inputs->input_extract_ops > 0 || inputs->approximated_groups > 0)
+    Z3_ast expr_sx = Z3_get_app_arg(ctx->z3_ctx, app, 0);
+    Z3_inc_ref(ctx->z3_ctx, expr_sx);
+    Z3_ast expr_dx = Z3_get_app_arg(ctx->z3_ctx, app, 1);
+    Z3_inc_ref(ctx->z3_ctx, expr_dx);
+
+    ast_info_ptr inputs_sx, inputs_dx, inputs;
+    detect_involved_inputs_wrapper(ctx, expr, &inputs_sx);
+    detect_involved_inputs_wrapper(ctx, expr, &inputs_dx);
+
+    Z3_dec_ref(ctx->z3_ctx, expr_sx);
+    Z3_dec_ref(ctx->z3_ctx, expr_dx);
+
+    if (inputs_sx->input_extract_ops > 0 ||
+        inputs_sx->approximated_groups > 0 ||
+        inputs_dx->input_extract_ops > 0 || inputs_dx->approximated_groups > 0)
         return 0; // it is not safe to add to univocally defined
 
-    if (inputs->index_groups.size != 1)
+    if (inputs_sx->index_groups.size == 1 && inputs_sx->index_groups.size == 0)
+        inputs = inputs_sx;
+    else if (inputs_sx->index_groups.size == 0 && inputs_sx->index_groups.size == 1)
+        inputs = inputs_dx;
+    else
         return 0;
 
     // we have (= something f(INPUT)) in the branch condition
