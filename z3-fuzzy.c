@@ -38,7 +38,7 @@
 
 // #define PRINT_SAT
 // #define DEBUG_RANGE
-#define DEBUG_CHECK_LIGHT
+// #define DEBUG_CHECK_LIGHT
 // #define DEBUG_DETECT_GROUP
 
 // #define SKIP_IS_VALID_EVAL
