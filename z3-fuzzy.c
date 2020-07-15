@@ -2280,7 +2280,7 @@ static inline interval_group_ptr interval_group_set_add_or_modify(
     }
     if (sub_constant > 0) {
         wi_modify_size(&wi, add_sub_const_size);
-        wi_update_add(&wi, add_constant);
+        wi_update_add(&wi, sub_constant);
     }
 
     wi_modify_size(&wi, ig->n * 8);
@@ -2560,7 +2560,6 @@ static inline int get_range(fuzzy_ctx_t* ctx, Z3_ast expr, index_group_t* ig,
 
     *wi = wi_init(const_size);
 
-    wi_modify_size(wi, const_size);
     wi_update_cmp(wi, constant, op);
     if (add_constant > 0) {
         wi_modify_size(wi, add_sub_const_size);
@@ -2568,7 +2567,7 @@ static inline int get_range(fuzzy_ctx_t* ctx, Z3_ast expr, index_group_t* ig,
     }
     if (sub_constant > 0) {
         wi_modify_size(wi, add_sub_const_size);
-        wi_update_add(wi, add_constant);
+        wi_update_add(wi, sub_constant);
     }
     wi_modify_size(wi, ig->n * 8);
 
@@ -2915,6 +2914,8 @@ static __always_inline int PHASE_simple_math(fuzzy_ctx_t* ctx, Z3_ast query,
     wrapped_interval_t wi;
     if (!get_range(ctx, branch_condition, &ig, &wi))
         return 0;
+
+    wi_print(&wi);
 
 #ifdef DEBUG_CHECK_LIGHT
     Z3FUZZ_LOG("Trying Simple Math\n");
