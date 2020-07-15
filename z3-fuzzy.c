@@ -6813,8 +6813,8 @@ static inline int handle_and_constraint(fuzzy_ctx_t* ctx, Z3_ast query,
 
         // update blacklist
         ulong* p;
-        set_reset_iter__ulong(&ast_data.inputs->indexes, 0);
-        while (set_iter_next__ulong(&ast_data.inputs->indexes, 0, &p))
+        set_reset_iter__ulong(&new_ast_info->indexes, 0);
+        while (set_iter_next__ulong(&new_ast_info->indexes, 0, &p))
             set_add__ulong(&black_indexes, *p);
         ast_info_reset(new_ast_info);
     }
@@ -6847,8 +6847,8 @@ static inline int handle_and_constraint(fuzzy_ctx_t* ctx, Z3_ast query,
 
             // update blacklist
             ulong* p;
-            set_reset_iter__ulong(&ast_data.inputs->indexes, 0);
-            while (set_iter_next__ulong(&ast_data.inputs->indexes, 0, &p))
+            set_reset_iter__ulong(&new_ast_info->indexes, 0);
+            while (set_iter_next__ulong(&new_ast_info->indexes, 0, &p))
                 set_add__ulong(&black_indexes, *p);
             ast_info_reset(new_ast_info);
         }
