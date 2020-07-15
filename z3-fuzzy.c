@@ -2915,8 +2915,6 @@ static __always_inline int PHASE_simple_math(fuzzy_ctx_t* ctx, Z3_ast query,
     if (!get_range(ctx, branch_condition, &ig, &wi))
         return 0;
 
-    wi_print(&wi);
-
 #ifdef DEBUG_CHECK_LIGHT
     Z3FUZZ_LOG("Trying Simple Math\n");
 #endif
