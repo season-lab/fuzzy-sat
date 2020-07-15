@@ -536,6 +536,42 @@ static void __gd_free_eval(eval_wapper_ctx_t* eval_ctx)
     free(eval_ctx->input);
 }
 
+static inline Z3_ast __gd_create_sub(Z3_context ctx, Z3_ast lhs, Z3_ast rhs,
+                                     unsigned sort_size, int is_signed)
+{
+    // I'm assuming that lhs and rhs has a ref_counter > 0
+    ASSERT_OR_ABORT(sort_size >= 2,
+                    "__gd_create_sub(): sort_size cannot be lower than 2");
+    if (!is_signed) {
+        Z3_ast zero =
+            Z3_mk_unsigned_int64(ctx, 0, Z3_mk_bv_sort(ctx, sort_size));
+        Z3_inc_ref(ctx, zero);
+        Z3_ast max_signed = Z3_mk_unsigned_int64(
+            ctx, (2 << (sort_size - 2)) - 1, Z3_mk_bv_sort(ctx, sort_size));
+        Z3_inc_ref(ctx, max_signed);
+        Z3_ast cond1 = Z3_mk_bvslt(ctx, lhs, zero);
+        Z3_inc_ref(ctx, cond1);
+        Z3_ast cond2 = Z3_mk_bvslt(ctx, rhs, zero);
+        Z3_inc_ref(ctx, cond2);
+        lhs = Z3_mk_ite(ctx, cond1, max_signed, lhs);
+        Z3_inc_ref(ctx, lhs);
+        rhs = Z3_mk_ite(ctx, cond2, zero, rhs);
+        Z3_inc_ref(ctx, rhs);
+
+        Z3_dec_ref(ctx, zero);
+        Z3_dec_ref(ctx, max_signed);
+        Z3_dec_ref(ctx, cond1);
+        Z3_dec_ref(ctx, cond2);
+    }
+    Z3_ast res = Z3_mk_bvsub(ctx, lhs, rhs);
+    Z3_inc_ref(ctx, res);
+    if (!is_signed) {
+        Z3_dec_ref(ctx, lhs);
+        Z3_dec_ref(ctx, rhs);
+    }
+    return res;
+}
+
 static int __gradient_transf_init(Z3_context ctx, Z3_ast expr, Z3_ast* out_exp)
 {
     ASSERT_OR_ABORT(Z3_get_ast_kind(ctx, expr) == Z3_APP_AST,
@@ -554,6 +590,11 @@ static int __gradient_transf_init(Z3_context ctx, Z3_ast expr, Z3_ast* out_exp)
         decl_kind = Z3_get_decl_kind(ctx, decl);
         is_not    = !is_not;
     }
+
+    int is_unsigned = 0;
+    if (decl_kind == Z3_OP_UGT || decl_kind == Z3_OP_UGEQ ||
+        decl_kind == Z3_OP_ULT || decl_kind == Z3_OP_ULEQ)
+        is_unsigned = 1;
 
     ASSERT_OR_ABORT(Z3_get_app_num_args(ctx, app) == 2,
                     "__gradient_transf_init requires a binary APP");
@@ -578,11 +619,6 @@ static int __gradient_transf_init(Z3_context ctx, Z3_ast expr, Z3_ast* out_exp)
     }
 
     if (sort_size < 64) {
-        int is_unsigned = 0;
-        if (decl_kind == Z3_OP_UGT || decl_kind == Z3_OP_UGEQ ||
-            decl_kind == Z3_OP_ULT || decl_kind == Z3_OP_ULEQ)
-            is_unsigned = 1;
-
         if (is_unsigned) {
             Z3_ast tmp1 = arg1;
             Z3_ast tmp2 = arg2;
@@ -621,8 +657,8 @@ PRE_SWITCH:
             }
             args[0] = arg2;
             args[1] = arg1;
-            res     = Z3_mk_bvsub(ctx, args[0], args[1]);
-            Z3_inc_ref(ctx, res);
+            res =
+                __gd_create_sub(ctx, args[0], args[1], sort_size, !is_unsigned);
             break;
         }
         case Z3_OP_SLT:
@@ -636,8 +672,8 @@ PRE_SWITCH:
             }
             args[0] = arg1;
             args[1] = arg2;
-            res     = Z3_mk_bvsub(ctx, args[0], args[1]);
-            Z3_inc_ref(ctx, res);
+            res =
+                __gd_create_sub(ctx, args[0], args[1], sort_size, !is_unsigned);
             break;
         }
         case Z3_OP_EQ: { // arg1 == arg2 =>   abs(arg1 - arg2)
@@ -2579,7 +2615,8 @@ static inline int __check_univocally_defined(fuzzy_ctx_t* ctx, Z3_ast expr)
 
     if (inputs_sx->index_groups.size == 1 && inputs_sx->index_groups.size == 0)
         inputs = inputs_sx;
-    else if (inputs_sx->index_groups.size == 0 && inputs_sx->index_groups.size == 1)
+    else if (inputs_sx->index_groups.size == 0 &&
+             inputs_sx->index_groups.size == 1)
         inputs = inputs_dx;
     else
         return 0;
