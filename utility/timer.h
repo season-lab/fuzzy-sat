@@ -9,8 +9,9 @@ typedef struct simple_timer_t {
     uint64_t       time_max_msec;
 } simple_timer_t;
 
-void init_timer(simple_timer_t* t, uint64_t time_max_msec);
-void start_timer(simple_timer_t* t);
-int  check_timer(simple_timer_t* t);
+void          init_timer(simple_timer_t* t, uint64_t time_max_msec);
+void          start_timer(simple_timer_t* t);
+int           check_timer(simple_timer_t* t);
+unsigned long get_elapsed_time(simple_timer_t* t);
 
 #endif

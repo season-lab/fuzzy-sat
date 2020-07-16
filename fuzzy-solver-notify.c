@@ -9,7 +9,7 @@
 #define BOLD(s) "\033[1m\033[37m" s "\033[0m"
 
 #define CHECK_CONSISTENCY
-#define PRINT_STATUS
+// #define PRINT_STATUS
 // #define DUMP_PROOFS
 // #define DUMP_SAT_QUERIES
 #define TIMEOUT 1000
@@ -186,6 +186,9 @@ static inline void print_status(unsigned long current_query,
               m_stats.conflicting_ast_size);
     pp_printf(14, 2, "| " BOLD("num timeouts:") "     %ld",
               fctx.stats.num_timeouts);
+    pp_printf(15, 2, "| ");
+    pp_printf(16, 2, "| " BOLD("avg eval time:") " %.03lf usec",
+              fctx.stats.avg_time_for_eval);
 
     pp_printf(2, 30, BOLD("sat:") "        %ld (%ld) [%ld opt]",
               fctx.stats.num_sat, fctx.stats.sat_in_seed, fctx.stats.opt_sat);
@@ -223,9 +226,11 @@ static inline void print_status(unsigned long current_query,
     pp_printf(14, 30, BOLD("ast info cache hits:") " %ld",
               fctx.stats.ast_info_cache_hits);
     pp_print_string(14, 64, "|");
+    pp_print_string(15, 64, "|");
+    pp_print_string(16, 64, "|");
 
     pp_print_string(
-        15, 2,
+        17, 2,
         "o-------------------------------------------------------------o");
 
     pp_set_col(0);

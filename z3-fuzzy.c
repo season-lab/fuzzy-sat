@@ -130,14 +130,15 @@ typedef ast_info_t* ast_info_ptr;
 #define DICT_DATA_T ast_info_ptr
 #include <dict.h>
 
-static unsigned long* tmp_input     = NULL;
-static unsigned long* tmp_opt_input = NULL;
-static unsigned char* tmp_proof     = NULL;
-static unsigned char* tmp_opt_proof = NULL;
-static int            opt_found     = 0;
-static unsigned       opt_num_sat   = 0;
-static ast_data_t     ast_data      = {0};
-static char           notify_count  = 0;
+static unsigned long* tmp_input           = NULL;
+static unsigned long* tmp_opt_input       = NULL;
+static unsigned char* tmp_proof           = NULL;
+static unsigned char* tmp_opt_proof       = NULL;
+static int            opt_found           = 0;
+static unsigned       opt_num_sat         = 0;
+static ast_data_t     ast_data            = {0};
+static char           notify_count        = 0;
+static unsigned long  g_prev_num_evaluate = 0;
 
 static char* query_log_filename = "/tmp/fuzzy-log-info.csv";
 FILE*        query_log;
@@ -251,8 +252,15 @@ static inline int timer_check_wrapper(fuzzy_ctx_t* ctx)
         return 0;
     static int i = 0;
     if (unlikely(++i & 16)) {
-        i = 0;
-        return check_timer(ctx->timer);
+        i                          = 0;
+        int           res          = check_timer(ctx->timer);
+        unsigned long elapsed_time = get_elapsed_time(ctx->timer);
+        ctx->stats.avg_time_for_eval =
+            (double)(ctx->stats.num_evaluate - g_prev_num_evaluate) == 0
+                ? ctx->stats.avg_time_for_eval
+                : (double)elapsed_time /
+                      ((double)(ctx->stats.num_evaluate - g_prev_num_evaluate));
+        return res;
     }
     return 0;
 }
@@ -6880,6 +6888,8 @@ int z3fuzz_query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
     *proof_size = 0;
 
     timer_start_wrapper(ctx);
+    g_prev_num_evaluate = ctx->stats.num_evaluate;
+
     __init_global_data(ctx, query, branch_condition);
 
     if (is_and_constraint(ctx, branch_condition))

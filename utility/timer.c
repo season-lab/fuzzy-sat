@@ -17,6 +17,13 @@ static inline unsigned long compute_time_msec(struct timeval* start,
            1000;
 }
 
+static inline unsigned long compute_time_usec(struct timeval* start,
+                                              struct timeval* end)
+{
+    return ((end->tv_sec - start->tv_sec) * 1000000 + end->tv_usec -
+            start->tv_usec);
+}
+
 void init_timer(simple_timer_t* t, uint64_t time_max_msec)
 {
     t->time_max_msec = time_max_msec;
@@ -31,4 +38,11 @@ int check_timer(simple_timer_t* t)
     if (delta_time > t->time_max_msec)
         return 1;
     return 0;
+}
+
+unsigned long get_elapsed_time(simple_timer_t* t)
+{
+    gettimeofday(&stop, 0);
+    unsigned long delta_time = compute_time_usec(&t->start, &stop);
+    return delta_time;
 }

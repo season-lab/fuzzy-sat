@@ -70,6 +70,7 @@ void pp_set_col(int i) {
 void pp_print_string(int row, int col, const char* s) {
   pp_set_line(row);
   pp_set_col(col);
+  __clear_line();
 
   int j;
   for (j = 0; j < num_cols - col && s[j] != 0; ++j)

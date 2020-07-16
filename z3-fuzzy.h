@@ -62,6 +62,7 @@ typedef struct fuzzy_stats_t {
     unsigned long conflicting_fallbacks_no_true;
     unsigned long ast_info_cache_hits;
     unsigned long num_timeouts;
+    double        avg_time_for_eval;
 } fuzzy_stats_t;
 
 typedef struct fuzzy_ctx_t {
