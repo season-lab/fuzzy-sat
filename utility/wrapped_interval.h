@@ -11,7 +11,7 @@
 #define OP_SGT 5
 #define OP_UGE 6
 #define OP_SGE 7
-#define OP_EQ  8
+#define OP_EQ 8
 
 typedef int optype;
 
@@ -29,12 +29,13 @@ typedef struct wrapped_interval_iter_t {
 } wrapped_interval_iter_t;
 
 wrapped_interval_t wi_init(unsigned size);
-int      wi_update_cmp(wrapped_interval_t* src, uint64_t c, optype op);
-void     wi_update_add(wrapped_interval_t* src, uint64_t c);
-void     wi_update_sub(wrapped_interval_t* src, uint64_t c);
-void     wi_modify_size(wrapped_interval_t* src, uint32_t new_size);
-int      wi_intersect(wrapped_interval_t* int1, const wrapped_interval_t* int2);
-int      wi_contains_element(const wrapped_interval_t* interval, uint64_t value);
+int  wi_update_cmp(wrapped_interval_t* src, uint64_t c, optype op);
+void wi_update_add(wrapped_interval_t* src, uint64_t c);
+void wi_update_sub(wrapped_interval_t* src, uint64_t c);
+void wi_update_invert(wrapped_interval_t* src);
+void wi_modify_size(wrapped_interval_t* src, uint32_t new_size);
+int  wi_intersect(wrapped_interval_t* int1, const wrapped_interval_t* int2);
+int  wi_contains_element(const wrapped_interval_t* interval, uint64_t value);
 uint64_t wi_get_range(const wrapped_interval_t* interval);
 void     wi_print(wrapped_interval_t* interval);
 
