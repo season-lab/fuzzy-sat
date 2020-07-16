@@ -2268,6 +2268,8 @@ static inline interval_group_ptr interval_group_set_add_or_modify(
     uint64_t add_constant, uint64_t sub_constant, int should_invert,
     uint32_t add_sub_const_size, uint32_t const_size, int* created_new)
 {
+    ASSERT_OR_ABORT(op != -1,
+                    "interval_group_set_add_or_modify() invalid optype");
     interval_group_t    igt     = {.group = *ig, .interval = {0}};
     interval_group_ptr  igt_p   = &igt;
     interval_group_ptr* igt_ptr = set_find_el__interval_group_ptr(set, &igt_p);
@@ -2507,7 +2509,7 @@ static inline int __check_range_constraint(fuzzy_ctx_t* ctx, Z3_ast expr)
 
     index_group_t ig = {0};
     uint64_t      constant, add_constant, sub_constant;
-    optype        op;
+    optype        op = -1;
     uint32_t      add_sub_const_size;
     unsigned      const_size;
     int           should_invert;
