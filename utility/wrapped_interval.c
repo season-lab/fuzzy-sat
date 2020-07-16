@@ -240,6 +240,17 @@ void wi_update_sub(wrapped_interval_t* src, uint64_t c)
     src->max = (src->max - c) & get_size_mask(src->size);
 }
 
+void wi_update_invert(wrapped_interval_t* src)
+{
+    src->min = (- src->min) & get_size_mask(src->size);
+    src->max = (- src->max) & get_size_mask(src->size);
+    if (src->max < src->min) {
+        src->min ^= src->max;
+        src->max ^= src->min;
+        src->min ^= src->max;
+    }
+}
+
 void wi_modify_size(wrapped_interval_t* src, uint32_t new_size)
 {
     if (new_size < src->size) {
@@ -313,10 +324,10 @@ const char* op_to_string(optype op)
 void wi_print(wrapped_interval_t* interval)
 {
     if (!is_wrapping(interval))
-        fprintf(stderr, "[ %lu, %lu ] (%u)\n", interval->min, interval->max,
+        fprintf(stderr, "[ 0x%lx, 0x%lx ] (%u)\n", interval->min, interval->max,
                 interval->size);
     else
-        fprintf(stderr, "[ %lu, %lu ] U [ %lu, %lu ] (%u)\n", interval->min,
+        fprintf(stderr, "[ 0x%lx, 0x%lx ] U [ 0x%lx, 0x%lx ] (%u)\n", interval->min,
                 get_size_mask(interval->size), 0UL, interval->max,
                 interval->size);
 }

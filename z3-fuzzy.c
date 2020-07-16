@@ -2273,9 +2273,11 @@ static inline unsigned size_normalized(unsigned size)
 
 static inline interval_group_ptr interval_group_set_add_or_modify(
     set__interval_group_ptr* set, index_group_t* ig, uint64_t c, optype op,
-    uint64_t add_constant, uint64_t sub_constant, uint32_t add_sub_const_size,
-    uint32_t const_size, int* created_new)
+    uint64_t add_constant, uint64_t sub_constant, int should_invert,
+    uint32_t add_sub_const_size, uint32_t const_size, int* created_new)
 {
+    ASSERT_OR_ABORT(op != -1,
+                    "interval_group_set_add_or_modify() invalid optype");
     interval_group_t    igt     = {.group = *ig, .interval = {0}};
     interval_group_ptr  igt_p   = &igt;
     interval_group_ptr* igt_ptr = set_find_el__interval_group_ptr(set, &igt_p);
@@ -2288,7 +2290,12 @@ static inline interval_group_ptr interval_group_set_add_or_modify(
     }
     if (sub_constant > 0) {
         wi_modify_size(&wi, add_sub_const_size);
-        wi_update_add(&wi, sub_constant);
+        if (!should_invert)
+            wi_update_add(&wi, sub_constant);
+        else {
+            wi_update_invert(&wi);
+            wi_update_add(&wi, sub_constant);
+        }
     }
 
     wi_modify_size(&wi, ig->n * 8);
@@ -2340,7 +2347,7 @@ static inline int __check_if_range(fuzzy_ctx_t* ctx, Z3_ast expr,
                                    // output args
                                    index_group_t* ig, uint64_t* constant,
                                    optype* op, uint64_t* add_constant,
-                                   uint64_t* sub_constant,
+                                   uint64_t* sub_constant, int* should_invert,
                                    uint32_t* add_sub_const_size,
                                    unsigned* const_size)
 {
@@ -2444,6 +2451,7 @@ static inline int __check_if_range(fuzzy_ctx_t* ctx, Z3_ast expr,
     *add_constant       = 0;
     *sub_constant       = 0;
     *add_sub_const_size = 0;
+    *should_invert      = 0;
 
     if (nonconst_op_decl_kind == Z3_OP_BADD ||
         nonconst_op_decl_kind == Z3_OP_BSUB) {
@@ -2459,8 +2467,11 @@ static inline int __check_if_range(fuzzy_ctx_t* ctx, Z3_ast expr,
 
         if (nonconst_op_decl_kind == Z3_OP_BADD) {
             *add_constant = constant_2;
-        } else
+        } else {
             *sub_constant = constant_2;
+            if (const_operand_2 == 0)
+                *should_invert = 1;
+        }
 
         Z3_ast non_const_operand2 =
             Z3_get_app_arg(ctx->z3_ctx, nonconst_op_app, const_operand_2 ^ 1);
@@ -2506,12 +2517,14 @@ static inline int __check_range_constraint(fuzzy_ctx_t* ctx, Z3_ast expr)
 
     index_group_t ig = {0};
     uint64_t      constant, add_constant, sub_constant;
-    optype        op;
+    optype        op = -1;
     uint32_t      add_sub_const_size;
     unsigned      const_size;
+    int           should_invert;
 
     if (!__check_if_range(ctx, expr, &ig, &constant, &op, &add_constant,
-                          &sub_constant, &add_sub_const_size, &const_size)) {
+                          &sub_constant, &should_invert, &add_sub_const_size,
+                          &const_size)) {
         goto OUT;
     }
     if (const_size > 64)
@@ -2526,7 +2539,7 @@ static inline int __check_range_constraint(fuzzy_ctx_t* ctx, Z3_ast expr)
     int                created_new;
     interval_group_ptr el = interval_group_set_add_or_modify(
         group_intervals, &ig, constant, op, add_constant, sub_constant,
-        add_sub_const_size, const_size, &created_new);
+        should_invert, add_sub_const_size, const_size, &created_new);
 
     if (created_new) {
         unsigned i;
@@ -2558,9 +2571,11 @@ static inline int get_range(fuzzy_ctx_t* ctx, Z3_ast expr, index_group_t* ig,
     optype   op;
     uint32_t add_sub_const_size;
     unsigned const_size;
+    int      should_invert;
 
     if (!__check_if_range(ctx, expr, ig, &constant, &op, &add_constant,
-                          &sub_constant, &add_sub_const_size, &const_size))
+                          &sub_constant, &should_invert, &add_sub_const_size,
+                          &const_size))
         goto OUT;
 
     set__interval_group_ptr* group_intervals =
@@ -2575,7 +2590,12 @@ static inline int get_range(fuzzy_ctx_t* ctx, Z3_ast expr, index_group_t* ig,
     }
     if (sub_constant > 0) {
         wi_modify_size(wi, add_sub_const_size);
-        wi_update_add(wi, sub_constant);
+        if (!should_invert)
+            wi_update_add(wi, sub_constant);
+        else {
+            wi_update_invert(wi);
+            wi_update_add(wi, sub_constant);
+        }
     }
     wi_modify_size(wi, ig->n * 8);
 

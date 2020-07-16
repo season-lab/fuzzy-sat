@@ -9,7 +9,7 @@
 #define BOLD(s) "\033[1m\033[37m" s "\033[0m"
 
 #define CHECK_CONSISTENCY
-// #define PRINT_STATUS
+#define PRINT_STATUS
 // #define DUMP_PROOFS
 // #define DUMP_SAT_QUERIES
 #define TIMEOUT 1000
