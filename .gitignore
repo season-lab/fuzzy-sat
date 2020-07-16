@@ -5,6 +5,8 @@ tests/
 *.o
 fuzzy_z3.csv
 fuzzy_flip_info.csv
+fuzzy_queries.csv
+z3_queries.csv
 debug-eval
 eval-driver
 fuzzy-solver
@@ -12,6 +14,7 @@ fuzzy-solver-notify
 fuzzy-solver-vs-z3
 maxmin-driver
 findall-driver
-solver
 interval_test
 libZ3Fuzzy.a
+stats-collection-z3
+stats-collection-fuzzy
