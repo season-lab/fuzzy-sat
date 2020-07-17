@@ -580,23 +580,66 @@ static inline Z3_ast __gd_create_sub(Z3_context ctx, Z3_ast lhs, Z3_ast rhs,
     return res;
 }
 
-static int __gradient_transf_init(Z3_context ctx, Z3_ast expr, Z3_ast* out_exp)
+static int __gradient_transf_init(fuzzy_ctx_t* ctx, Z3_ast expr,
+                                  Z3_ast* out_exp)
 {
-    ASSERT_OR_ABORT(Z3_get_ast_kind(ctx, expr) == Z3_APP_AST,
+    ASSERT_OR_ABORT(Z3_get_ast_kind(ctx->z3_ctx, expr) == Z3_APP_AST,
                     "__gradient_transf_init expects an APP argument");
 
-    Z3_app       app       = Z3_to_app(ctx, expr);
-    Z3_func_decl decl      = Z3_get_app_decl(ctx, app);
-    Z3_decl_kind decl_kind = Z3_get_decl_kind(ctx, decl);
+    Z3_app       app       = Z3_to_app(ctx->z3_ctx, expr);
+    Z3_func_decl decl      = Z3_get_app_decl(ctx->z3_ctx, app);
+    Z3_decl_kind decl_kind = Z3_get_decl_kind(ctx->z3_ctx, decl);
 
     int    is_not = 0;
     Z3_ast arg    = expr;
     while (decl_kind == Z3_OP_NOT) {
-        arg       = Z3_get_app_arg(ctx, app, 0);
-        app       = Z3_to_app(ctx, arg);
-        decl      = Z3_get_app_decl(ctx, app);
-        decl_kind = Z3_get_decl_kind(ctx, decl);
+        arg       = Z3_get_app_arg(ctx->z3_ctx, app, 0);
+        app       = Z3_to_app(ctx->z3_ctx, arg);
+        decl      = Z3_get_app_decl(ctx->z3_ctx, app);
+        decl_kind = Z3_get_decl_kind(ctx->z3_ctx, decl);
         is_not    = !is_not;
+    }
+    Z3_inc_ref(ctx->z3_ctx, arg);
+
+    if (decl_kind == Z3_OP_OR) {
+        // detect whether all the conditions but one are valid
+        Z3_ast valid_arg = NULL;
+
+        unsigned i;
+        unsigned nargs = Z3_get_app_num_args(ctx->z3_ctx, app);
+        for (i = 0; i < nargs; ++i) {
+            Z3_ast child = Z3_get_app_arg(ctx->z3_ctx, app, i);
+            Z3_inc_ref(ctx->z3_ctx, child);
+
+            ast_info_ptr ast_info;
+            detect_involved_inputs_wrapper(ctx, child, &ast_info);
+
+            ulong* p;
+            int    has_inputs = 0;
+            set_reset_iter__ulong(&ast_info->indexes, 1);
+            while (set_iter_next__ulong(&ast_info->indexes, 1, &p)) {
+                if (set_check__ulong(&ast_data.inputs->indexes, *p)) {
+                    has_inputs = 1;
+                    break;
+                }
+            }
+
+            if (!has_inputs) {
+                Z3_dec_ref(ctx->z3_ctx, child);
+                continue;
+            }
+            if (valid_arg != NULL) {
+                Z3_dec_ref(ctx->z3_ctx, valid_arg);
+                Z3_dec_ref(ctx->z3_ctx, child);
+                return 0;
+            }
+            valid_arg = child;
+        }
+        Z3_dec_ref(ctx->z3_ctx, arg);
+        arg       = valid_arg;
+        app       = Z3_to_app(ctx->z3_ctx, arg);
+        decl      = Z3_get_app_decl(ctx->z3_ctx, app);
+        decl_kind = Z3_get_decl_kind(ctx->z3_ctx, decl);
     }
 
     int is_unsigned = 0;
@@ -604,25 +647,24 @@ static int __gradient_transf_init(Z3_context ctx, Z3_ast expr, Z3_ast* out_exp)
         decl_kind == Z3_OP_ULT || decl_kind == Z3_OP_ULEQ)
         is_unsigned = 1;
 
-    ASSERT_OR_ABORT(Z3_get_app_num_args(ctx, app) == 2,
+    ASSERT_OR_ABORT(Z3_get_app_num_args(ctx->z3_ctx, app) == 2,
                     "__gradient_transf_init requires a binary APP");
 
     Z3_ast args[2] = {0};
-    Z3_inc_ref(ctx, arg);
-    Z3_ast arg1 = Z3_get_app_arg(ctx, app, 0);
-    Z3_inc_ref(ctx, arg1);
-    Z3_ast arg2 = Z3_get_app_arg(ctx, app, 1);
-    Z3_inc_ref(ctx, arg2);
-    Z3_dec_ref(ctx, arg);
+    Z3_ast arg1    = Z3_get_app_arg(ctx->z3_ctx, app, 0);
+    Z3_inc_ref(ctx->z3_ctx, arg1);
+    Z3_ast arg2 = Z3_get_app_arg(ctx->z3_ctx, app, 1);
+    Z3_inc_ref(ctx->z3_ctx, arg2);
+    Z3_dec_ref(ctx->z3_ctx, arg);
 
-    Z3_sort arg_sort = Z3_get_sort(ctx, arg1);
-    if (Z3_get_sort_kind(ctx, arg_sort) != Z3_BV_SORT)
+    Z3_sort arg_sort = Z3_get_sort(ctx->z3_ctx, arg1);
+    if (Z3_get_sort_kind(ctx->z3_ctx, arg_sort) != Z3_BV_SORT)
         return 0;
-    unsigned sort_size = Z3_get_bv_sort_size(ctx, arg_sort);
+    unsigned sort_size = Z3_get_bv_sort_size(ctx->z3_ctx, arg_sort);
     if (sort_size < 2) {
         // 1 bit bv
-        Z3_dec_ref(ctx, arg1);
-        Z3_dec_ref(ctx, arg2);
+        Z3_dec_ref(ctx->z3_ctx, arg1);
+        Z3_dec_ref(ctx->z3_ctx, arg2);
         return 0;
     }
 
@@ -630,22 +672,22 @@ static int __gradient_transf_init(Z3_context ctx, Z3_ast expr, Z3_ast* out_exp)
         if (is_unsigned) {
             Z3_ast tmp1 = arg1;
             Z3_ast tmp2 = arg2;
-            arg1        = Z3_mk_zero_ext(ctx, 64 - sort_size, tmp1);
-            Z3_inc_ref(ctx, arg1);
-            arg2 = Z3_mk_zero_ext(ctx, 64 - sort_size, tmp2);
-            Z3_inc_ref(ctx, arg2);
-            Z3_dec_ref(ctx, tmp1);
-            Z3_dec_ref(ctx, tmp2);
+            arg1        = Z3_mk_zero_ext(ctx->z3_ctx, 64 - sort_size, tmp1);
+            Z3_inc_ref(ctx->z3_ctx, arg1);
+            arg2 = Z3_mk_zero_ext(ctx->z3_ctx, 64 - sort_size, tmp2);
+            Z3_inc_ref(ctx->z3_ctx, arg2);
+            Z3_dec_ref(ctx->z3_ctx, tmp1);
+            Z3_dec_ref(ctx->z3_ctx, tmp2);
             sort_size = 64;
         } else {
             Z3_ast tmp1 = arg1;
             Z3_ast tmp2 = arg2;
-            arg1        = Z3_mk_sign_ext(ctx, 64 - sort_size, tmp1);
-            Z3_inc_ref(ctx, arg1);
-            arg2 = Z3_mk_sign_ext(ctx, 64 - sort_size, tmp2);
-            Z3_inc_ref(ctx, arg2);
-            Z3_dec_ref(ctx, tmp1);
-            Z3_dec_ref(ctx, tmp2);
+            arg1        = Z3_mk_sign_ext(ctx->z3_ctx, 64 - sort_size, tmp1);
+            Z3_inc_ref(ctx->z3_ctx, arg1);
+            arg2 = Z3_mk_sign_ext(ctx->z3_ctx, 64 - sort_size, tmp2);
+            Z3_inc_ref(ctx->z3_ctx, arg2);
+            Z3_dec_ref(ctx->z3_ctx, tmp1);
+            Z3_dec_ref(ctx->z3_ctx, tmp2);
             sort_size = 64;
         }
     }
@@ -665,8 +707,8 @@ PRE_SWITCH:
             }
             args[0] = arg2;
             args[1] = arg1;
-            res =
-                __gd_create_sub(ctx, args[0], args[1], sort_size, !is_unsigned);
+            res     = __gd_create_sub(ctx->z3_ctx, args[0], args[1], sort_size,
+                                  !is_unsigned);
             break;
         }
         case Z3_OP_SLT:
@@ -680,8 +722,8 @@ PRE_SWITCH:
             }
             args[0] = arg1;
             args[1] = arg2;
-            res =
-                __gd_create_sub(ctx, args[0], args[1], sort_size, !is_unsigned);
+            res     = __gd_create_sub(ctx->z3_ctx, args[0], args[1], sort_size,
+                                  !is_unsigned);
             break;
         }
         case Z3_OP_EQ: { // arg1 == arg2 =>   abs(arg1 - arg2)
@@ -689,30 +731,31 @@ PRE_SWITCH:
             args[0] = arg1;
             args[1] = arg2;
 
-            Z3_ast cond = Z3_mk_bvsgt(ctx, args[0], args[1]);
-            Z3_inc_ref(ctx, cond);
-            Z3_ast ift = Z3_mk_bvsub(ctx, args[0], args[1]);
-            Z3_inc_ref(ctx, ift);
-            Z3_ast iff = Z3_mk_bvsub(ctx, args[1], args[0]);
-            Z3_inc_ref(ctx, iff);
+            Z3_ast cond = Z3_mk_bvsgt(ctx->z3_ctx, args[0], args[1]);
+            Z3_inc_ref(ctx->z3_ctx, cond);
+            Z3_ast ift = Z3_mk_bvsub(ctx->z3_ctx, args[0], args[1]);
+            Z3_inc_ref(ctx->z3_ctx, ift);
+            Z3_ast iff = Z3_mk_bvsub(ctx->z3_ctx, args[1], args[0]);
+            Z3_inc_ref(ctx->z3_ctx, iff);
 
-            ASSERT_OR_ABORT(Z3_get_sort_kind(ctx, Z3_get_sort(ctx, cond)) ==
-                                Z3_BOOL_SORT,
-                            "not bool sort");
-            Z3_ast ite = Z3_mk_ite(ctx, cond, ift, iff);
-            Z3_inc_ref(ctx, ite);
-            Z3_dec_ref(ctx, cond);
-            Z3_dec_ref(ctx, ift);
-            Z3_dec_ref(ctx, iff);
+            ASSERT_OR_ABORT(
+                Z3_get_sort_kind(ctx->z3_ctx, Z3_get_sort(ctx->z3_ctx, cond)) ==
+                    Z3_BOOL_SORT,
+                "not bool sort");
+            Z3_ast ite = Z3_mk_ite(ctx->z3_ctx, cond, ift, iff);
+            Z3_inc_ref(ctx->z3_ctx, ite);
+            Z3_dec_ref(ctx->z3_ctx, cond);
+            Z3_dec_ref(ctx->z3_ctx, ift);
+            Z3_dec_ref(ctx->z3_ctx, iff);
 
             if (is_not) {
-                Z3_ast zero =
-                    Z3_mk_unsigned_int64(ctx, 0, Z3_mk_bv_sort(ctx, sort_size));
-                Z3_inc_ref(ctx, zero);
-                res = Z3_mk_bvsub(ctx, zero, ite);
-                Z3_inc_ref(ctx, res);
-                Z3_dec_ref(ctx, ite);
-                Z3_dec_ref(ctx, zero);
+                Z3_ast zero = Z3_mk_unsigned_int64(
+                    ctx->z3_ctx, 0, Z3_mk_bv_sort(ctx->z3_ctx, sort_size));
+                Z3_inc_ref(ctx->z3_ctx, zero);
+                res = Z3_mk_bvsub(ctx->z3_ctx, zero, ite);
+                Z3_inc_ref(ctx->z3_ctx, res);
+                Z3_dec_ref(ctx->z3_ctx, ite);
+                Z3_dec_ref(ctx->z3_ctx, zero);
             } else
                 res = ite;
             break;
@@ -722,8 +765,8 @@ PRE_SWITCH:
             ASSERT_OR_ABORT(0, "__gradient_transf_init unknown decl kind");
     }
 
-    Z3_dec_ref(ctx, arg1);
-    Z3_dec_ref(ctx, arg2);
+    Z3_dec_ref(ctx->z3_ctx, arg1);
+    Z3_dec_ref(ctx->z3_ctx, arg2);
     *out_exp = res;
     return 1;
 }
@@ -2084,7 +2127,7 @@ static inline int __check_conflicting_constraint(fuzzy_ctx_t* ctx, Z3_ast expr)
         decl_kind != Z3_OP_ULEQ && decl_kind != Z3_OP_SLT &&
         decl_kind != Z3_OP_ULT && decl_kind != Z3_OP_SGEQ &&
         decl_kind != Z3_OP_UGEQ && decl_kind != Z3_OP_SGT &&
-        decl_kind != Z3_OP_UGT) {
+        decl_kind != Z3_OP_UGT && decl_kind != Z3_OP_OR) {
         res = 0;
         goto OUT;
     }
@@ -3191,8 +3234,7 @@ PHASE_gradient_descend(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
 #endif
 
     Z3_ast out_ast;
-    int    valid_for_gd =
-        __gradient_transf_init(ctx->z3_ctx, branch_condition, &out_ast);
+    int valid_for_gd = __gradient_transf_init(ctx, branch_condition, &out_ast);
     if (!valid_for_gd)
         return 0;
 
@@ -6643,8 +6685,12 @@ static inline int query_check_light_and_multigoal(fuzzy_ctx_t* ctx,
     // not want to mutate them!
     ulong* p;
     set_reset_iter__ulong(&branch_ast_info->indexes, 0);
-    while (set_iter_next__ulong(&branch_ast_info->indexes, 0, &p))
+    while (set_iter_next__ulong(&branch_ast_info->indexes, 0, &p)) {
+#ifdef DEBUG_CHECK_LIGHT
+        Z3FUZZ_LOG("freezing inp[%ld] = 0x%02lx\n", *p, tmp_input[*p]);
+#endif
         set_add__ulong(&black_indexes, *p);
+    }
 
     ast_info_ptr new_ast_info = (ast_info_ptr)malloc(sizeof(ast_info_t));
     ast_info_init(new_ast_info);
