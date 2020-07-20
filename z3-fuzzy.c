@@ -6925,6 +6925,9 @@ static inline int query_check_light_and_multigoal(fuzzy_ctx_t* ctx,
     Z3FUZZ_LOG("Trying multigoal\n");
 #endif
 
+    fuzzy_stats_t bk_stats;
+    memcpy(&bk_stats, &ctx->stats, sizeof(fuzzy_stats_t));
+
     // set tmp_input to the input that made the branch condition true
     memcpy(tmp_input, tmp_opt_input,
            curr_t->values_len * sizeof(unsigned long));
@@ -6986,7 +6989,7 @@ static inline int query_check_light_and_multigoal(fuzzy_ctx_t* ctx,
             }
             if (res == 1) {
                 // the PI is true, we have fixed the input
-                ctx->stats.multigoal++;
+                bk_stats.multigoal++;
                 break;
             } else if (opt_found) {
                 // PI is not True, but this ast is True
@@ -7028,6 +7031,7 @@ static inline int query_check_light_and_multigoal(fuzzy_ctx_t* ctx,
     // we do not want to prevent the user to ask for the optimistic
     // solution
     opt_found = 1;
+    memcpy(&ctx->stats, &bk_stats, sizeof(fuzzy_stats_t));
 
     set_free__ulong(&black_indexes, NULL);
     ast_info_ptr_free(&new_ast_info);
