@@ -1191,6 +1191,136 @@ static inline int __evaluate_branch_query(fuzzy_ctx_t* ctx, Z3_ast query,
 // **** HEURISTICS - POPULATE ast_data_t struct ****
 // *************************************************
 
+static inline int is_bor_constraint(fuzzy_ctx_t* ctx, Z3_ast branch_condition)
+{
+    Z3_ast_kind node_kind = Z3_get_ast_kind(ctx->z3_ctx, branch_condition);
+    if (node_kind != Z3_APP_AST)
+        return 0;
+
+    Z3_app       node_app       = Z3_to_app(ctx->z3_ctx, branch_condition);
+    Z3_func_decl node_decl      = Z3_get_app_decl(ctx->z3_ctx, node_app);
+    Z3_decl_kind node_decl_kind = Z3_get_decl_kind(ctx->z3_ctx, node_decl);
+
+    if (node_decl_kind == Z3_OP_BOR)
+        return 1;
+    return 0;
+}
+
+static inline void flatten_bor_args(fuzzy_ctx_t* ctx, Z3_ast node,
+                                    da__Z3_ast* args)
+{
+    Z3_app   app        = Z3_to_app(ctx->z3_ctx, node);
+    unsigned num_fields = Z3_get_app_num_args(ctx->z3_ctx, app);
+
+    unsigned i;
+    for (i = 0; i < num_fields; ++i) {
+        Z3_ast child = Z3_get_app_arg(ctx->z3_ctx, app, i);
+        if (is_bor_constraint(ctx, child))
+            flatten_bor_args(ctx, child, args);
+        else {
+            Z3_inc_ref(ctx->z3_ctx, child);
+            da_add_item__Z3_ast(args, child);
+        }
+    }
+}
+
+static int __detect_single_byte(fuzzy_ctx_t* ctx, Z3_ast node, int* idx)
+{
+    if (Z3_get_ast_kind(ctx->z3_ctx, node) != Z3_APP_AST)
+        return 0;
+
+    int          res        = 0;
+    Z3_app       app        = Z3_to_app(ctx->z3_ctx, node);
+    unsigned     num_fields = Z3_get_app_num_args(ctx->z3_ctx, app);
+    Z3_func_decl decl       = Z3_get_app_decl(ctx->z3_ctx, app);
+    Z3_decl_kind decl_kind  = Z3_get_decl_kind(ctx->z3_ctx, decl);
+    if (num_fields > 1) {
+        return 0;
+    }
+
+    switch (decl_kind) {
+        case Z3_OP_EXTRACT:
+        case Z3_OP_ZERO_EXT:
+        case Z3_OP_SIGN_EXT: {
+            Z3_ast child = Z3_get_app_arg(ctx->z3_ctx, app, 0);
+            res          = __detect_single_byte(ctx, child, idx);
+            break;
+        }
+        case Z3_OP_UNINTERPRETED: {
+            Z3_symbol s            = Z3_get_decl_name(ctx->z3_ctx, decl);
+            int       symbol_index = Z3_get_symbol_int(ctx->z3_ctx, s);
+            if (symbol_index >= ctx->testcases.data[0].testcase_len)
+                // it is an assignment
+                res = 0;
+            else {
+                *idx = symbol_index;
+                res  = 1;
+            }
+            break;
+        }
+        default:
+            break;
+    }
+    return res;
+}
+
+static int __detect_concat_shift(fuzzy_ctx_t* ctx, Z3_ast node, int* s_idx,
+                                 int* pos)
+{
+    if (Z3_get_ast_kind(ctx->z3_ctx, node) != Z3_APP_AST)
+        return 0;
+
+    Z3_app       app        = Z3_to_app(ctx->z3_ctx, node);
+    unsigned     num_fields = Z3_get_app_num_args(ctx->z3_ctx, app);
+    Z3_func_decl decl       = Z3_get_app_decl(ctx->z3_ctx, app);
+    Z3_decl_kind decl_kind  = Z3_get_decl_kind(ctx->z3_ctx, decl);
+
+    if (decl_kind != Z3_OP_CONCAT) {
+        int idx;
+        if (!__detect_single_byte(ctx, node, &idx))
+            return 0;
+
+        *pos   = 0;
+        *s_idx = idx;
+        return 1;
+    }
+
+    if (num_fields != 2)
+        return 0;
+
+    *s_idx = -1;
+    *pos   = -1;
+
+    Z3_ast child_sx = Z3_get_app_arg(ctx->z3_ctx, app, 0);
+    Z3_inc_ref(ctx->z3_ctx, child_sx);
+    int idx;
+    if (__detect_single_byte(ctx, child_sx, &idx)) {
+        *s_idx = idx;
+    } else {
+        Z3_dec_ref(ctx->z3_ctx, child_sx);
+        return 0;
+    }
+    Z3_dec_ref(ctx->z3_ctx, child_sx);
+
+    Z3_ast child_dx = Z3_get_app_arg(ctx->z3_ctx, app, 1);
+    Z3_inc_ref(ctx->z3_ctx, child_dx);
+    if (Z3_get_ast_kind(ctx->z3_ctx, child_dx) == Z3_NUMERAL_AST) {
+        *pos = Z3_get_bv_sort_size(ctx->z3_ctx,
+                                   Z3_get_sort(ctx->z3_ctx, child_dx));
+        if (*pos % 8 != 0) {
+            Z3_dec_ref(ctx->z3_ctx, child_dx);
+            return 0;
+        }
+        *pos /= 8;
+    } else {
+        Z3_dec_ref(ctx->z3_ctx, child_dx);
+        return 0;
+    }
+    Z3_dec_ref(ctx->z3_ctx, child_dx);
+
+    return 1;
+}
+
 static int __detect_input_group(fuzzy_ctx_t* ctx, Z3_ast node,
                                 index_group_t* ig, char* approx)
 {
@@ -1205,7 +1335,7 @@ static int __detect_input_group(fuzzy_ctx_t* ctx, Z3_ast node,
             switch (decl_kind) {
                 case Z3_OP_EXTRACT: {
 #ifdef DEBUG_DETECT_GROUP
-                    printf("DETECT_GROUP [Z3_OP_EXTRACT]\n");
+                    Z3FUZZ_LOG("DETECT_GROUP [Z3_OP_EXTRACT]\n");
 #endif
 
                     int prev_n = ig->n;
@@ -1215,8 +1345,8 @@ static int __detect_input_group(fuzzy_ctx_t* ctx, Z3_ast node,
                     unsigned long low =
                         Z3_get_decl_int_parameter(ctx->z3_ctx, decl, 1);
 #ifdef DEBUG_DETECT_GROUP
-                    printf("hig: %lu, low: %lu, prev_n: %d\n", hig, low,
-                           prev_n);
+                    Z3FUZZ_LOG("hig: %lu, low: %lu, prev_n: %d\n", hig, low,
+                               prev_n);
 #endif
                     if (hig + 1 % 8 != 0 || low % 8 != 0)
                         *approx = 1;
@@ -1231,10 +1361,10 @@ static int __detect_input_group(fuzzy_ctx_t* ctx, Z3_ast node,
 
                     int next_n = ig->n;
 #ifdef DEBUG_DETECT_GROUP
-                    printf("next_n: %d\n", next_n);
+                    Z3FUZZ_LOG("next_n: %d\n", next_n);
                     for (i = 0; i < ig->n; ++i)
-                        printf(" @ ig->indexes[%u] = 0x%lx\n", i,
-                               ig->indexes[i]);
+                        Z3FUZZ_LOG(" @ ig->indexes[%u] = 0x%lx\n", i,
+                                   ig->indexes[i]);
 #endif
 
                     unsigned bv_width = next_n - prev_n;
@@ -1257,14 +1387,14 @@ static int __detect_input_group(fuzzy_ctx_t* ctx, Z3_ast node,
 
 #ifdef DEBUG_DETECT_GROUP
                     for (i = 0; i < ig->n; ++i)
-                        printf(" > ig->indexes[%u] = 0x%lx\n", i,
-                               ig->indexes[i]);
+                        Z3FUZZ_LOG(" > ig->indexes[%u] = 0x%lx\n", i,
+                                   ig->indexes[i]);
 #endif
                     break;
                 }
                 case Z3_OP_BAND: {
 #ifdef DEBUG_DETECT_GROUP
-                    printf("DETECT_GROUP [Z3_OP_BAND]\n");
+                    Z3FUZZ_LOG("DETECT_GROUP [Z3_OP_BAND]\n");
 #endif
                     // check if one of the two is a constant
                     // recursive call as before
@@ -1310,7 +1440,7 @@ static int __detect_input_group(fuzzy_ctx_t* ctx, Z3_ast node,
 
                     int prev_n = ig->n;
 #ifdef DEBUG_DETECT_GROUP
-                    printf("prev_n: %d\n", prev_n);
+                    Z3FUZZ_LOG("prev_n: %d\n", prev_n);
 #endif
 
                     // recursive call
@@ -1326,11 +1456,11 @@ static int __detect_input_group(fuzzy_ctx_t* ctx, Z3_ast node,
 
                     int next_n = ig->n;
 #ifdef DEBUG_DETECT_GROUP
-                    printf("low: %lu, hig: %lu\n", low, hig);
-                    printf("next_n: %d\n", next_n);
+                    Z3FUZZ_LOG("low: %lu, hig: %lu\n", low, hig);
+                    Z3FUZZ_LOG("next_n: %d\n", next_n);
                     for (i = 0; i < ig->n; ++i)
-                        printf(" @ ig->indexes[%u] = 0x%lx\n", i,
-                               ig->indexes[i]);
+                        Z3FUZZ_LOG(" @ ig->indexes[%u] = 0x%lx\n", i,
+                                   ig->indexes[i]);
 #endif
 
                     unsigned bv_width = next_n - prev_n;
@@ -1354,8 +1484,8 @@ static int __detect_input_group(fuzzy_ctx_t* ctx, Z3_ast node,
 
 #ifdef DEBUG_DETECT_GROUP
                     for (i = 0; i < ig->n; ++i)
-                        printf(" > ig->indexes[%u] = 0x%lx\n", i,
-                               ig->indexes[i]);
+                        Z3FUZZ_LOG(" > ig->indexes[%u] = 0x%lx\n", i,
+                                   ig->indexes[i]);
 #endif
                     free(tmp);
 
@@ -1368,8 +1498,63 @@ static int __detect_input_group(fuzzy_ctx_t* ctx, Z3_ast node,
                 case Z3_OP_BOR: {
                     // detect if is an OR/ADD of BSHL
 #ifdef DEBUG_DETECT_GROUP
-                    printf("DETECT_GROUP [Z3_OP_BADD/Z3_OP_BOR]\n");
+                    Z3FUZZ_LOG("DETECT_GROUP [Z3_OP_BADD/Z3_OP_BOR]\n");
 #endif
+
+                    if (decl_kind == Z3_OP_BOR) {
+
+                        da__Z3_ast args;
+                        da_init__Z3_ast(&args);
+                        flatten_bor_args(ctx, node, &args);
+
+                        int found_concat_shifts = 1;
+                        int n_tmp_inps          = 0;
+                        int tmp_inps[8]         = {-1, -1, -1, -1, -1, -1, -1};
+                        for (i = 0; i < args.size; ++i) {
+                            Z3_ast child = args.data[i];
+
+                            int symb_idx, pos;
+                            if (!__detect_concat_shift(ctx, child, &symb_idx,
+                                                       &pos)) {
+                                found_concat_shifts = 0;
+                                break;
+                            }
+
+                            if (tmp_inps[pos] != -1) {
+                                found_concat_shifts = 0;
+                                break;
+                            }
+
+                            tmp_inps[pos] = symb_idx;
+                            n_tmp_inps++;
+                        }
+                        for (i = 0; i < args.size; ++i)
+                            Z3_dec_ref(ctx->z3_ctx, args.data[i]);
+                        da_free__Z3_ast(&args, NULL);
+
+                        if (found_concat_shifts) {
+                            for (i = 0; i < 8; ++i) {
+                                if (ig->n >= MAX_GROUP_SIZE) {
+                                    res = 0;
+                                    break;
+                                }
+                                if (tmp_inps[i] == -1)
+                                    break;
+                                ig->indexes[ig->n++] = tmp_inps[i];
+                            }
+                            if (i != n_tmp_inps) {
+                                res = 0;
+                                break;
+                            }
+#ifdef DEBUG_DETECT_GROUP
+                            Z3FUZZ_LOG("Detected with detect concat shift the "
+                                       "group:\n");
+                            print_index_group(ig);
+#endif
+                            res = 1;
+                            break;
+                        }
+                    }
 
                     res                            = 0;
                     unsigned long shift_mask       = 0;
@@ -1383,7 +1568,7 @@ static int __detect_input_group(fuzzy_ctx_t* ctx, Z3_ast node,
                             if (Z3_get_decl_kind(ctx->z3_ctx, child_decl) ==
                                 Z3_OP_BSHL) {
 #ifdef DEBUG_DETECT_GROUP
-                                printf("> shift\n");
+                                Z3FUZZ_LOG("> shift\n");
 #endif
                                 unsigned long shift_val = 0;
 
@@ -1417,7 +1602,8 @@ static int __detect_input_group(fuzzy_ctx_t* ctx, Z3_ast node,
                                 }
 
 #ifdef DEBUG_DETECT_GROUP
-                                printf("> shift val: 0x%016lx\n", shift_val);
+                                Z3FUZZ_LOG("> shift val: 0x%016lx\n",
+                                           shift_val);
 #endif
 
                                 unsigned char prev_n = ig->n;
@@ -1448,7 +1634,7 @@ static int __detect_input_group(fuzzy_ctx_t* ctx, Z3_ast node,
                                 if (!res)
                                     break;
 #ifdef DEBUG_DETECT_GROUP
-                                printf("> shift OK\n");
+                                Z3FUZZ_LOG("> shift OK\n");
 #endif
                                 continue;
                             }
@@ -1460,13 +1646,13 @@ static int __detect_input_group(fuzzy_ctx_t* ctx, Z3_ast node,
                             break;
                         }
 #ifdef DEBUG_DETECT_GROUP
-                        printf("> op != shift\n");
+                        Z3FUZZ_LOG("> op != shift\n");
 #endif
                         res = __detect_input_group(ctx, child, ig, approx);
                         if (!res)
                             break;
 #ifdef DEBUG_DETECT_GROUP
-                        printf("> op != shift OK\n");
+                        Z3FUZZ_LOG("> op != shift OK\n");
 #endif
                     }
 
@@ -1923,6 +2109,17 @@ static void __detect_early_constants(fuzzy_ctx_t* ctx, Z3_ast v,
                     __detect_early_constants(ctx, child2, data);
                     Z3_dec_ref(ctx->z3_ctx, child2);
                     break;
+                }
+                case Z3_OP_OR:
+                case Z3_OP_AND: {
+                    unsigned num_fields = Z3_get_app_num_args(ctx->z3_ctx, app);
+                    unsigned i          = 0;
+                    for (i = 0; i < num_fields; ++i) {
+                        Z3_ast child = Z3_get_app_arg(ctx->z3_ctx, app, i);
+                        Z3_inc_ref(ctx->z3_ctx, child);
+                        __detect_early_constants(ctx, child, data);
+                        Z3_dec_ref(ctx->z3_ctx, child);
+                    }
                 }
                 case Z3_OP_EQ:
                 case Z3_OP_UGEQ:
@@ -6948,6 +7145,7 @@ int z3fuzz_query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
 
 #ifdef DEBUG_CHECK_LIGHT
     Z3FUZZ_LOG("Called z3fuzz_query_check_light\n");
+    z3fuzz_print_expr(ctx, branch_condition);
 #endif
 
     int res;
