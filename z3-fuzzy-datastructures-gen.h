@@ -98,7 +98,7 @@ typedef struct ast_ptr {
     Z3_ast     ast;
 } ast_ptr;
 #define SET_N_BUCKETS 256
-#define SET_DATA_T    ast_ptr
+#define SET_DATA_T ast_ptr
 #include <set.h>
 
 typedef set__ast_ptr* conflicting_ptr;
@@ -179,4 +179,23 @@ static void index_to_group_intervals_el_free(da__interval_group_ptr* el)
 // ******* da Z3_ast **********************
 #define DA_DATA_T Z3_ast
 #include <dynamic-array.h>
+// ****************************************
+// ********* ItS ite **********************
+typedef struct ite_its_t {
+    index_group_t ig;
+    unsigned long val;
+} ite_its_t;
+#define DA_DATA_T ite_its_t
+#include <dynamic-array.h>
+
+int da_check_el__ite_its_t(da__ite_its_t* d, ite_its_t* el)
+{
+    unsigned i;
+    for (i = 0; i < d->size; ++i) {
+        if (d->data[i].val == el->val &&
+            index_group_equals(&d->data[i].ig, &el->ig))
+            return 1;
+    }
+    return 0;
+}
 // ****************************************

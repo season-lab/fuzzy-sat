@@ -110,6 +110,7 @@ typedef struct ast_info_t {
     indexes_t         indexes;
     da__index_group_t index_groups_ud;
     da__ulong         indexes_ud;
+    da__ite_its_t     inp_to_state_ite;
 } ast_info_t;
 
 typedef struct ast_data_t {
@@ -308,6 +309,7 @@ static inline void ast_info_init(ast_info_ptr ptr)
     set_init__ulong(&ptr->indexes, &index_hash, &index_equals);
     da_init__ulong(&ptr->indexes_ud);
     da_init__index_group_t(&ptr->index_groups_ud);
+    da_init__ite_its_t(&ptr->inp_to_state_ite);
     ptr->linear_arithmetic_operations    = 0;
     ptr->nonlinear_arithmetic_operations = 0;
     ptr->input_extract_ops               = 0;
@@ -321,6 +323,7 @@ static inline void ast_info_reset(ast_info_ptr ptr)
     set_remove_all__ulong(&ptr->indexes, NULL);
     da_remove_all__ulong(&ptr->indexes_ud, NULL);
     da_remove_all__index_group_t(&ptr->index_groups_ud, NULL);
+    da_remove_all__ite_its_t(&ptr->inp_to_state_ite, NULL);
     ptr->linear_arithmetic_operations    = 0;
     ptr->nonlinear_arithmetic_operations = 0;
     ptr->input_extract_ops               = 0;
@@ -334,6 +337,7 @@ static inline void ast_info_ptr_free(ast_info_ptr* ptr)
     set_free__ulong(&(*ptr)->indexes, NULL);
     da_free__ulong(&(*ptr)->indexes_ud, NULL);
     da_free__index_group_t(&(*ptr)->index_groups_ud, NULL);
+    da_free__ite_its_t(&(*ptr)->inp_to_state_ite, NULL);
     free(*ptr);
 }
 
@@ -1868,6 +1872,11 @@ static void __union_ast_info(ast_info_ptr dst, ast_info_ptr src)
                                         &src->index_groups_ud.data[i]))
             da_add_item__index_group_t(&dst->index_groups_ud,
                                        src->index_groups_ud.data[i]);
+    for (i = 0; i < src->inp_to_state_ite.size; ++i)
+        if (!da_check_el__ite_its_t(&dst->inp_to_state_ite,
+                                    &src->inp_to_state_ite.data[i]))
+            da_add_item__ite_its_t(&dst->inp_to_state_ite,
+                                   src->inp_to_state_ite.data[i]);
 
     dst->input_extract_ops += src->input_extract_ops;
     dst->linear_arithmetic_operations += src->linear_arithmetic_operations;
@@ -2042,6 +2051,22 @@ static inline void __detect_involved_inputs(fuzzy_ctx_t* ctx, Z3_ast v,
                 case Z3_OP_BSREM_I:
                 case Z3_OP_BSMOD: {
                     new_el->input_extract_ops++;
+                    break;
+                }
+                case Z3_OP_ITE: {
+                    // look in ite condition
+                    Z3_ast cond = Z3_get_app_arg(ctx->z3_ctx, app, 0);
+                    Z3_inc_ref(ctx->z3_ctx, cond);
+                    ast_data_t tmp = {0};
+                    __detect_input_to_state_query(ctx, cond, &tmp);
+                    if (tmp.is_input_to_state) {
+                        ite_its_t its_el = {.ig  = tmp.input_to_state_group,
+                                            .val = tmp.input_to_state_const};
+                        da_add_item__ite_its_t(&new_el->inp_to_state_ite,
+                                               its_el);
+                    }
+                    Z3_dec_ref(ctx->z3_ctx, cond);
+                    break;
                 }
                 default: {
                     break;
@@ -3272,7 +3297,8 @@ static __always_inline int PHASE_input_to_state_extended(
     if (unlikely(skip_input_to_state_extended))
         return 0;
 
-    ASSERT_OR_ABORT(ast_data.values.size > 0,
+    ASSERT_OR_ABORT(ast_data.values.size > 0 ||
+                        ast_data.inputs->inp_to_state_ite.size > 0,
                     "PHASE_input_to_state_extended  no early constants");
 
 #ifdef DEBUG_CHECK_LIGHT
@@ -3368,6 +3394,38 @@ static __always_inline int PHASE_input_to_state_extended(
                 index            = group->indexes[k];
                 tmp_input[index] = current_testcase->values[index];
             }
+        }
+    }
+
+    // ite constants
+    for (i = 0; i < ast_data.inputs->inp_to_state_ite.size; ++i) {
+        ite_its_t* its_el = &ast_data.inputs->inp_to_state_ite.data[i];
+        set_tmp_input_group_to_value(&its_el->ig, its_el->val);
+    }
+    int eval_v = __evaluate_branch_query(
+        ctx, query, branch_condition, tmp_input, current_testcase->value_sizes,
+        current_testcase->values_len);
+    if (eval_v == 1) {
+#ifdef PRINT_SAT
+        Z3FUZZ_LOG("[check light - input to state extended] Query "
+                   "is SAT\n");
+#endif
+        ctx->stats.input_to_state_ext++;
+        ctx->stats.num_sat++;
+        __vals_long_to_char(tmp_input, tmp_proof,
+                            current_testcase->testcase_len);
+        *proof      = tmp_proof;
+        *proof_size = current_testcase->values_len;
+        return 1;
+    } else if (unlikely(eval_v == TIMEOUT_V))
+        return TIMEOUT_V;
+
+    // restore tmp_input
+    for (i = 0; i < ast_data.inputs->inp_to_state_ite.size; ++i) {
+        ite_its_t* its_el = &ast_data.inputs->inp_to_state_ite.data[i];
+        for (k = 0; k < its_el->ig.n; ++k) {
+            index            = its_el->ig.indexes[k];
+            tmp_input[index] = current_testcase->values[index];
         }
     }
     return 0;
@@ -6688,7 +6746,8 @@ static int __query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
         return 1;
 
     // Input to State Extended
-    if (ast_data.values.size > 0) {
+    if (ast_data.values.size > 0 ||
+        ast_data.inputs->inp_to_state_ite.size > 0) {
         int res = PHASE_input_to_state_extended(ctx, query, branch_condition,
                                                 proof, proof_size);
         if (unlikely(res == TIMEOUT_V))
