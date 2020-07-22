@@ -48,6 +48,7 @@
 // #define USE_HAVOC_MOD
 #define USE_AFL_DET_GROUPS
 #define ENABLE_AGGRESSIVE_OPTIMISTIC
+#define AVOID_GD_FALLBACK 0
 
 static int log_query_stats = 0;
 static int skip_notify     = 0;
@@ -492,7 +493,7 @@ static int __gd_init_eval(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast expr,
     }
 
     unsigned idx = 0;
-    if (!__check_overlapping_groups()) {
+    if (AVOID_GD_FALLBACK || !__check_overlapping_groups()) {
         out_ctx->mapping_size = ast_data.inputs->index_groups.size;
         out_ctx->mapping =
             (mapping_el_t*)malloc(sizeof(mapping_el_t) * out_ctx->mapping_size);
@@ -1187,7 +1188,7 @@ static inline int __evaluate_branch_query(fuzzy_ctx_t* ctx, Z3_ast query,
         }
 #endif
     }
-    res = res > 0 ? 1 : 0;
+    res = res != 0 ? 1 : 0;
     return res;
 }
 
@@ -6925,6 +6926,10 @@ static inline int query_check_light_and_multigoal(fuzzy_ctx_t* ctx,
     Z3FUZZ_LOG("Trying multigoal\n");
 #endif
 
+    Z3_ast qb[] = {branch_condition, query};
+    query = Z3_mk_and(ctx->z3_ctx, 2, qb);
+    Z3_inc_ref(ctx->z3_ctx, query);
+
     fuzzy_stats_t bk_stats;
     memcpy(&bk_stats, &ctx->stats, sizeof(fuzzy_stats_t));
 
@@ -7033,6 +7038,7 @@ static inline int query_check_light_and_multigoal(fuzzy_ctx_t* ctx,
     opt_found = 1;
     memcpy(&ctx->stats, &bk_stats, sizeof(fuzzy_stats_t));
 
+    Z3_dec_ref(ctx->z3_ctx, query);
     set_free__ulong(&black_indexes, NULL);
     ast_info_ptr_free(&new_ast_info);
 END_FUN_1:
@@ -7407,7 +7413,7 @@ unsigned long z3fuzz_maximize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_maximize,
 
     Z3_inc_ref(ctx->z3_ctx, original_to_maximize);
     if (sort_size < 64) {
-        to_maximize = Z3_mk_sign_ext(ctx->z3_ctx, 64 - sort_size, to_maximize);
+        to_maximize = Z3_mk_zero_ext(ctx->z3_ctx, 64 - sort_size, to_maximize);
         sort_size   = 64;
     }
     to_maximize = Z3_mk_bvneg(ctx->z3_ctx, to_maximize);
@@ -7482,7 +7488,7 @@ unsigned long z3fuzz_minimize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_minimize,
     Z3_ast to_minimize_original = to_minimize;
     Z3_inc_ref(ctx->z3_ctx, to_minimize_original);
     if (sort_size < 64) {
-        to_minimize = Z3_mk_sign_ext(ctx->z3_ctx, 64 - sort_size, to_minimize);
+        to_minimize = Z3_mk_zero_ext(ctx->z3_ctx, 64 - sort_size, to_minimize);
         sort_size   = 64;
     }
     Z3_inc_ref(ctx->z3_ctx, to_minimize);

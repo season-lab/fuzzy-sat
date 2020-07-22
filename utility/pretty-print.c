@@ -30,6 +30,14 @@ static inline void __reset_cursor() {
   row_idx = 0;
 }
 
+static int __dim_changed() {
+  struct winsize w;
+  ioctl(0, TIOCGWINSZ, &w);
+
+  return w.ws_row -1 != num_rows || \
+    w.ws_col - 1 != num_cols;
+}
+
 void pp_init() {
   setvbuf(stdin, NULL, _IONBF, 0);
   setvbuf(stdout, NULL, _IONBF, 0);
@@ -68,6 +76,9 @@ void pp_set_col(int i) {
 }
 
 void pp_print_string(int row, int col, const char* s) {
+  if (__dim_changed())
+    pp_init();
+
   pp_set_line(row);
   pp_set_col(col);
   __clear_line();
