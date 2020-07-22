@@ -1516,6 +1516,10 @@ static int __detect_input_group(fuzzy_ctx_t* ctx, Z3_ast node,
                         int n_tmp_inps          = 0;
                         int tmp_inps[8]         = {-1, -1, -1, -1, -1, -1, -1};
                         for (i = 0; i < args.size; ++i) {
+                            if (i >= 8) {
+                                found_concat_shifts = 0;
+                                break;
+                            }
                             Z3_ast child = args.data[i];
 
                             int symb_idx, pos;
@@ -1551,6 +1555,9 @@ static int __detect_input_group(fuzzy_ctx_t* ctx, Z3_ast node,
                                 res = 0;
                                 break;
                             }
+                            // invert group!
+                            for (i = 0; i < n_tmp_inps; ++i)
+                                ig->indexes[i] = tmp_inps[n_tmp_inps - i - 1];
 #ifdef DEBUG_DETECT_GROUP
                             Z3FUZZ_LOG("Detected with detect concat shift the "
                                        "group:\n");
