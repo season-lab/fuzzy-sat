@@ -1945,6 +1945,39 @@ static void ast_info_populate_with_blacklist(ast_info_ptr dst, ast_info_ptr src,
     }
 }
 
+static inline int is_and_constraint(fuzzy_ctx_t* ctx, Z3_ast branch_condition)
+{
+    Z3_ast_kind node_kind = Z3_get_ast_kind(ctx->z3_ctx, branch_condition);
+    if (node_kind != Z3_APP_AST)
+        return 0;
+
+    Z3_app       node_app       = Z3_to_app(ctx->z3_ctx, branch_condition);
+    Z3_func_decl node_decl      = Z3_get_app_decl(ctx->z3_ctx, node_app);
+    Z3_decl_kind node_decl_kind = Z3_get_decl_kind(ctx->z3_ctx, node_decl);
+
+    if (node_decl_kind == Z3_OP_AND)
+        return 1;
+    return 0;
+}
+
+static inline void flatten_and_args(fuzzy_ctx_t* ctx, Z3_ast node,
+                                    da__Z3_ast* args)
+{
+    Z3_app   app        = Z3_to_app(ctx->z3_ctx, node);
+    unsigned num_fields = Z3_get_app_num_args(ctx->z3_ctx, app);
+
+    unsigned i;
+    for (i = 0; i < num_fields; ++i) {
+        Z3_ast child = Z3_get_app_arg(ctx->z3_ctx, app, i);
+        if (is_and_constraint(ctx, child))
+            flatten_and_args(ctx, child, args);
+        else {
+            Z3_inc_ref(ctx->z3_ctx, child);
+            da_add_item__Z3_ast(args, child);
+        }
+    }
+}
+
 static inline void __detect_involved_inputs(fuzzy_ctx_t* ctx, Z3_ast v,
                                             ast_info_ptr* data)
 {
@@ -2081,14 +2114,28 @@ static inline void __detect_involved_inputs(fuzzy_ctx_t* ctx, Z3_ast v,
                     // look in ite condition
                     Z3_ast cond = Z3_get_app_arg(ctx->z3_ctx, app, 0);
                     Z3_inc_ref(ctx->z3_ctx, cond);
-                    ast_data_t tmp = {0};
-                    __detect_input_to_state_query(ctx, cond, &tmp, 1);
-                    if (tmp.is_input_to_state) {
-                        ite_its_t its_el = {.ig  = tmp.input_to_state_group,
-                                            .val = tmp.input_to_state_const};
-                        da_add_item__ite_its_t(&new_el->inp_to_state_ite,
-                                               its_el);
+                    da__Z3_ast and_vals;
+                    da_init__Z3_ast(&and_vals);
+                    if (is_and_constraint(ctx, cond))
+                        flatten_and_args(ctx, cond, &and_vals);
+                    else
+                        da_add_item__Z3_ast(&and_vals, cond);
+
+                    unsigned i;
+                    for (i = 0; i < and_vals.size; ++i) {
+                        ast_data_t tmp = {0};
+                        __detect_input_to_state_query(ctx, and_vals.data[i],
+                                                      &tmp, 1);
+                        if (tmp.is_input_to_state) {
+                            ite_its_t its_el = {.ig = tmp.input_to_state_group,
+                                                .val =
+                                                    tmp.input_to_state_const};
+                            da_add_item__ite_its_t(&new_el->inp_to_state_ite,
+                                                   its_el);
+                        }
+                        Z3_dec_ref(ctx->z3_ctx, and_vals.data[i]);
                     }
+                    da_free__Z3_ast(&and_vals, NULL);
                     Z3_dec_ref(ctx->z3_ctx, cond);
                     break;
                 }
@@ -7025,8 +7072,7 @@ static inline int query_check_light_and_multigoal(fuzzy_ctx_t* ctx,
                     ctx->stats.conflicting_fallbacks_no_true;
                 bk_stats.conflicting_fallbacks_same_inputs =
                     ctx->stats.conflicting_fallbacks_same_inputs;
-                bk_stats.num_evaluate =
-                    ctx->stats.num_evaluate;
+                bk_stats.num_evaluate = ctx->stats.num_evaluate;
                 break;
             } else if (opt_found) {
                 // PI is not True, but this ast is True
@@ -7077,39 +7123,6 @@ END_FUN_1:
     set_free__ulong(&local_conflicting_asts, NULL);
 END_FUN_2:
     return res;
-}
-
-static inline int is_and_constraint(fuzzy_ctx_t* ctx, Z3_ast branch_condition)
-{
-    Z3_ast_kind node_kind = Z3_get_ast_kind(ctx->z3_ctx, branch_condition);
-    if (node_kind != Z3_APP_AST)
-        return 0;
-
-    Z3_app       node_app       = Z3_to_app(ctx->z3_ctx, branch_condition);
-    Z3_func_decl node_decl      = Z3_get_app_decl(ctx->z3_ctx, node_app);
-    Z3_decl_kind node_decl_kind = Z3_get_decl_kind(ctx->z3_ctx, node_decl);
-
-    if (node_decl_kind == Z3_OP_AND)
-        return 1;
-    return 0;
-}
-
-static inline void flatten_and_args(fuzzy_ctx_t* ctx, Z3_ast node,
-                                    da__Z3_ast* args)
-{
-    Z3_app   app        = Z3_to_app(ctx->z3_ctx, node);
-    unsigned num_fields = Z3_get_app_num_args(ctx->z3_ctx, app);
-
-    unsigned i;
-    for (i = 0; i < num_fields; ++i) {
-        Z3_ast child = Z3_get_app_arg(ctx->z3_ctx, app, i);
-        if (is_and_constraint(ctx, child))
-            flatten_and_args(ctx, child, args);
-        else {
-            Z3_inc_ref(ctx->z3_ctx, child);
-            da_add_item__Z3_ast(args, child);
-        }
-    }
 }
 
 static inline Z3_ast get_query_without_branch_condition(fuzzy_ctx_t* ctx,

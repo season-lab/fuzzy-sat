@@ -44,6 +44,7 @@ for line in f_jsf:
     if sat_jsf == "1":
         n_sat_jsf += 1
         if not fuzzy_sat_dict[i]:
+            print("query %d jsf but not fuzzy" % i)
             jfs_sat_but_no_fuzzy += 1
     tot_t_jsf += t_jsf
     i += 1

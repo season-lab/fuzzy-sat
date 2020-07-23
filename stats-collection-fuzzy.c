@@ -5,7 +5,6 @@
 #include "z3-fuzzy.h"
 
 #define LOG_ON_FILE
-#define Z3_SOLVER_TIMEOUT "10000"
 #define FUZZY_SOLVER_TIMEOUT 1000
 
 fuzzy_ctx_t fctx;
@@ -114,7 +113,6 @@ int main(int argc, char* argv[])
     char*     seed_filename  = argv[2];
     char*     tests_dir      = argc > 3 ? argv[3] : NULL;
     Z3_config cfg            = Z3_mk_config();
-    Z3_set_param_value(cfg, "timeout", Z3_SOLVER_TIMEOUT);
     Z3_context           ctx = Z3_mk_context(cfg);
     unsigned char const* proof;
     unsigned long        proof_size;
