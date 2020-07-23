@@ -1736,11 +1736,10 @@ static int __detect_input_group(fuzzy_ctx_t* ctx, Z3_ast node,
 }
 
 static void __detect_input_to_state_query(fuzzy_ctx_t* ctx, Z3_ast node,
-                                          ast_data_t* data)
+                                          ast_data_t* data, int constant_strict)
 {
-    Z3_ast_kind node_kind            = Z3_get_ast_kind(ctx->z3_ctx, node);
-    unsigned    is_app               = node_kind == Z3_APP_AST;
-    int         const_transformation = 0;
+    Z3_ast_kind node_kind = Z3_get_ast_kind(ctx->z3_ctx, node);
+    unsigned    is_app    = node_kind == Z3_APP_AST;
 
     Z3_app       node_app = is_app ? Z3_to_app(ctx->z3_ctx, node) : (Z3_app)0;
     Z3_func_decl node_decl =
@@ -1802,21 +1801,21 @@ static void __detect_input_to_state_query(fuzzy_ctx_t* ctx, Z3_ast node,
         return;
     }
 
-    // condition 2 - one child is a constant
-    int      condition_ok  = 0;
-    unsigned const_operand = 0;
-    unsigned num_fields    = Z3_get_app_num_args(ctx->z3_ctx, node_app);
+    // condition 2 - one child is input-to-state
+    int      condition_ok = 0;
+    unsigned its_operand  = 0;
+    unsigned num_fields   = Z3_get_app_num_args(ctx->z3_ctx, node_app);
     unsigned i;
     for (i = 0; i < num_fields; ++i) {
         Z3_ast child = Z3_get_app_arg(ctx->z3_ctx, node_app, i);
-        if (Z3_get_ast_kind(ctx->z3_ctx, child) == Z3_NUMERAL_AST) {
-            Z3_bool successGet = Z3_get_numeral_uint64(
-                ctx->z3_ctx, child, (uint64_t*)&data->input_to_state_const);
-            if (successGet == Z3_FALSE)
-                return; // constant is too big
-            data->input_to_state_const += const_transformation;
-            condition_ok  = 1;
-            const_operand = i;
+        Z3_inc_ref(ctx->z3_ctx, child);
+        char approx;
+        condition_ok = __detect_input_group(
+                           ctx, child, &data->input_to_state_group, &approx) &&
+                       data->input_to_state_group.n > 0;
+        Z3_dec_ref(ctx->z3_ctx, child);
+        if (condition_ok) {
+            its_operand = i;
             break;
         }
     }
@@ -1826,20 +1825,37 @@ static void __detect_input_to_state_query(fuzzy_ctx_t* ctx, Z3_ast node,
         return;
     }
 
-    // condition 3 - the other child is input-to-state
-    Z3_ast non_const_ast =
-        Z3_get_app_arg(ctx->z3_ctx, node_app, const_operand == 1 ? 0 : 1);
-    Z3_inc_ref(ctx->z3_ctx, non_const_ast);
-    char approx;
-    condition_ok = __detect_input_group(ctx, non_const_ast,
-                                        &data->input_to_state_group, &approx) &&
-                   data->input_to_state_group.n > 0;
-    Z3_dec_ref(ctx->z3_ctx, non_const_ast);
+    // The other child is a constant?
+    condition_ok           = 0;
+    unsigned const_operand = its_operand == 1 ? 0 : 1;
+    Z3_ast   other_child = Z3_get_app_arg(ctx->z3_ctx, node_app, const_operand);
+    Z3_inc_ref(ctx->z3_ctx, other_child);
+    if (Z3_get_ast_kind(ctx->z3_ctx, other_child) == Z3_NUMERAL_AST) {
+        Z3_bool successGet = Z3_get_numeral_uint64(
+            ctx->z3_ctx, other_child, (uint64_t*)&data->input_to_state_const);
+        if (successGet == Z3_FALSE) {
+            Z3_dec_ref(ctx->z3_ctx, other_child);
+            data->is_input_to_state = 0;
+            return; // constant is too big
+        }
+        condition_ok = 1;
+    }
 
     if (!condition_ok) {
-        data->is_input_to_state = 0;
-        return;
+        if (constant_strict) {
+            data->is_input_to_state = 0;
+            Z3_dec_ref(ctx->z3_ctx, other_child);
+            return;
+        }
+        // Not a constant, lets evaluate the AST in the current testcase...
+        testcase_t* current_testcase = &ctx->testcases.data[0];
+
+        data->input_to_state_const = ctx->model_eval(
+            ctx->z3_ctx, other_child, current_testcase->values,
+            current_testcase->value_sizes, current_testcase->values_len, NULL);
     }
+
+    Z3_dec_ref(ctx->z3_ctx, other_child);
 
     if (is_neg && (op_type == Z3_OP_EQ || op_type == Z3_OP_UGEQ ||
                    op_type == Z3_OP_SGEQ)) {
@@ -2066,7 +2082,7 @@ static inline void __detect_involved_inputs(fuzzy_ctx_t* ctx, Z3_ast v,
                     Z3_ast cond = Z3_get_app_arg(ctx->z3_ctx, app, 0);
                     Z3_inc_ref(ctx->z3_ctx, cond);
                     ast_data_t tmp = {0};
-                    __detect_input_to_state_query(ctx, cond, &tmp);
+                    __detect_input_to_state_query(ctx, cond, &tmp, 1);
                     if (tmp.is_input_to_state) {
                         ite_its_t its_el = {.ig  = tmp.input_to_state_group,
                                             .val = tmp.input_to_state_const};
@@ -3092,7 +3108,7 @@ static inline void __init_global_data(fuzzy_ctx_t* ctx, Z3_ast query,
 
     __reset_ast_data();
 
-    __detect_input_to_state_query(ctx, branch_condition, &ast_data);
+    __detect_input_to_state_query(ctx, branch_condition, &ast_data, 0);
     detect_involved_inputs_wrapper(ctx, branch_condition, &ast_data.inputs);
     __detect_early_constants(ctx, branch_condition, &ast_data);
 
@@ -6934,7 +6950,7 @@ static inline int query_check_light_and_multigoal(fuzzy_ctx_t* ctx,
 #endif
 
     Z3_ast qb[] = {branch_condition, query};
-    query = Z3_mk_and(ctx->z3_ctx, 2, qb);
+    query       = Z3_mk_and(ctx->z3_ctx, 2, qb);
     Z3_inc_ref(ctx->z3_ctx, query);
 
     fuzzy_stats_t bk_stats;
