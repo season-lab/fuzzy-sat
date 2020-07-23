@@ -7018,6 +7018,15 @@ static inline int query_check_light_and_multigoal(fuzzy_ctx_t* ctx,
             if (res == 1) {
                 // the PI is true, we have fixed the input
                 bk_stats.multigoal++;
+                bk_stats.num_sat++;
+                bk_stats.conflicting_fallbacks =
+                    ctx->stats.conflicting_fallbacks;
+                bk_stats.conflicting_fallbacks_no_true =
+                    ctx->stats.conflicting_fallbacks_no_true;
+                bk_stats.conflicting_fallbacks_same_inputs =
+                    ctx->stats.conflicting_fallbacks_same_inputs;
+                bk_stats.num_evaluate =
+                    ctx->stats.num_evaluate;
                 break;
             } else if (opt_found) {
                 // PI is not True, but this ast is True
