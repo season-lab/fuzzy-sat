@@ -2118,8 +2118,10 @@ static inline void __detect_involved_inputs(fuzzy_ctx_t* ctx, Z3_ast v,
                     da_init__Z3_ast(&and_vals);
                     if (is_and_constraint(ctx, cond))
                         flatten_and_args(ctx, cond, &and_vals);
-                    else
+                    else {
+                        Z3_inc_ref(ctx->z3_ctx, cond);
                         da_add_item__Z3_ast(&and_vals, cond);
+                    }
 
                     unsigned i;
                     for (i = 0; i < and_vals.size; ++i) {
