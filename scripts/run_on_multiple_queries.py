@@ -79,6 +79,9 @@ def run_jfs(query):
         )
     except subprocess.TimeoutExpired:
         output = b""
+    except subprocess.CalledProcessError:
+        print("WARNING: called process error on %s" % query)
+        output = b""
     end = time.time()
     elapsed = (end - start) * 1000.0
 
