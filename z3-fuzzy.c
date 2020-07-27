@@ -606,7 +606,8 @@ static int __gradient_transf_init(fuzzy_ctx_t* ctx, Z3_ast expr,
     }
     Z3_inc_ref(ctx->z3_ctx, arg);
 
-    if (decl_kind == Z3_OP_OR) {
+    if ((decl_kind == Z3_OP_OR && !is_not) ||
+        (decl_kind == Z3_OP_AND && is_not)) {
         // detect whether all the conditions but one are valid
         Z3_ast valid_arg = NULL;
 
@@ -614,6 +615,8 @@ static int __gradient_transf_init(fuzzy_ctx_t* ctx, Z3_ast expr,
         unsigned nargs = Z3_get_app_num_args(ctx->z3_ctx, app);
         for (i = 0; i < nargs; ++i) {
             Z3_ast child = Z3_get_app_arg(ctx->z3_ctx, app, i);
+            if (is_not)
+                child = Z3_mk_not(ctx->z3_ctx, child);
             Z3_inc_ref(ctx->z3_ctx, child);
 
             ast_info_ptr ast_info;
@@ -645,6 +648,18 @@ static int __gradient_transf_init(fuzzy_ctx_t* ctx, Z3_ast expr,
         app       = Z3_to_app(ctx->z3_ctx, arg);
         decl      = Z3_get_app_decl(ctx->z3_ctx, app);
         decl_kind = Z3_get_decl_kind(ctx->z3_ctx, decl);
+
+        while (decl_kind == Z3_OP_NOT) {
+            Z3_ast prev_arg = arg;
+            arg             = Z3_get_app_arg(ctx->z3_ctx, app, 0);
+            Z3_inc_ref(ctx->z3_ctx, arg);
+
+            app       = Z3_to_app(ctx->z3_ctx, arg);
+            decl      = Z3_get_app_decl(ctx->z3_ctx, app);
+            decl_kind = Z3_get_decl_kind(ctx->z3_ctx, decl);
+            is_not    = !is_not;
+            Z3_dec_ref(ctx->z3_ctx, prev_arg);
+        }
     }
 
     int is_unsigned = 0;
