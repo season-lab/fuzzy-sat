@@ -661,6 +661,8 @@ static int __gradient_transf_init(fuzzy_ctx_t* ctx, Z3_ast expr,
             Z3_dec_ref(ctx->z3_ctx, prev_arg);
         }
     }
+    if (decl_kind == Z3_OP_OR || decl_kind == Z3_OP_AND)
+        return 0;
 
     int is_unsigned = 0;
     if (decl_kind == Z3_OP_UGT || decl_kind == Z3_OP_UGEQ ||
@@ -1960,7 +1962,8 @@ static void ast_info_populate_with_blacklist(ast_info_ptr dst, ast_info_ptr src,
     }
 }
 
-static inline int is_and_constraint(fuzzy_ctx_t* ctx, Z3_ast branch_condition)
+static inline int is_and_constraint(fuzzy_ctx_t* ctx, Z3_ast branch_condition,
+                                    int* with_not)
 {
     Z3_ast_kind node_kind = Z3_get_ast_kind(ctx->z3_ctx, branch_condition);
     if (node_kind != Z3_APP_AST)
@@ -1970,23 +1973,60 @@ static inline int is_and_constraint(fuzzy_ctx_t* ctx, Z3_ast branch_condition)
     Z3_func_decl node_decl      = Z3_get_app_decl(ctx->z3_ctx, node_app);
     Z3_decl_kind node_decl_kind = Z3_get_decl_kind(ctx->z3_ctx, node_decl);
 
-    if (node_decl_kind == Z3_OP_AND)
+    if (node_decl_kind == Z3_OP_AND) {
+        *with_not = 0;
         return 1;
+    }
+
+    int is_not = 0;
+    while (node_decl_kind == Z3_OP_NOT) {
+        branch_condition = Z3_get_app_arg(ctx->z3_ctx, node_app, 0);
+        node_app         = Z3_to_app(ctx->z3_ctx, branch_condition);
+        node_decl        = Z3_get_app_decl(ctx->z3_ctx, node_app);
+        node_decl_kind   = Z3_get_decl_kind(ctx->z3_ctx, node_decl);
+        is_not           = !is_not;
+    }
+    if (is_not && node_decl_kind == Z3_OP_OR) {
+        *with_not = 1;
+        return 1;
+    }
+
     return 0;
 }
 
 static inline void flatten_and_args(fuzzy_ctx_t* ctx, Z3_ast node,
                                     da__Z3_ast* args)
 {
-    Z3_app   app        = Z3_to_app(ctx->z3_ctx, node);
-    unsigned num_fields = Z3_get_app_num_args(ctx->z3_ctx, app);
+    Z3_app       app        = Z3_to_app(ctx->z3_ctx, node);
+    unsigned     num_fields = Z3_get_app_num_args(ctx->z3_ctx, app);
+    Z3_func_decl decl       = Z3_get_app_decl(ctx->z3_ctx, app);
+    Z3_decl_kind decl_kind  = Z3_get_decl_kind(ctx->z3_ctx, decl);
 
+    int negated = 0;
+    if (decl_kind != Z3_OP_AND) {
+        int is_not = 0;
+        while (decl_kind == Z3_OP_NOT) {
+            node      = Z3_get_app_arg(ctx->z3_ctx, app, 0);
+            app       = Z3_to_app(ctx->z3_ctx, node);
+            decl      = Z3_get_app_decl(ctx->z3_ctx, app);
+            decl_kind = Z3_get_decl_kind(ctx->z3_ctx, decl);
+            is_not    = !is_not;
+        }
+        negated = is_not;
+        ASSERT_OR_ABORT(decl_kind == Z3_OP_OR,
+                        "flatten_and_args: not an and constraint");
+        num_fields = Z3_get_app_num_args(ctx->z3_ctx, app);
+    }
+
+    int      with_not;
     unsigned i;
     for (i = 0; i < num_fields; ++i) {
         Z3_ast child = Z3_get_app_arg(ctx->z3_ctx, app, i);
-        if (is_and_constraint(ctx, child))
+        if (is_and_constraint(ctx, child, &with_not))
             flatten_and_args(ctx, child, args);
         else {
+            if (negated)
+                child = Z3_mk_not(ctx->z3_ctx, child);
             Z3_inc_ref(ctx->z3_ctx, child);
             da_add_item__Z3_ast(args, child);
         }
@@ -2131,7 +2171,8 @@ static inline void __detect_involved_inputs(fuzzy_ctx_t* ctx, Z3_ast v,
                     Z3_inc_ref(ctx->z3_ctx, cond);
                     da__Z3_ast and_vals;
                     da_init__Z3_ast(&and_vals);
-                    if (is_and_constraint(ctx, cond))
+                    int with_not;
+                    if (is_and_constraint(ctx, cond, &with_not))
                         flatten_and_args(ctx, cond, &and_vals);
                     else {
                         Z3_inc_ref(ctx->z3_ctx, cond);
@@ -2233,6 +2274,7 @@ static void __detect_early_constants(fuzzy_ctx_t* ctx, Z3_ast v,
                         __detect_early_constants(ctx, child, data);
                         Z3_dec_ref(ctx->z3_ctx, child);
                     }
+                    break;
                 }
                 case Z3_OP_EQ:
                 case Z3_OP_UGEQ:
@@ -6938,8 +6980,8 @@ static inline void aggressive_optimistic(fuzzy_ctx_t* ctx,
     performing_aggressive_optimistic = 1;
     unsigned char const* dummy_proof;
     unsigned long        dummy_proof_size;
-    __query_check_light(ctx, branch_condition, branch_condition, &dummy_proof,
-                        &dummy_proof_size);
+    z3fuzz_query_check_light(ctx, Z3_mk_true(ctx->z3_ctx), branch_condition,
+                             &dummy_proof, &dummy_proof_size);
     performing_aggressive_optimistic = 0;
     check_is_valid                   = 1;
 
@@ -6973,7 +7015,7 @@ static inline int query_check_light_and_multigoal(fuzzy_ctx_t* ctx,
         }
     }
 #endif
-    if (res == 1)
+    if (res == 1 || performing_aggressive_optimistic)
         // the query is SAT
         goto END_FUN_2;
     if (opt_found == 0) {
@@ -7145,7 +7187,8 @@ END_FUN_2:
 static inline Z3_ast get_query_without_branch_condition(fuzzy_ctx_t* ctx,
                                                         Z3_ast       query)
 {
-    if (!is_and_constraint(ctx, query)) {
+    int with_not;
+    if (!is_and_constraint(ctx, query, &with_not) || with_not) {
         return Z3_mk_true(ctx->z3_ctx);
     }
 
@@ -7287,7 +7330,8 @@ int z3fuzz_query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
 
     __init_global_data(ctx, query, branch_condition);
 
-    if (is_and_constraint(ctx, branch_condition))
+    int with_not;
+    if (is_and_constraint(ctx, branch_condition, &with_not))
         res = handle_and_constraint(ctx, query, branch_condition, proof,
                                     proof_size);
     else
@@ -7937,7 +7981,8 @@ void z3fuzz_notify_constraint(fuzzy_ctx_t* ctx, Z3_ast constraint)
 
     Z3_inc_ref(ctx->z3_ctx, constraint);
 
-    if (is_and_constraint(ctx, constraint)) {
+    int with_not;
+    if (is_and_constraint(ctx, constraint, &with_not)) {
         da__Z3_ast args;
         da_init__Z3_ast(&args);
         flatten_and_args(ctx, constraint, &args);

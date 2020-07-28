@@ -345,6 +345,10 @@ int main(int argc, char* argv[])
         Z3_ast*  assertions;
         unsigned n_assertions;
         divide_query_in_assertions(query, &assertions, &n_assertions);
+        if (n_assertions > 0)
+            query = Z3_mk_and(fctx.z3_ctx, n_assertions, assertions);
+        else
+            query = Z3_mk_true(fctx.z3_ctx);
 
         gettimeofday(&start, NULL);
         int j;
