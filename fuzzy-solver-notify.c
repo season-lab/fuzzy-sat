@@ -402,9 +402,11 @@ int main(int argc, char* argv[])
            "fast sat queries: %lu\n"
            "elaps time:       %.3lf s\n"
            "elaps time sat:   %.3lf s\n"
+           "elaps par:        %.3lf s\n"
            "elaps time + par: %.3lf s\n",
            num_queries, sat_queries, (double)elapsed_time / 1000,
            (double)elapsed_time_fast_sat / 1000,
+           (double)elapsed_time_parsing / 1000,
            (double)(elapsed_time + elapsed_time_parsing) / 1000);
 
     Z3_ast_vector_dec_ref(ctx, queries);

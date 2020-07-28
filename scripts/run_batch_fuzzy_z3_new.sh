@@ -14,10 +14,10 @@ function execute_bench {
     exp_name=$3
     out_dir=$4
 
-    echo "running exp $exp_name on z3..."
-    $BIN_Z3 $query_path
+    # echo "running exp $exp_name on z3..."
+    # $BIN_Z3 $query_path
 
-    mv ./z3_queries.csv $out_dir/$exp_name-z3-queries.csv
+    # mv ./z3_queries.csv $out_dir/$exp_name-z3-queries.csv
 
     echo "running exp $exp_name on fuzzy..."
     $BIN_FUZZY $query_path $seed_path
@@ -41,6 +41,7 @@ function execute_run {
     execute_bench $QUERIES_PATH/advmng.smt2              $SEED_PATH/mappy.mng          advmng   $out_dir
     execute_bench $QUERIES_PATH/advzip.smt2              $SEED_PATH/small_archive.zip  advzip   $out_dir
     execute_bench $QUERIES_PATH/bloaty.smt2              $SEED_PATH/small_exec.elf     bloaty   $out_dir
+    execute_bench $QUERIES_PATH/bsdtar.smt2              $SEED_PATH/tar.tar            bsdtar   $out_dir
     execute_bench $QUERIES_PATH/djpeg.smt2               $SEED_PATH/not_kitty.jpg      djpeg    $out_dir
     execute_bench $QUERIES_PATH/jhead.smt2               $SEED_PATH/not_kitty.jpg      jhead    $out_dir
     execute_bench $QUERIES_PATH/libpng.smt2              $SEED_PATH/not_kitty.png      libpng   $out_dir
@@ -52,7 +53,7 @@ function execute_run {
     execute_bench $QUERIES_PATH/objdump.smt2             $SEED_PATH/small_exec.elf     objdump  $out_dir
 }
 
-OUT_DIR=$SCRIPTPATH/../exp_logs/exp-nuovi/fuzzy-z3-10sec
+OUT_DIR=$SCRIPTPATH/../exp_logs/exp-nuovi/fuzzy-z3-1sec
 
 execute_run $OUT_DIR 1
 execute_run $OUT_DIR 2

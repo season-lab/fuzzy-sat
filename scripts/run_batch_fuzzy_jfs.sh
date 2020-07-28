@@ -51,6 +51,10 @@ function execute_run {
     execute_bench /tmp/bloaty_queries $SEED_PATH/small_exec.elf bloaty $out_dir
     rm -rf /tmp/bloaty_queries
 
+    tar xzf $QUERIES_PATH/bsdtar_queries.tar.gz -C /tmp
+    execute_bench /tmp/bsdtar_queries $SEED_PATH/tar.tar bsdtar $out_dir
+    rm -rf /tmp/bsdtar_queries
+
     tar xzf $QUERIES_PATH/djpeg_queries.tar.gz -C /tmp
     execute_bench /tmp/djpeg_queries $SEED_PATH/not_kitty.jpg djpeg $out_dir
     rm -rf /tmp/djpeg_queries
