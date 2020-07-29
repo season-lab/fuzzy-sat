@@ -198,8 +198,10 @@ static int interesting32[] = {
     512,         // 0x200
     1000,        // 0x3e8
     1024,        // 0x400
+    1280,        // 0x500
     4096,        // 0x1000
     32767,       // 0x7fff
+    344064,      // 0x54000
     -128,        // 0xffffff80
     -1,          // 0xffffffff
     0,           // 0x0
@@ -1689,10 +1691,24 @@ static int __detect_input_group(fuzzy_ctx_t* ctx, Z3_ast node,
                 }
                 case Z3_OP_CONCAT: {
                     // recursive call
-                    res = 0;
+                    int found_inp = 0;
+                    res           = 0;
                     for (i = 0; i < num_fields; ++i) {
                         Z3_ast child = Z3_get_app_arg(ctx->z3_ctx, app, i);
                         Z3_inc_ref(ctx->z3_ctx, child);
+                        Z3_ast_kind child_kind =
+                            Z3_get_ast_kind(ctx->z3_ctx, child);
+                        if (child_kind != Z3_NUMERAL_AST)
+                            found_inp = 1;
+                        else if (child_kind == Z3_NUMERAL_AST && found_inp)
+                            // the group is shifted...
+                            *approx = 1;
+
+                        if (child_kind == Z3_NUMERAL_AST) {
+                            Z3_dec_ref(ctx->z3_ctx, child);
+                            continue;
+                        }
+
                         res = __detect_input_group(ctx, child, ig, approx);
                         Z3_dec_ref(ctx->z3_ctx, child);
                         if (res == 0)
@@ -4493,7 +4509,7 @@ SUBPHASE_afl_det_int32(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
             }
         }
 
-#if 0
+#if 1
         tmp_input[input_index_3] = (unsigned long)(interesting32[i]) & 0xffU;
         tmp_input[input_index_2] =
             (unsigned long)(interesting32[i] >> 8) & 0xffU;
@@ -6652,6 +6668,10 @@ static __always_inline int
 PHASE_range_bruteforce(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
                        unsigned char const** proof, unsigned long* proof_size)
 {
+    unsigned long i;
+    int           j, k;
+    uint64_t      c;
+
     if (unlikely(skip_range_brute_force))
         return 0;
     if (performing_aggressive_optimistic)
@@ -6681,7 +6701,7 @@ PHASE_range_bruteforce(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
         return 0; // no interval
 
     if (wi_get_range(interval) > RANGE_MAX_WIDTH_BRUTE_FORCE)
-        return 0; // range too wide
+        goto TRY_MIN_MAX; // range too wide
 
     wrapped_interval_iter_t it = wi_init_iter_values(interval);
     uint64_t                val;
@@ -6707,6 +6727,54 @@ PHASE_range_bruteforce(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
 
     // the query is unsat
     return 2;
+
+TRY_MIN_MAX:
+    for (j = 0; j < 2; ++j) {
+        if (j == 0)
+            c = interval->min;
+        else
+            c = interval->max;
+
+        for (k = 0; k < ig->n; ++k) {
+            unsigned int  index = ig->indexes[ig->n - k - 1];
+            unsigned char b     = __extract_from_long(c, k);
+
+#ifdef DEBUG_CHECK_LIGHT
+            Z3FUZZ_LOG("range bruteforce - inj byte: 0x%x @ %d\n", b, index);
+#endif
+            if (current_testcase->values[index] == (unsigned long)b)
+                continue;
+
+            tmp_input[index] = b;
+        }
+        int valid_eval = is_valid_eval_group(ctx, ig, tmp_input,
+                                             current_testcase->value_sizes,
+                                             current_testcase->values_len);
+        if (valid_eval) {
+            int eval_v = __evaluate_branch_query(
+                ctx, query, branch_condition, tmp_input,
+                current_testcase->value_sizes, current_testcase->values_len);
+            if (eval_v == 1) {
+#ifdef PRINT_SAT
+                Z3FUZZ_LOG("[check light - range bruteforce] Query "
+                           "is SAT\n");
+#endif
+                ctx->stats.range_brute_force++;
+                ctx->stats.num_sat++;
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                *proof      = tmp_proof;
+                *proof_size = current_testcase->values_len;
+                return 1;
+            } else if (unlikely(eval_v == TIMEOUT_V))
+                return TIMEOUT_V;
+        }
+    }
+    for (k = 0; k < ig->n; ++k) {
+        i            = ig->indexes[ig->n - k - 1];
+        tmp_input[i] = current_testcase->values[i];
+    }
+    return 0;
 }
 
 static __always_inline int
@@ -6737,35 +6805,31 @@ PHASE_range_bruteforce_opt(fuzzy_ctx_t* ctx, Z3_ast query,
         if (interval == 0)
             continue; // no interval
 
-        if (wi_get_range(interval) > RANGE_MAX_WIDTH_BRUTE_FORCE / 2)
-            continue; // range too wide
-
-        break;
-    }
-    if (interval == NULL ||
-        wi_get_range(interval) > RANGE_MAX_WIDTH_BRUTE_FORCE / 2)
-        return 0;
-
-    wrapped_interval_iter_t it = wi_init_iter_values(interval);
-    uint64_t                val;
-    while (wi_iter_get_next(&it, &val)) {
-        set_tmp_input_group_to_value(ig, val);
-        int eval_v = __evaluate_branch_query(
-            ctx, query, branch_condition, tmp_input,
-            current_testcase->value_sizes, current_testcase->values_len);
-        if (eval_v == 1) {
+        int                     i  = 0;
+        wrapped_interval_iter_t it = wi_init_iter_values(interval);
+        uint64_t                val;
+        while (wi_iter_get_next(&it, &val)) {
+            if (i++ > RANGE_MAX_WIDTH_BRUTE_FORCE / 4)
+                break;
+            set_tmp_input_group_to_value(ig, val);
+            int eval_v = __evaluate_branch_query(
+                ctx, query, branch_condition, tmp_input,
+                current_testcase->value_sizes, current_testcase->values_len);
+            if (eval_v == 1) {
 #ifdef PRINT_SAT
-            Z3FUZZ_LOG("[check light - range bruteforce opt] Query is SAT\n");
+                Z3FUZZ_LOG(
+                    "[check light - range bruteforce opt] Query is SAT\n");
 #endif
-            ctx->stats.range_brute_force_opt++;
-            ctx->stats.num_sat++;
-            __vals_long_to_char(tmp_input, tmp_proof,
-                                current_testcase->testcase_len);
-            *proof      = tmp_proof;
-            *proof_size = current_testcase->testcase_len;
-            return 1;
-        } else if (unlikely(eval_v == TIMEOUT_V))
-            return TIMEOUT_V;
+                ctx->stats.range_brute_force_opt++;
+                ctx->stats.num_sat++;
+                __vals_long_to_char(tmp_input, tmp_proof,
+                                    current_testcase->testcase_len);
+                *proof      = tmp_proof;
+                *proof_size = current_testcase->testcase_len;
+                return 1;
+            } else if (unlikely(eval_v == TIMEOUT_V))
+                return TIMEOUT_V;
+        }
     }
     return 0;
 }

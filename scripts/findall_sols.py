@@ -23,12 +23,12 @@ for i in range(1, len(bvs)):
 s = z3.Solver()
 s.add(query)
 
-import IPython; IPython.embed()
+# import IPython; IPython.embed()
 
 j = 1
 while s.check().r == 1:
   m = s.model()
-  v = m.eval(bv)
+  v = m.eval(bv, model_completion=True)
   v = v.as_long()
 
   print("SOL %d" % j)
