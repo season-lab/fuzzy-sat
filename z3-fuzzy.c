@@ -79,6 +79,7 @@ static int skip_afl_det_flip_long          = 0;
 static int skip_afl_det_arith64            = 0;
 static int skip_afl_det_int64              = 0;
 
+static int skip_freeze_neighbours = 1;
 static int skip_afl_havoc         = 0;
 static int use_greedy_mamin       = 0;
 static int check_unnecessary_eval = 1;
@@ -150,6 +151,7 @@ static char interesting8[] = {
     -1,   // 0xff
     0,    // 0x0
     1,    // 0x1
+    2,    // 0x2
     16,   // 0x10
     32,   // 0x20
     64,   // 0x40
@@ -173,6 +175,7 @@ static short interesting16[] = {
     -1,     // 0xffff
     0,      // 0x0
     1,      // 0x1
+    2,      // 0x2
     16,     // 0x10
     32,     // 0x20
     64,     // 0x40
@@ -190,6 +193,7 @@ static int interesting32[] = {
     16777215,    // 0xffffff
     2147483647,  // 0x7fffffff
     -32768,      // 0xffff8000
+    8421504,     // 0x808080
     -129,        // 0xffffff7f
     16711935,    // 0xff00ff
     128,         // 0x80
@@ -206,6 +210,7 @@ static int interesting32[] = {
     -1,          // 0xffffffff
     0,           // 0x0
     1,           // 0x1
+    2,           // 0x2
     16,          // 0x10
     32,          // 0x20
     64,          // 0x40
@@ -239,6 +244,7 @@ static long interesting64[] = {
     -1,                   // 0xffffffffffffffff
     0,                    // 0x0
     1,                    // 0x1
+    2,                    // 0x2
     16,                   // 0x10
     32,                   // 0x20
     64,                   // 0x40
@@ -2392,7 +2398,19 @@ static inline unsigned long get_group_value_in_tmp_input(index_group_t* group)
     unsigned char k;
     for (k = 0; k < group->n; ++k) {
         unsigned long index = group->indexes[group->n - k - 1];
-        res |= tmp_input[index] << k;
+        res |= tmp_input[index] << (k * 8);
+    }
+    return res;
+}
+
+static inline unsigned long
+get_group_value_in_tmp_input_inv(index_group_t* group)
+{
+    unsigned long res = 0;
+    unsigned char k;
+    for (k = 0; k < group->n; ++k) {
+        unsigned long index = group->indexes[k];
+        res |= tmp_input[index] << (k * 8);
     }
     return res;
 }
@@ -2408,6 +2426,17 @@ static inline void set_tmp_input_group_to_value(index_group_t* group,
     unsigned char k;
     for (k = 0; k < group->n; ++k) {
         unsigned long index = group->indexes[group->n - k - 1];
+        unsigned char b     = __extract_from_long(v, k);
+        tmp_input[index]    = b;
+    }
+}
+
+static inline void set_tmp_input_group_to_value_inv(index_group_t* group,
+                                                    uint64_t       v)
+{
+    unsigned char k;
+    for (k = 0; k < group->n; ++k) {
+        unsigned long index = group->indexes[k];
         unsigned char b     = __extract_from_long(v, k);
         tmp_input[index]    = b;
     }
@@ -4195,11 +4224,11 @@ SUBPHASE_afl_det_int16(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
         tmp_input[input_index_0] =
             (unsigned long)(interesting16[i] >> 8) & 0xffUL;
         valid_eval = is_valid_eval_index(ctx, input_index_0, tmp_input,
-                                             current_testcase->value_sizes,
-                                             current_testcase->values_len) &&
-                         is_valid_eval_index(ctx, input_index_1, tmp_input,
-                                             current_testcase->value_sizes,
-                                             current_testcase->values_len);
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_1, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len);
         if (valid_eval) {
             int eval_v = __evaluate_branch_query(
                 ctx, query, branch_condition, tmp_input,
@@ -4518,17 +4547,17 @@ SUBPHASE_afl_det_int32(fuzzy_ctx_t* ctx, Z3_ast query, Z3_ast branch_condition,
         tmp_input[input_index_0] =
             (unsigned long)(interesting32[i] >> 24) & 0xffU;
         valid_eval = is_valid_eval_index(ctx, input_index_0, tmp_input,
-                                             current_testcase->value_sizes,
-                                             current_testcase->values_len) &&
-                         is_valid_eval_index(ctx, input_index_1, tmp_input,
-                                             current_testcase->value_sizes,
-                                             current_testcase->values_len) &&
-                         is_valid_eval_index(ctx, input_index_2, tmp_input,
-                                             current_testcase->value_sizes,
-                                             current_testcase->values_len) &&
-                         is_valid_eval_index(ctx, input_index_3, tmp_input,
-                                             current_testcase->value_sizes,
-                                             current_testcase->values_len);
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_1, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_2, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len) &&
+                     is_valid_eval_index(ctx, input_index_3, tmp_input,
+                                         current_testcase->value_sizes,
+                                         current_testcase->values_len);
         if (valid_eval) {
             int eval_v = __evaluate_branch_query(
                 ctx, query, branch_condition, tmp_input,
@@ -6999,6 +7028,108 @@ static int __query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
     return 0;
 }
 
+static inline int ig_has_index(index_group_t* ig, ulong idx)
+{
+    unsigned i;
+    for (i = 0; i < ig->n; ++i) {
+        if (ig->indexes[i] == idx)
+            return 1;
+    }
+    return 0;
+}
+
+static inline int find_group_with_all_inputs(index_group_t* ig)
+{
+    ulong*         p;
+    index_group_t* tmp_ig;
+    set_reset_iter__index_group_t(&ast_data.inputs->index_groups, 0);
+    while (set_iter_next__index_group_t(&ast_data.inputs->index_groups, 0,
+                                        &tmp_ig)) {
+        int has_all = 1;
+        set_reset_iter__ulong(&ast_data.inputs->indexes, 0);
+        while (set_iter_next__ulong(&ast_data.inputs->indexes, 0, &p)) {
+            if (!ig_has_index(tmp_ig, *p)) {
+                has_all = 0;
+                break;
+            }
+        }
+        if (has_all) {
+            *ig = *tmp_ig;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static inline int PHASE_freeze_neighbours(fuzzy_ctx_t* ctx, Z3_ast query,
+                                          Z3_ast branch_condition,
+                                          unsigned char const** proof,
+                                          unsigned long*        proof_size)
+{
+    if (skip_freeze_neighbours)
+        return 0;
+
+    index_group_t ig;
+    if (ast_data.inputs->index_groups.size == 1) {
+        index_group_t* tmp_ig = NULL;
+        set_reset_iter__index_group_t(&ast_data.inputs->index_groups, 0);
+        set_iter_next__index_group_t(&ast_data.inputs->index_groups, 0,
+                                     &tmp_ig);
+        assert(tmp_input != NULL && "unreachable");
+        ig = *tmp_ig;
+    } else if (!find_group_with_all_inputs(&ig))
+        return 0;
+
+    testcase_t* current_testcase = &ctx->testcases.data[0];
+    uint64_t    initial_val      = get_group_value_in_tmp_input(&ig);
+    unsigned    i;
+    for (i = 1; i < 256; ++i) {
+        set_tmp_input_group_to_value(&ig, initial_val + i);
+        int eval_v = __evaluate_branch_query(
+            ctx, query, branch_condition, tmp_input,
+            current_testcase->value_sizes, current_testcase->values_len);
+        if (eval_v == 1) {
+#ifdef PRINT_SAT
+            Z3FUZZ_LOG("[check light - freeze neighbours] "
+                       "Query is SAT\n");
+#endif
+            ctx->stats.multigoal++;
+            ctx->stats.num_sat++;
+            __vals_long_to_char(tmp_input, tmp_proof,
+                                current_testcase->testcase_len);
+            *proof      = tmp_proof;
+            *proof_size = current_testcase->testcase_len;
+            return 1;
+        } else if (unlikely(eval_v == TIMEOUT_V))
+            return TIMEOUT_V;
+    }
+    set_tmp_input_group_to_value(&ig, initial_val);
+
+    uint64_t initial_val_inv = get_group_value_in_tmp_input_inv(&ig);
+    for (i = 1; i < 256; ++i) {
+        set_tmp_input_group_to_value_inv(&ig, initial_val_inv + i);
+        int eval_v = __evaluate_branch_query(
+            ctx, query, branch_condition, tmp_input,
+            current_testcase->value_sizes, current_testcase->values_len);
+        if (eval_v == 1) {
+#ifdef PRINT_SAT
+            Z3FUZZ_LOG("[check light - freeze neighbours] "
+                       "Query is SAT\n");
+#endif
+            ctx->stats.multigoal++;
+            ctx->stats.num_sat++;
+            __vals_long_to_char(tmp_input, tmp_proof,
+                                current_testcase->testcase_len);
+            *proof      = tmp_proof;
+            *proof_size = current_testcase->testcase_len;
+            return 1;
+        } else if (unlikely(eval_v == TIMEOUT_V))
+            return TIMEOUT_V;
+    }
+    set_tmp_input_group_to_value(&ig, initial_val);
+    return 0;
+}
+
 static inline int check_if_range_for_indexes(fuzzy_ctx_t* ctx,
                                              set__ulong*  indexes)
 {
@@ -7149,6 +7280,13 @@ static inline int query_check_light_and_multigoal(fuzzy_ctx_t* ctx,
         set_add__ulong(&black_indexes, *p);
     }
 
+    res = PHASE_freeze_neighbours(ctx, query, branch_condition, proof,
+                                  proof_size);
+    if (unlikely(res == TIMEOUT_V))
+        return 0;
+    if (res == 1)
+        goto END_FUN_0;
+
     ast_info_ptr new_ast_info = (ast_info_ptr)malloc(sizeof(ast_info_t));
     ast_info_init(new_ast_info);
 
@@ -7189,13 +7327,6 @@ static inline int query_check_light_and_multigoal(fuzzy_ctx_t* ctx,
                 // the PI is true, we have fixed the input
                 bk_stats.multigoal++;
                 bk_stats.num_sat++;
-                bk_stats.conflicting_fallbacks =
-                    ctx->stats.conflicting_fallbacks;
-                bk_stats.conflicting_fallbacks_no_true =
-                    ctx->stats.conflicting_fallbacks_no_true;
-                bk_stats.conflicting_fallbacks_same_inputs =
-                    ctx->stats.conflicting_fallbacks_same_inputs;
-                bk_stats.num_evaluate = ctx->stats.num_evaluate;
                 break;
             } else if (opt_found) {
                 // PI is not True, but this ast is True
@@ -7236,12 +7367,19 @@ static inline int query_check_light_and_multigoal(fuzzy_ctx_t* ctx,
     // if we are here, we populated 'opt_proof' at least one time,
     // we do not want to prevent the user to ask for the optimistic
     // solution
-    opt_found = 1;
+    opt_found                      = 1;
+    bk_stats.num_evaluate          = ctx->stats.num_evaluate;
+    bk_stats.conflicting_fallbacks = ctx->stats.conflicting_fallbacks;
+    bk_stats.conflicting_fallbacks_no_true =
+        ctx->stats.conflicting_fallbacks_no_true;
+    bk_stats.conflicting_fallbacks_same_inputs =
+        ctx->stats.conflicting_fallbacks_same_inputs;
     memcpy(&ctx->stats, &bk_stats, sizeof(fuzzy_stats_t));
 
+    ast_info_ptr_free(&new_ast_info);
+END_FUN_0:
     Z3_dec_ref(ctx->z3_ctx, query);
     set_free__ulong(&black_indexes, NULL);
-    ast_info_ptr_free(&new_ast_info);
 END_FUN_1:
     set_free__ulong(&local_conflicting_asts, NULL);
 END_FUN_2:
