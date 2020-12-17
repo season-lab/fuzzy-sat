@@ -10,6 +10,7 @@
 
 #define CHECK_CONSISTENCY
 #define PRINT_STATUS
+// #define PRINT_EVAL_TIME
 // #define DUMP_PROOFS
 // #define DUMP_SAT_QUERIES
 #define TIMEOUT 1000
@@ -386,6 +387,13 @@ int main(int argc, char* argv[])
 
         elapsed_time += compute_time_msec(&start, &stop);
         free(assertions);
+
+#ifndef PRINT_STATUS
+#ifdef PRINT_EVAL_TIME
+        printf("Time for eval of query %d: %.03lf us\n",
+               i, fctx.stats.avg_time_for_eval);
+#endif
+#endif
 
 #ifdef PRINT_STATUS
         print_status(i, num_queries);
