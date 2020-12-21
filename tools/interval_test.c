@@ -1,4 +1,4 @@
-#include "utility/wrapped_interval.h"
+#include "wrapped_interval.h"
 #include <stdio.h>
 
 int main()

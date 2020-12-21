@@ -1,7 +1,7 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <sys/time.h>
-#include "utility/pretty-print.h"
+#include "pretty-print.h"
 #include "z3-fuzzy.h"
 
 #define SOLVER_TIMEOUT "10000" // 10 sec // 0
@@ -82,7 +82,8 @@ static inline void print_status(unsigned long current_query,
     pp_printf(31, 1, "int32:               %ld", fctx.stats.int32);
     pp_printf(32, 1, "int64:               %ld", fctx.stats.int64);
     pp_printf(33, 1, "havoc:               %ld", fctx.stats.havoc);
-    pp_printf(34, 1, "ast_info_cache_hits: %ld", fctx.stats.ast_info_cache_hits);
+    pp_printf(34, 1, "ast_info_cache_hits: %ld",
+              fctx.stats.ast_info_cache_hits);
 #ifdef Z3_FALLTHROUGH
     pp_printf(35, 1, "sat z3:               %ld", sat_queries_z3);
     pp_printf(36, 1, "unsat z3:             %ld", unsat_queries_z3);

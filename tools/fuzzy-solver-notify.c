@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <sys/time.h>
-#include "utility/pretty-print.h"
+#include "pretty-print.h"
 #include "z3-fuzzy.h"
 
 #define BOLD(s) "\033[1m\033[37m" s "\033[0m"

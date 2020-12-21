@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <z3.h>
-#include "utility/pretty-print.h"
+#include "pretty-print.h"
 #include "z3-fuzzy.h"
 
 #define TIMEOUT 1000

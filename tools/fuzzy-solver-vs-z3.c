@@ -1,7 +1,7 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <sys/time.h>
-#include "utility/pretty-print.h"
+#include "pretty-print.h"
 #include "z3-fuzzy.h"
 
 #define NREP 1

@@ -3,9 +3,9 @@
 #include <fcntl.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include "utility/gradient_descend.h"
-#include "utility/wrapped_interval.h"
-#include "utility/timer.h"
+#include "gradient_descend.h"
+#include "wrapped_interval.h"
+#include "timer.h"
 #include "z3-fuzzy.h"
 
 #ifndef likely
@@ -89,9 +89,9 @@ static int max_ast_info_cache_size = 14000;
 static int performing_aggressive_optimistic = 0;
 
 #ifdef USE_MD5_HASH
-#include "utility/md5.h"
+#include "md5.h"
 #else
-#include "utility/xxhash/xxh3.h"
+#include "xxhash/xxh3.h"
 #endif
 
 // generate parametric data structures

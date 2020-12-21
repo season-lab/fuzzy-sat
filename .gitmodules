@@ -3,5 +3,5 @@
 	url = https://github.com/season-lab/z3.git
 	branch = fuzzolic
 [submodule "xxhash"]
-	path = utility/xxhash
+	path = lib/xxhash
 	url = https://github.com/Cyan4973/xxHash.git
