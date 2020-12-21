@@ -131,7 +131,7 @@ typedef struct ast_data_t {
 
 typedef ast_info_t* ast_info_ptr;
 #define DICT_DATA_T ast_info_ptr
-#include <dict.h>
+#include "dict.h"
 
 static unsigned long* tmp_input           = NULL;
 static unsigned long* tmp_opt_input       = NULL;

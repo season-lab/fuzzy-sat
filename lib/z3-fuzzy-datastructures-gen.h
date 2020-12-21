@@ -8,7 +8,7 @@ typedef struct index_group_t {
 
 #define SET_N_BUCKETS 8
 #define SET_DATA_T index_group_t
-#include <set.h>
+#include "set.h"
 typedef set__index_group_t index_groups_t;
 
 unsigned long index_group_hash(index_group_t* el)
@@ -44,7 +44,7 @@ static inline int da_check_el__index_group_t(da__index_group_t* da,
 typedef unsigned long ulong;
 #define SET_N_BUCKETS 512
 #define SET_DATA_T ulong
-#include <set.h>
+#include "set.h"
 unsigned long index_hash(unsigned long* el) { return *el; }
 unsigned int  index_equals(unsigned long* el1, unsigned long* el2)
 {
@@ -88,7 +88,7 @@ unsigned int digest_equals(digest_t* el1, digest_t* el2)
 }
 
 #define SET_DATA_T digest_t
-#include <set.h>
+#include "set.h"
 
 typedef set__digest_t processed_set_t;
 // ********* end evaluate set ************
@@ -99,11 +99,11 @@ typedef struct ast_ptr {
 } ast_ptr;
 #define SET_N_BUCKETS 256
 #define SET_DATA_T ast_ptr
-#include <set.h>
+#include "set.h"
 
 typedef set__ast_ptr* conflicting_ptr;
 #define DICT_DATA_T conflicting_ptr
-#include <dict.h>
+#include "dict.h"
 
 static void          ast_ptr_free(ast_ptr* el) { Z3_dec_ref(el->ctx, el->ast); }
 static unsigned long ast_ptr_hash(ast_ptr* el)
@@ -153,10 +153,10 @@ typedef struct interval_group_t {
 
 typedef interval_group_t* interval_group_ptr;
 #define SET_DATA_T interval_group_ptr
-#include <set.h>
+#include "set.h"
 
 #define DICT_DATA_T da__interval_group_ptr
-#include <dict.h>
+#include "dict.h"
 
 static unsigned long interval_group_ptr_hash(interval_group_ptr* el)
 {
@@ -178,7 +178,7 @@ static void index_to_group_intervals_el_free(da__interval_group_ptr* el)
 // ******* end interval group *************
 // ******* da Z3_ast **********************
 #define DA_DATA_T Z3_ast
-#include <dynamic-array.h>
+#include "dynamic-array.h"
 // ****************************************
 // ********* ItS ite **********************
 typedef struct ite_its_t {
@@ -186,7 +186,7 @@ typedef struct ite_its_t {
     unsigned long val;
 } ite_its_t;
 #define DA_DATA_T ite_its_t
-#include <dynamic-array.h>
+#include "dynamic-array.h"
 
 int da_check_el__ite_its_t(da__ite_its_t* d, ite_its_t* el)
 {

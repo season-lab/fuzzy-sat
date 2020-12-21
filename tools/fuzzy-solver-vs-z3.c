@@ -236,7 +236,8 @@ int main(int argc, char* argv[])
 
     pp_printf(6, 1, "speedup   %.02lf x", cumulative_z3 / cumulative_fuzzy);
     pp_printf(7, 1, "detected  %ld / %ld", fuzzy_sat / NREP, z3_sat / NREP);
-    puts("");
+    pp_set_line(8);
+
     Z3_ast_vector_dec_ref(ctx, queries);
     free(str_symbols);
     z3fuzz_free(&fctx);
