@@ -8235,7 +8235,7 @@ void z3fuzz_dump_proof(fuzzy_ctx_t* ctx, const char* filename,
     FILE* fp = fopen(filename, "w");
     ASSERT_OR_ABORT(fp != NULL, "z3fuzz_dump_proof() open failed");
 
-    Z3FUZZ_LOG("dumping proof in %s\n", filename);
+    // Z3FUZZ_LOG("dumping proof in %s\n", filename);
 
     unsigned long i;
     for (i = 0; i < proof_size; i++) {

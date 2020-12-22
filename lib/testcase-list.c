@@ -40,7 +40,7 @@ void load_testcase(testcase_list_t* t, char const* filename, Z3_context ctx)
 {
     ASSERT_OR_ABORT(t->size < t->max_size, "testcase_list is full");
 
-    TESTCASE_LIB_LOG("Loading testcase \"%s\" \n", filename);
+    // TESTCASE_LIB_LOG("Loading testcase \"%s\" \n", filename);
 
     testcase_t    tc = {0};
     FILE*         fp = fopen(filename, "r");
