@@ -15,3 +15,13 @@ add_executable(fuzzy-solver-vs-z3
     fuzzy-solver-vs-z3.c
     pretty-print.c)
 LinkBin(fuzzy-solver-vs-z3)
+
+add_executable(stats-collection-fuzzy
+    stats-collection-fuzzy.c
+    pretty-print.c)
+LinkBin(stats-collection-fuzzy)
+
+add_executable(stats-collection-z3
+    stats-collection-z3.c
+    pretty-print.c)
+LinkBin(stats-collection-z3)
