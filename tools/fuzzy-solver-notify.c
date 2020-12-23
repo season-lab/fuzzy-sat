@@ -248,7 +248,7 @@ static struct option long_opt[] = {
     {"out", required_argument, NULL, 'o'},
     {"dsat", no_argument, &g_dump_sat_queries, 1},
     {"dproofs", no_argument, &g_dump_proofs, 1},
-    {"quiet", no_argument, &g_no_tui, 1},
+    {"notui", no_argument, &g_no_tui, 1},
     {NULL, 0, NULL, 0}};
 
 static inline void usage(char* filename)
@@ -262,7 +262,7 @@ static inline void usage(char* filename)
             "\n"
             "  --dsat                    dump sat queries\n"
             "  --dproofs                 dump sat proofs\n"
-            "  --quiet                   quiet mode (no text UI)\n"
+            "  --notui                   no text UI\n"
             "\n",
             filename);
 }

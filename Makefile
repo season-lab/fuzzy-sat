@@ -10,7 +10,7 @@ BIN_DIR=./build/bin
 LIB_DIR=./build/lib
 INC_DIR=./build/include
 
-all: fuzzy-solver-notify fuzzy-solver-vs-z3
+all: fuzzy-solver-notify fuzzy-solver-vs-z3 stats-collection-z3 stats-collection-fuzzy
 
 fuzzy-solver-notify: fuzzy-lib
 	${CC} ${CFLAGS} ${SRC_TOOLS_DIR}/fuzzy-solver-notify.c ${SRC_TOOLS_DIR}/pretty-print.c ${LIB_DIR}/libZ3Fuzzy.a -o ${BIN_DIR}/fuzzy-solver ${CINCLUDE} ${CLIB_PATHS} ${CLIBS}
