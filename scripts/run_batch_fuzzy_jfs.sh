@@ -1,7 +1,6 @@
 #!/bin/bash
 
 SCRIPTPATH="$( cd "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
-BIN_Z3=$SCRIPTPATH/../stats-collection-z3
 QUERIES_PATH=$SCRIPTPATH/../query_db/single_queries
 SEED_PATH=$SCRIPTPATH/../query_db/seeds
 

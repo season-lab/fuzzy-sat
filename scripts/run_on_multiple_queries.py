@@ -29,7 +29,7 @@ def run_fuzzy(query, seed):
     start = time.time()
     try:
         output = subprocess.check_output(
-            [os.path.join(SCRIPT_PATH, "../fuzzy-solver-notify"), query, seed],
+            [os.path.join(SCRIPT_PATH, "../fuzzy-solver"), "--query", query, "--seed", seed, "--notui"],
             timeout=2,
             stderr=subprocess.DEVNULL,
             env={"LD_LIBRARY_PATH": os.path.join(SCRIPT_PATH, "../fuzzolic-z3/build")}
@@ -39,7 +39,7 @@ def run_fuzzy(query, seed):
     end = time.time()
     elapsed = (end - start) * 1000.0
 
-    if b"fast sat queries: 1" in output:
+    if b"SAT" in output:
         return True, elapsed
     return False, elapsed
 
