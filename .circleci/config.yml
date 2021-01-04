@@ -26,10 +26,6 @@ jobs:
             chmod +x /tmp/monitor_mem.sh &&
             /tmp/monitor_mem.sh &
 
-      - store_artifacts:
-          path: /tmp/memusage
-          destination: memory-usage
-
       - restore_cache:
           key: fuzzolic-z3-{{ checksum ".git/modules/fuzzolic-z3/refs/heads/fuzzolic" }}
 
@@ -47,3 +43,7 @@ jobs:
           name: "Running tests"
           command: |
             echo "Dummy test"
+
+      - store_artifacts:
+          path: /tmp/memusage
+          destination: memory-usage
