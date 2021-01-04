@@ -17,7 +17,7 @@ set_property(TARGET objZ3FuzzyLib PROPERTY POSITION_INDEPENDENT_CODE 1)
 add_library(Z3Fuzzy_static STATIC $<TARGET_OBJECTS:objZ3FuzzyLib>)
 add_library(Z3Fuzzy_shared SHARED $<TARGET_OBJECTS:objZ3FuzzyLib>)
 
-include_directories("${CMAKE_SOURCE_DIR}/fuzzolic-z3/src/api")
+target_include_directories (objZ3FuzzyLib PUBLIC "${CMAKE_SOURCE_DIR}/fuzzolic-z3/src/api")
 target_link_libraries (Z3Fuzzy_shared LINK_PUBLIC libz3)
 
 set_target_properties(Z3Fuzzy_static PROPERTIES OUTPUT_NAME Z3Fuzzy)
