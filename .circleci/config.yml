@@ -22,11 +22,8 @@ jobs:
           name: Monitor memory usage
           command: |
             echo "Memory Usage" > /tmp/memusage
-            while true; do
-              sleep 5
-              free >> /tmp/memusage
-              echo "======" >> /tmp/memusage
-            done
+            echo "============" >> /tmp/memusage
+            free -h -s 3 >> /tmp/memusage
           background: true
 
       - restore_cache:
