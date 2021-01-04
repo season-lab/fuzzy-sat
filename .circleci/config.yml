@@ -21,11 +21,13 @@ jobs:
       - run:
           name: Monitor memory usage
           command: |
-            echo "Memory Usage" > /tmp/memusage;
-            echo "while true; do free >> /tmp/memusage; sleep 1; done" > /tmp/monitor_mem.sh;
-            cat /tmp/monitor_mem.sh;
-            chmod +x /tmp/monitor_mem.sh;
-            /tmp/monitor_mem.sh &
+            echo "Memory Usage" > /tmp/memusage
+            while true; do
+              sleep 5
+              free >> /tmp/memusage
+              echo "======" >> /tmp/memusage
+            done
+          background: true
 
       - restore_cache:
           key: fuzzolic-z3-{{ checksum ".git/modules/fuzzolic-z3/refs/heads/fuzzolic" }}
