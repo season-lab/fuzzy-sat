@@ -23,7 +23,7 @@ jobs:
 
       - run:
           name: Building
-          working_directory: fuzzy-sat/build_cmake
+          working_directory: build_cmake
           command: |
             make `nproc`
 
