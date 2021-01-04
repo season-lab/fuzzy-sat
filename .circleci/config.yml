@@ -24,11 +24,11 @@ jobs:
       - run:
           name: Building
           command: |
-            cd build_cmake && make `nproc`
+            cd build_cmake && echo `pwd` && ls && make `nproc`
 
       - save_cache:
           paths:
-            - fuzzy-sat/build_cmake/fuzzolic-z3
+            - build_cmake/fuzzolic-z3
           key: fuzzolic-z3-{{ checksum ".git/modules/fuzzolic-z3/refs/heads/fuzzolic" }}
       
       - run:
