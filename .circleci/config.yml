@@ -16,7 +16,7 @@ jobs:
       - run:
           name: Init cmake build
           command: |
-            mkdir build_cmake
+            mkdir build_cmake && cmake .. -DCMAKE_BUILD_TYPE=Release
 
       - restore_cache:
           key: fuzzolic-z3-{{ checksum ".git/modules/fuzzolic-z3/refs/heads/fuzzolic" }}
@@ -24,7 +24,7 @@ jobs:
       - run:
           name: Building
           command: |
-            cd build_cmake && cmake .. -DCMAKE_BUILD_TYPE=Release && make `nproc`
+            cd build_cmake && make -j `nproc`
 
       - save_cache:
           paths:
