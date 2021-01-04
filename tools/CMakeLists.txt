@@ -3,7 +3,8 @@ cmake_minimum_required(VERSION 3.7)
 macro(LinkBin exe_name)
     target_link_libraries(${exe_name} LINK_PUBLIC libz3)
     target_link_libraries(${exe_name} LINK_PUBLIC Z3Fuzzy_static)
-    target_include_directories(${exe_name} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../lib)
+    target_include_directories(${exe_name} PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/../fuzzolic-z3/src/api")
+    target_include_directories(${exe_name} PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/../lib")
 endmacro()
 
 add_executable(fuzzy-solver
