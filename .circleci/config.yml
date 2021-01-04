@@ -18,6 +18,18 @@ jobs:
           command: |
             mkdir build_cmake && cd build_cmake && cmake .. -DCMAKE_BUILD_TYPE=Release
 
+      - run:
+          name: Monitor memory usage
+          command: |
+            echo "Memory Usage" > /tmp/memusage &&
+            echo "while true; do free >> /tmp/memusage; sleep 1; done" > /tmp/monitor_mem.sh &&
+            chmod +x /tmp/monitor_mem.sh &&
+            /tmp/monitor_mem.sh &
+
+      - store_artifacts:
+          path: /tmp/memusage
+          destination: memory-usage
+
       - restore_cache:
           key: fuzzolic-z3-{{ checksum ".git/modules/fuzzolic-z3/refs/heads/fuzzolic" }}
 
