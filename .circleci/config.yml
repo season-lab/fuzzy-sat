@@ -23,9 +23,8 @@ jobs:
 
       - run:
           name: Building
-          working_directory: build_cmake
           command: |
-            make `nproc`
+            cd build_cmake && make `nproc`
 
       - save_cache:
           paths:
