@@ -32,7 +32,7 @@ jobs:
       - run:
           name: Building
           command: |
-            cd build_cmake && make -j `nproc`
+            cd build_cmake && make -j 5
 
       - save_cache:
           paths:
