@@ -50,3 +50,8 @@ jobs:
       - store_artifacts:
           path: /tmp/memusage
           destination: memory-usage
+
+      - run:
+          name: Job memory usage
+          command: cat /sys/fs/cgroup/memory/memory.max_usage_in_bytes
+          when: always
