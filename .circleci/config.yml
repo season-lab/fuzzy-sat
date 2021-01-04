@@ -21,9 +21,10 @@ jobs:
       - run:
           name: Monitor memory usage
           command: |
-            echo "Memory Usage" > /tmp/memusage &&
-            echo "while true; do free >> /tmp/memusage; sleep 1; done" > /tmp/monitor_mem.sh &&
-            chmod +x /tmp/monitor_mem.sh &&
+            echo "Memory Usage" > /tmp/memusage;
+            echo "while true; do free >> /tmp/memusage; sleep 1; done" > /tmp/monitor_mem.sh;
+            cat /tmp/monitor_mem.sh;
+            chmod +x /tmp/monitor_mem.sh;
             /tmp/monitor_mem.sh &
 
       - restore_cache:
