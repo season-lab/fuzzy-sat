@@ -46,7 +46,7 @@ jobs:
           name: Building fuzzy
           command: |
             cd build_cmake/lib
-            make -j 5
+            make -j 5 Z3Fuzzy_static
             cd ../tools
             make -j 5
 
