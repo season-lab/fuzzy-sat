@@ -48,7 +48,7 @@ jobs:
             cd build_cmake/lib
             make -j 5 Z3Fuzzy_static
             cd ../tools
-            make -j 5
+            make -j 5 fuzzy-solver
 
       - run:
           name: "Running tests"
