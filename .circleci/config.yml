@@ -51,9 +51,13 @@ jobs:
             make -j 5
 
       - run:
-          name: "Running tests"
+          name: Tests
           command: |
-            echo "Dummy test"
+            cd tests
+            FUZZY_BIN="`pwd`/build_cmake/tools/fuzzy-solver" python3 -m pytest run.py --junitxml=test-results/junit.xml
+
+      - store_test_results:
+           path: tests/test-results
 
       - store_artifacts:
           path: /tmp/memusage

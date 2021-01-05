@@ -10,3 +10,4 @@ build/include/*
 !build/include/.gitkeep
 
 *.o
+*.pyc
