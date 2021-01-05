@@ -21,9 +21,6 @@ jobs:
           command: |
             [[ -f fuzzy-sat/.git ]] || (git submodule sync && git submodule update --init --recursive)
 
-      - restore_cache:
-          key: fuzzolic-z3-{{ checksum ".git/modules/fuzzolic-z3/refs/heads/fuzzolic" }}
-
       - run:
           name: Init cmake build
           command: |
@@ -31,16 +28,28 @@ jobs:
             cd build_cmake
             cmake .. -DCMAKE_BUILD_TYPE=Release
 
+      - restore_cache:
+          key: fuzzolic-z3-{{ checksum ".git/modules/fuzzolic-z3/refs/heads/fuzzolic" }}
+
       - run:
-          name: Building
+          name: Building z3
           command: |
-            cd build_cmake && make -j 5
+            cd build_cmake/fuzzolic-z3
+            [ ! -f z3 ] && make -j 5 || true
 
       - save_cache:
           paths:
             - build_cmake/fuzzolic-z3
           key: fuzzolic-z3-{{ checksum ".git/modules/fuzzolic-z3/refs/heads/fuzzolic" }}
-      
+
+      - run:
+          name: Building fuzzy
+          command: |
+            cd build_cmake/lib
+            make -j 5
+            cd ../tools
+            make -j 5
+
       - run:
           name: "Running tests"
           command: |
