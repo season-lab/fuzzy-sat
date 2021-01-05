@@ -54,7 +54,7 @@ jobs:
           name: Tests
           command: |
             cd tests
-            FUZZY_BIN="`pwd`/build_cmake/tools/fuzzy-solver" python3 -m pytest run.py --junitxml=test-results/junit.xml
+            FUZZY_BIN="`pwd`/../build_cmake/tools/fuzzy-solver" python3 -m pytest run.py --junitxml=test-results/junit.xml
 
       - store_test_results:
            path: tests/test-results
