@@ -9,16 +9,6 @@ jobs:
       - checkout
 
       - run:
-          name: Fetching submodules
-          command: |
-            [[ -f fuzzy-sat/.git ]] || (git submodule sync && git submodule update --init --recursive)
-
-      - run:
-          name: Init cmake build
-          command: |
-            mkdir build_cmake && cd build_cmake && cmake .. -DCMAKE_BUILD_TYPE=Release
-
-      - run:
           name: Monitor memory usage
           command: |
             echo "Memory Usage" > /tmp/memusage
@@ -26,8 +16,20 @@ jobs:
             free -h -s 3 >> /tmp/memusage
           background: true
 
+      - run:
+          name: Fetching submodules
+          command: |
+            [[ -f fuzzy-sat/.git ]] || (git submodule sync && git submodule update --init --recursive)
+
       - restore_cache:
           key: fuzzolic-z3-{{ checksum ".git/modules/fuzzolic-z3/refs/heads/fuzzolic" }}
+
+      - run:
+          name: Init cmake build
+          command: |
+            mkdir build_cmake || true
+            cd build_cmake
+            cmake .. -DCMAKE_BUILD_TYPE=Release
 
       - run:
           name: Building
