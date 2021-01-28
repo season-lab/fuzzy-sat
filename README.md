@@ -20,7 +20,7 @@ $ make
 It will build our fork of z3, the FuzzySAT library, and the command-line tools.
 
 ### How to use
-See https://season-lab.github.io/fuzzolic/.
+See https://season-lab.github.io/fuzzolic/usage.html#fuzzy-sat.
 
 ### Query Dataset
 
