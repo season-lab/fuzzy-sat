@@ -3,7 +3,7 @@
 [![CircleCI](https://circleci.com/gh/season-lab/fuzzy-sat.svg?style=shield&circle-token=426e6fc0f049c0a748ff3487716cb303ebe9a918)](https://app.circleci.com/pipelines/github/season-lab/fuzzy-sat)
 
 ### How to use
-todo
+See https://season-lab.github.io/fuzzolic/.
 
 ### Query Dataset
 
