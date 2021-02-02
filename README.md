@@ -6,7 +6,8 @@
 
 Clone the repository and all the submodules:
 ``` bash
-$ git clone https://github.com/season-lab/fuzzy-sat && cd fuzzy-sat
+$ git clone https://github.com/season-lab/fuzzy-sat 
+$ cd fuzzy-sat
 $ git submodule update --init --recursive
 ```
 
