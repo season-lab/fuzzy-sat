@@ -22,3 +22,5 @@ target_link_libraries (Z3Fuzzy_shared LINK_PUBLIC libz3)
 
 set_target_properties(Z3Fuzzy_static PROPERTIES OUTPUT_NAME Z3Fuzzy)
 set_target_properties(Z3Fuzzy_shared PROPERTIES OUTPUT_NAME Z3Fuzzy)
+
+install(FILES z3-fuzzy.h DESTINATION include)
