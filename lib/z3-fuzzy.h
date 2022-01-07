@@ -102,13 +102,15 @@ typedef struct memory_impact_stats_t {
     unsigned long n_assignments;
 } memory_impact_stats_t;
 
-void z3fuzz_init(fuzzy_ctx_t* fctx, Z3_context ctx, char* seed_filename,
-                 char* testcase_path,
-                 uint64_t (*model_eval)(Z3_context, Z3_ast, uint64_t*, uint8_t*,
+fuzzy_ctx_t* z3fuzz_create(Z3_context ctx, char* seed_filename,
+                           unsigned timeout);
+void         z3fuzz_init(fuzzy_ctx_t* fctx, Z3_context ctx, char* seed_filename,
+                         char* testcase_path,
+                         uint64_t (*model_eval)(Z3_context, Z3_ast, uint64_t*, uint8_t*,
                                         size_t, uint32_t*),
-                 unsigned timeout);
-void z3fuzz_free(fuzzy_ctx_t* ctx);
-void z3fuzz_print_expr(fuzzy_ctx_t* ctx, Z3_ast e);
+                         unsigned timeout);
+void         z3fuzz_free(fuzzy_ctx_t* ctx);
+void         z3fuzz_print_expr(fuzzy_ctx_t* ctx, Z3_ast e);
 
 unsigned long z3fuzz_evaluate_expression(fuzzy_ctx_t* ctx, Z3_ast value,
                                          unsigned char* values);

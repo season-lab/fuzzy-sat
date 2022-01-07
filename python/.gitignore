@@ -1,0 +1,4 @@
+build/
+fuzzysat.egg-info/
+fuzzysat/z3/
+fuzzysat/libZ3Fuzzy.so

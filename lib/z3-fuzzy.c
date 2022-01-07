@@ -738,7 +738,7 @@ PRE_SWITCH:
             args[0] = arg2;
             args[1] = arg1;
             res     = __gd_create_sub(ctx->z3_ctx, args[0], args[1], sort_size,
-                                  !is_unsigned);
+                                      !is_unsigned);
             break;
         }
         case Z3_OP_SLT:
@@ -753,7 +753,7 @@ PRE_SWITCH:
             args[0] = arg1;
             args[1] = arg2;
             res     = __gd_create_sub(ctx->z3_ctx, args[0], args[1], sort_size,
-                                  !is_unsigned);
+                                      !is_unsigned);
             break;
         }
         case Z3_OP_EQ: { // arg1 == arg2 =>   abs(arg1 - arg2)
@@ -930,11 +930,11 @@ void z3fuzz_init(fuzzy_ctx_t* fctx, Z3_context ctx, char* seed_filename,
 
     testcase_t* current_testcase = &fctx->testcases.data[0];
     tmp_input     = (unsigned long*)malloc(sizeof(unsigned long) *
-                                       current_testcase->values_len);
+                                           current_testcase->values_len);
     tmp_opt_input = (unsigned long*)malloc(sizeof(unsigned long) *
                                            current_testcase->values_len);
     tmp_proof     = (unsigned char*)malloc(sizeof(unsigned char) *
-                                       current_testcase->testcase_len);
+                                           current_testcase->testcase_len);
     tmp_opt_proof = (unsigned char*)malloc(sizeof(unsigned char) *
                                            current_testcase->testcase_len);
 
@@ -975,6 +975,16 @@ void z3fuzz_init(fuzzy_ctx_t* fctx, Z3_context ctx, char* seed_filename,
     set_init__ulong(processed_constraints, index_hash, index_equals);
 
     gd_init();
+}
+
+fuzzy_ctx_t* z3fuzz_create(Z3_context ctx, char* seed_filename,
+                           unsigned timeout)
+{
+    fuzzy_ctx_t* res = (fuzzy_ctx_t*)malloc(sizeof(fuzzy_ctx_t));
+    ASSERT_OR_ABORT(res, "z3fuzz_create(): failed malloc");
+
+    z3fuzz_init(res, ctx, seed_filename, NULL, NULL, timeout);
+    return res;
 }
 
 void z3fuzz_free(fuzzy_ctx_t* ctx)
@@ -1045,7 +1055,7 @@ void z3fuzz_free(fuzzy_ctx_t* ctx)
 
 void z3fuzz_print_expr(fuzzy_ctx_t* ctx, Z3_ast e)
 {
-    Z3FUZZ_LOG("expr:\n%s\n", Z3_ast_to_string(ctx->z3_ctx, e));
+    Z3FUZZ_LOG("expr:\n%s\n[end expr]\n", Z3_ast_to_string(ctx->z3_ctx, e));
 }
 
 static inline void __vals_char_to_long(unsigned char* in_vals,
@@ -3629,8 +3639,8 @@ static __always_inline int PHASE_brute_force(fuzzy_ctx_t* ctx, Z3_ast query,
     for (i = 0; i < 256; ++i) {
         tmp_input[*uniq_index] = i;
         int eval_v             = __evaluate_branch_query(
-            ctx, query, branch_condition, tmp_input,
-            current_testcase->value_sizes, current_testcase->values_len);
+                        ctx, query, branch_condition, tmp_input,
+                        current_testcase->value_sizes, current_testcase->values_len);
         if (eval_v == 1) {
 #ifdef PRINT_SAT
             Z3FUZZ_LOG("[check light - brute force] "
@@ -3868,8 +3878,8 @@ SUBPHASE_afl_det_byte_flip(fuzzy_ctx_t* ctx, Z3_ast query,
 
     tmp_input[input_index] = (unsigned long)input_byte_0 ^ 0xffUL;
     int valid_eval         = is_valid_eval_index(ctx, input_index, tmp_input,
-                                         current_testcase->value_sizes,
-                                         current_testcase->values_len);
+                                                 current_testcase->value_sizes,
+                                                 current_testcase->values_len);
     if (valid_eval) {
         int eval_v = __evaluate_branch_query(
             ctx, query, branch_condition, tmp_input,
@@ -5596,17 +5606,17 @@ static __always_inline int PHASE_afl_havoc_mod(fuzzy_ctx_t* ctx, Z3_ast query,
 
     // initialize list input
     indexes      = (unsigned long*)malloc(ast_data.inputs->indexes.size *
-                                     sizeof(unsigned long));
+                                          sizeof(unsigned long));
     indexes_size = ast_data.inputs->indexes.size;
     // initialize groups input
     ig_16      = (index_group_t**)malloc(ast_data.inputs->index_groups.size *
-                                    sizeof(index_group_t*));
+                                         sizeof(index_group_t*));
     ig_16_size = 0;
     ig_32      = (index_group_t**)malloc(ast_data.inputs->index_groups.size *
-                                    sizeof(index_group_t*));
+                                         sizeof(index_group_t*));
     ig_32_size = 0;
     ig_64      = (index_group_t**)malloc(ast_data.inputs->index_groups.size *
-                                    sizeof(index_group_t*));
+                                         sizeof(index_group_t*));
     ig_64_size = 0;
 
     i = 0;
@@ -5969,17 +5979,17 @@ static __always_inline int PHASE_afl_havoc(fuzzy_ctx_t* ctx, Z3_ast query,
 
     // initialize list input
     indexes      = (unsigned long*)malloc(ast_data.inputs->indexes.size *
-                                     sizeof(unsigned long));
+                                          sizeof(unsigned long));
     indexes_size = ast_data.inputs->indexes.size;
     // initialize groups input
     ig_16      = (index_group_t**)malloc(ast_data.inputs->index_groups.size *
-                                    sizeof(index_group_t*));
+                                         sizeof(index_group_t*));
     ig_16_size = 0;
     ig_32      = (index_group_t**)malloc(ast_data.inputs->index_groups.size *
-                                    sizeof(index_group_t*));
+                                         sizeof(index_group_t*));
     ig_32_size = 0;
     ig_64      = (index_group_t**)malloc(ast_data.inputs->index_groups.size *
-                                    sizeof(index_group_t*));
+                                         sizeof(index_group_t*));
     ig_64_size = 0;
 
     i = 0;
@@ -6348,17 +6358,17 @@ static __always_inline int PHASE_afl_havoc_whole_pi(fuzzy_ctx_t* ctx,
 
     // initialize list input
     indexes      = (unsigned long*)malloc(tmp_ast_info->indexes.size *
-                                     sizeof(unsigned long));
+                                          sizeof(unsigned long));
     indexes_size = tmp_ast_info->indexes.size;
     // initialize groups input
     ig_16      = (index_group_t**)malloc(tmp_ast_info->index_groups.size *
-                                    sizeof(index_group_t*));
+                                         sizeof(index_group_t*));
     ig_16_size = 0;
     ig_32      = (index_group_t**)malloc(tmp_ast_info->index_groups.size *
-                                    sizeof(index_group_t*));
+                                         sizeof(index_group_t*));
     ig_32_size = 0;
     ig_64      = (index_group_t**)malloc(tmp_ast_info->index_groups.size *
-                                    sizeof(index_group_t*));
+                                         sizeof(index_group_t*));
     ig_64_size = 0;
 
     i = 0;
@@ -7554,7 +7564,7 @@ void z3fuzz_add_assignment(fuzzy_ctx_t* ctx, int idx, Z3_ast assignment_value)
         unsigned old_size     = ctx->size_assignments;
         ctx->size_assignments = (idx + 1) * 3 / 2;
         ctx->assignments      = (Z3_ast*)realloc(
-            ctx->assignments, sizeof(Z3_ast) * ctx->size_assignments);
+                 ctx->assignments, sizeof(Z3_ast) * ctx->size_assignments);
         ASSERT_OR_ABORT(
             ctx->assignments != NULL,
             "z3fuzz_add_assignment() ctx->assignments - failed realloc");
@@ -7580,7 +7590,7 @@ void z3fuzz_add_assignment(fuzzy_ctx_t* ctx, int idx, Z3_ast assignment_value)
         if (testcase->values_len <= idx) {
             testcase->values_len = (idx + 1) * 3 / 2;
             testcase->values     = (unsigned long*)realloc(
-                testcase->values, sizeof(unsigned long) * testcase->values_len);
+                    testcase->values, sizeof(unsigned long) * testcase->values_len);
             ASSERT_OR_ABORT(
                 testcase->values != 0,
                 "z3fuzz_add_assignment() testcase->values - failed realloc");
@@ -7644,8 +7654,8 @@ static inline unsigned long __minimize_maximize_inner_greedy(
 
     testcase_t*   current_testcase = &ctx->testcases.data[0];
     unsigned long max_min          = ctx->model_eval(
-        ctx->z3_ctx, to_maximize_minimize, tmp_input,
-        current_testcase->value_sizes, current_testcase->values_len, NULL);
+                 ctx->z3_ctx, to_maximize_minimize, tmp_input,
+                 current_testcase->value_sizes, current_testcase->values_len, NULL);
     unsigned long tmp;
     unsigned long original_byte, max_min_byte, i, j;
     ulong*        p;
@@ -8129,8 +8139,8 @@ void z3fuzz_find_all_values_gd(
 
         at_least_once = 1;
         last_val      = ctx->model_eval(ctx->z3_ctx, expr_original, tmp_input,
-                                   current_testcase->value_sizes,
-                                   current_testcase->values_len, NULL);
+                                        current_testcase->value_sizes,
+                                        current_testcase->values_len, NULL);
         __vals_long_to_char(tmp_input, tmp_proof,
                             current_testcase->testcase_len);
 

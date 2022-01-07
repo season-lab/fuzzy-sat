@@ -9,5 +9,8 @@ build/lib/*
 build/include/*
 !build/include/.gitkeep
 
+build-cmake/
+
 *.o
 *.pyc
+*.z3-trace
