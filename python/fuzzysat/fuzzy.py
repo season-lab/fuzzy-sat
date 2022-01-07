@@ -40,7 +40,7 @@ class FuzzySolver(object):
     def __del__(self):
         self._tmpfile.close()
 
-    def notify_constraint(self, constraint:BitVecRef):
+    def add(self, constraint:BitVecRef):
         self.constraints.append(constraint)
 
         libref.z3fuzz_notify_constraint(
