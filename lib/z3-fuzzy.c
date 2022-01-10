@@ -7902,6 +7902,16 @@ void z3fuzz_find_all_values(fuzzy_ctx_t* ctx, Z3_ast expr, Z3_ast pi,
     set__ulong output_vals;
     set_init__ulong(&output_vals, index_hash, index_equals);
 
+    // Perform the first evaluation in the seed
+    __vals_long_to_char(tmp_input, tmp_proof, current_testcase->testcase_len);
+    unsigned long value_in_seed = ctx->model_eval(
+        ctx->z3_ctx, expr, tmp_input, current_testcase->value_sizes,
+        current_testcase->values_len, NULL);
+    fuzzy_findall_res_t res_seed_call =
+        callback(tmp_proof, current_testcase->testcase_len, value_in_seed);
+    if (res_seed_call == Z3FUZZ_STOP)
+        goto END;
+
     index_group_t* g;
 
     set_reset_iter__index_group_t(&ast_data.inputs->index_groups, 1);
