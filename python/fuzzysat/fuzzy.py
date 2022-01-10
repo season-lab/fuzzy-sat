@@ -5,12 +5,18 @@ import os
 from .z3 import main_ctx as _z3_ctx
 from .z3 import BitVec, BitVecRef, BoolVal, BoolRef, And
 
+class evalElement(ctypes.Structure):
+    _fields_ = [('val', ctypes.c_uint64),
+                ('proof', ctypes.c_uint64),
+                ('proof_size', ctypes.c_uint64)]
+
 SCRIPTDIR = os.path.realpath(os.path.dirname(__file__))
 
 libref = ctypes.cdll.LoadLibrary(
     os.path.join(SCRIPTDIR, "libfuzzy_python.so"))
 
 libref.createFuzzyCtx.restype             = ctypes.c_void_p
+libref.createEvalElementArray.restype     = ctypes.POINTER(evalElement)
 libref.z3fuzz_evaluate_expression.restype = ctypes.c_uint64
 libref.z3fuzz_maximize.restype            = ctypes.c_uint64
 libref.z3fuzz_minimize.restype            = ctypes.c_uint64
@@ -33,7 +39,7 @@ class FuzzyCtx(object):
         libref.destroyFuzzyCtx(self.handle_ref())
 
 class FuzzySolver(object):
-    def __init__(self, seed:bytes, timeout:int=0):
+    def __init__(self, seed:bytes, timeout:int=1000):
         self._tmpfile = tempfile.NamedTemporaryFile()
         self._tmpfile.write(seed)
         self._tmpfile.flush()
@@ -78,8 +84,14 @@ class FuzzySolver(object):
             ctypes.byref(proof_size))
 
         if res == 0:
-            return False, None
-        return True, (ctypes.c_char*proof_size.value).from_address(proof.value).raw
+            optsol = libref.z3fuzz_get_optimistic_sol(
+                self.ctx.handle_ref(),
+                ctypes.byref(proof),
+                ctypes.byref(proof_size))
+            if optsol == 0:
+                return False, False, None
+            return False, True, (ctypes.c_char*proof_size.value).from_address(proof.value).raw
+        return True, True, (ctypes.c_char*proof_size.value).from_address(proof.value).raw
 
     def eval_in_seed(self, expr:BitVecRef):
         seed_arr = (ctypes.c_uint8 * len(self.seed))(*list(self.seed))
@@ -90,7 +102,10 @@ class FuzzySolver(object):
         )
 
     def eval_upto(self, expr:BitVecRef, n:int, use_gd=False, gd_to_max=True):
-        out_arr = (ctypes.c_uint64 * n)(*([0]*n))
+        out_arr = libref.createEvalElementArray(
+            ctypes.c_uint64(n),
+            ctypes.c_uint64(len(self.seed))
+        )
 
         gd_mode = 0
         if use_gd and not gd_to_max:
@@ -102,11 +117,25 @@ class FuzzySolver(object):
             self.ctx.handle_ref(),
             expr.as_ast(),
             self.pi().as_ast(),
-            ctypes.byref(out_arr),
+            out_arr,
             ctypes.c_uint32(n),
             ctypes.c_uint8(gd_mode))
 
-        return list({out_arr[i] for i in range(n_vals)})
+        inserted_vals = set()
+        res = list()
+        for i in range(n_vals):
+            if out_arr[i].val in inserted_vals:
+                continue
+
+            inserted_vals.add(out_arr[i].val)
+            res.append(
+                (out_arr[i].val, (ctypes.c_char*out_arr[i].proof_size).from_address(out_arr[i].proof).raw)
+            )
+
+        libref.destroyEvalElementArray(
+            out_arr,
+            ctypes.c_uint64(n))
+        return res
 
     def minimize(self, expr:BitVecRef):
         proof_size = ctypes.c_uint64()

@@ -27,7 +27,7 @@ def _build_native():
     if not os.path.exists(build_dir):
         os.mkdir(build_dir)
 
-    cmd = ["cmake", "-DCMAKE_BUILD_TYPE=Debug", ".."]
+    cmd = ["cmake", "-DCMAKE_BUILD_TYPE=Release", ".."]
     subprocess.check_call(cmd, cwd=build_dir)
 
     cmd = ["make", "-j", str(multiprocessing.cpu_count())]
@@ -59,7 +59,10 @@ def _build_native():
     _patch_z3()
 
 def _clean_native():
-    pass
+    shutil.rmtree('fuzzysat/z3', ignore_errors=True)
+    shutil.rmtree('native/libZ3Fuzzy.a', ignore_errors=True)
+    shutil.rmtree('native/libfuzzy_python.so', ignore_errors=True)
+    shutil.rmtree('fuzzysat/libfuzzy_python.so', ignore_errors=True)
 
 class build(_build):
     def run(self, *args):
