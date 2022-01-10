@@ -3,7 +3,7 @@ import ctypes
 import os
 
 from .z3 import main_ctx as _z3_ctx
-from .z3 import BitVecRef, BoolVal, And
+from .z3 import BitVec, BitVecRef, BoolVal, And
 
 SCRIPTDIR = os.path.realpath(os.path.dirname(__file__))
 
@@ -36,9 +36,15 @@ class FuzzySolver(object):
 
         self.ctx = FuzzyCtx(self._tmpfile.name, timeout)
         self.constraints = list()
+        self.inputs = [BitVec(i, 8) for i in range(len(seed))]
 
     def __del__(self):
         self._tmpfile.close()
+
+    def get_input(self, off):
+        if off > len(self.inputs) or off < 0:
+            raise ValueError("off is not a valid input")
+        return self.inputs[off]
 
     def add(self, constraint:BitVecRef):
         self.constraints.append(constraint)

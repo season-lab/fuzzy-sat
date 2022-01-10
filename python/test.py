@@ -4,10 +4,10 @@ import fuzzysat.z3 as z3
 s = fuzzysat.FuzzySolver(b"\x00\x00\x00\x00")
 
 inp = z3.Concat(
-    z3.BitVec(0, 8),
-    z3.BitVec(1, 8),
-    z3.BitVec(2, 8),
-    z3.BitVec(3, 8))
+    s.get_input(0),
+    s.get_input(1),
+    s.get_input(2),
+    s.get_input(3))
 
 s.add(inp < 16)
 s.add(inp > 0)
