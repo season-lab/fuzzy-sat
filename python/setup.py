@@ -1,6 +1,7 @@
 import multiprocessing
 import subprocess
 import shutil
+import sys
 import os
 
 from setuptools import setup, find_packages
@@ -8,6 +9,10 @@ from distutils.command.build import build as _build
 from distutils.command.clean import clean as _clean
 
 SCRIPTDIR = os.path.realpath(os.path.dirname(__file__))
+
+if SCRIPTDIR.startswith("/tmp"):
+    sys.stderr.write("!Err: update PIP")
+    exit(1)
 
 def _patch_z3():
     os.system(
@@ -29,8 +34,6 @@ def _build_native():
     subprocess.check_call(cmd, cwd=build_dir)
 
     shutil.rmtree('fuzzysat/z3', ignore_errors=True)
-    shutil.rmtree('fuzzysat/libZ3Fuzzy.so', ignore_errors=True)
-
     shutil.copytree(
         os.path.join(build_dir, "fuzzolic-z3", "python", "z3"),
         "fuzzysat/z3"
@@ -39,9 +42,18 @@ def _build_native():
         os.path.join(build_dir, "fuzzolic-z3", "python", "libz3.so"),
         "fuzzysat/z3/libz3.so"
     )
+
+    shutil.rmtree('native/libZ3Fuzzy.a', ignore_errors=True)
     shutil.copy(
-        os.path.join(build_dir, "lib", "libZ3Fuzzy.so"),
-        "fuzzysat/libZ3Fuzzy.so"
+        os.path.join(build_dir, "lib", "libZ3Fuzzy.a"),
+        "native/libZ3Fuzzy.a"
+    )
+
+    cmd = ["make"]
+    subprocess.check_call(cmd, cwd=os.path.join(SCRIPTDIR, "native"))
+    shutil.copy(
+        os.path.join("native", "libfuzzy_python.so"),
+        "fuzzysat/libfuzzy_python.so"
     )
 
     _patch_z3()
@@ -79,7 +91,7 @@ setup (
     package_data={
         'fuzzysat': [
             'z3/*',
-            'libZ3Fuzzy.so',
+            'libfuzzy_python.so'
         ]
     }
 )

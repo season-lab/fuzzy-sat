@@ -8072,6 +8072,7 @@ void z3fuzz_find_all_values_gd(
                                     unsigned long        val))
 {
     Z3_inc_ref(ctx->z3_ctx, expr);
+    Z3_inc_ref(ctx->z3_ctx, pi);
 
     testcase_t* current_testcase = &ctx->testcases.data[0];
     Z3_ast      expr_original    = expr;
@@ -8161,6 +8162,7 @@ void z3fuzz_find_all_values_gd(
 OUT_1:
     set_free__digest_t(&digest_set, NULL);
 OUT_2:
+    Z3_dec_ref(ctx->z3_ctx, pi);
     Z3_dec_ref(ctx->z3_ctx, expr);
     Z3_dec_ref(ctx->z3_ctx, expr_original);
     __gd_free_eval(&ew);

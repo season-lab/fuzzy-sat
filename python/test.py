@@ -10,6 +10,7 @@ inp = z3.Concat(
     z3.BitVec(3, 8))
 
 s.add(inp < 16)
+s.add(inp > 0)
 is_sat, proof = s.check_sat(inp > 10)
 
 if is_sat:
@@ -17,3 +18,6 @@ if is_sat:
 else:
     print("UNKNOWN")
 
+print(s.eval_upto(inp, 20))
+print(s.eval_upto(inp, 20, use_gd=True, gd_to_max=False))
+print(s.eval_upto(inp, 20, use_gd=True, gd_to_max=True))
