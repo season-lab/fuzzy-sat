@@ -7703,6 +7703,8 @@ unsigned long z3fuzz_maximize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_maximize,
                               unsigned char const** out_values,
                               unsigned long*        out_len)
 {
+    Z3_inc_ref(ctx->z3_ctx, pi);
+
     memcpy(tmp_input, ctx->testcases.data[0].values,
            ctx->testcases.data[0].values_len * sizeof(unsigned long));
 
@@ -7776,6 +7778,7 @@ unsigned long z3fuzz_maximize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_maximize,
     *out_values = tmp_proof;
 
 OUT:
+    Z3_dec_ref(ctx->z3_ctx, pi);
     Z3_dec_ref(ctx->z3_ctx, to_maximize);
     Z3_dec_ref(ctx->z3_ctx, original_to_maximize);
     __gd_free_eval(&ew);
@@ -7788,6 +7791,7 @@ unsigned long z3fuzz_minimize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_minimize,
                               unsigned char const** out_values,
                               unsigned long*        out_len)
 {
+    Z3_inc_ref(ctx->z3_ctx, pi);
     memcpy(tmp_input, ctx->testcases.data[0].values,
            ctx->testcases.data[0].values_len * sizeof(unsigned long));
 
@@ -7847,6 +7851,7 @@ unsigned long z3fuzz_minimize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_minimize,
     __vals_long_to_char(tmp_input, tmp_proof, *out_len);
     *out_values = tmp_proof;
 OUT:
+    Z3_dec_ref(ctx->z3_ctx, pi);
     Z3_dec_ref(ctx->z3_ctx, to_minimize);
     Z3_dec_ref(ctx->z3_ctx, to_minimize_original);
     __gd_free_eval(&ew);

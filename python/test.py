@@ -19,6 +19,15 @@ if is_sat:
 else:
     print("UNKNOWN")
 
-print(s.eval_upto(inp, 20))
-print(s.eval_upto(inp, 20, use_gd=True, gd_to_max=False))
-print(s.eval_upto(inp, 20, use_gd=True, gd_to_max=True))
+print("eval_upto (greedy):   ",
+    s.eval_upto(inp, 20))
+print("eval_upto (gd to min):",
+    s.eval_upto(inp, 20, use_gd=True, gd_to_max=False))
+print("eval_upto (gd to max):",
+    s.eval_upto(inp, 20, use_gd=True, gd_to_max=True))
+
+minval, minproof = s.minimize(inp)
+maxval, maxproof = s.maximize(inp)
+
+print("minval:", minval, "(", str(minproof), ")")
+print("maxval:", maxval, "(", str(maxproof), ")")
