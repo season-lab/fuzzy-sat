@@ -10,6 +10,8 @@ from distutils.command.clean import clean as _clean
 
 SCRIPTDIR = os.path.realpath(os.path.dirname(__file__))
 
+DEBUG=False
+
 if SCRIPTDIR.startswith("/tmp"):
     sys.stderr.write("!Err: update PIP")
     exit(1)
@@ -27,7 +29,10 @@ def _build_native():
     if not os.path.exists(build_dir):
         os.mkdir(build_dir)
 
-    cmd = ["cmake", "-DCMAKE_BUILD_TYPE=Release", ".."]
+    cmd = [
+        "cmake",
+        "-DCMAKE_BUILD_TYPE=" + ("Release" if not DEBUG else "Debug"),
+        ".."]
     subprocess.check_call(cmd, cwd=build_dir)
 
     cmd = ["make", "-j", str(multiprocessing.cpu_count())]

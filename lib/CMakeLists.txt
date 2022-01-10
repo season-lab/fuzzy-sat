@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.7)
 
+# Strip the binary in release mode
 set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -s")
 
 set(z3fuzzy_src
