@@ -101,16 +101,20 @@ class FuzzySolver(object):
             seed_arr
         )
 
-    def eval_upto(self, expr:BitVecRef, n:int, use_gd=False, gd_to_max=True):
+    def eval_upto_inner(self, expr:BitVecRef, n:int, mode="greedy"):
+        if mode not in {"greedy", "gd_min", "gd_max"}:
+            raise ValueError("unrecognised mode")
+
         out_arr = libref.createEvalElementArray(
             ctypes.c_uint64(n),
             ctypes.c_uint64(len(self.seed))
         )
 
-        gd_mode = 0
-        if use_gd and not gd_to_max:
+        if mode == "greedy":
+            gd_mode = 0
+        elif mode == "gd_min":
             gd_mode = 1
-        elif use_gd and gd_to_max:
+        else:
             gd_mode = 2
 
         n_vals = libref.evalUpto(
@@ -136,6 +140,21 @@ class FuzzySolver(object):
             out_arr,
             ctypes.c_uint64(n))
         return res
+
+    def eval_upto(self, expr:BitVecRef, n:int):
+        added_elements = set()
+        res = list()
+
+        for el in \
+                self.eval_upto_inner(expr, n, "greedy") + \
+                self.eval_upto_inner(expr, n, "gd_min") + \
+                self.eval_upto_inner(expr, n, "gd_max"):
+
+            if el[0] in added_elements:
+                continue
+            added_elements.add(el[0])
+            res.append(el)
+        return res[:n]
 
     def minimize(self, expr:BitVecRef):
         proof_size = ctypes.c_uint64()

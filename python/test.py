@@ -32,14 +32,20 @@ print_sat_info(r)
 
 print()
 
-print("eval_upto (greedy):   ")
+print("eval_upto (all):   ")
 for val, proof in s.eval_upto(inp, 20):
     print("   ", val, proof)
-print("eval_upto (gd to min):")
-for val, proof in s.eval_upto(inp, 20, use_gd=True, gd_to_max=False):
+print()
+print("eval_upto (greedy):   ")
+for val, proof in s.eval_upto_inner(inp, 20, mode="greedy"):
     print("   ", val, proof)
+print()
+print("eval_upto (gd to min):")
+for val, proof in s.eval_upto_inner(inp, 20, mode="gd_min"):
+    print("   ", val, proof)
+print()
 print("eval_upto (gd to max):")
-for val, proof in s.eval_upto(inp, 20, use_gd=True, gd_to_max=True):
+for val, proof in s.eval_upto_inner(inp, 20, mode="gd_max"):
     print("   ", val, proof)
 
 print()
