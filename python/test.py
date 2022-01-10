@@ -1,7 +1,8 @@
 import fuzzysat
 import fuzzysat.z3 as z3
 
-s = fuzzysat.FuzzySolver(b"\x00\x00\x00\x00")
+s = fuzzysat.FuzzySolver(
+    seed=b"\x00\x00\x00\x01")
 
 inp = z3.Concat(
     s.get_input(0),

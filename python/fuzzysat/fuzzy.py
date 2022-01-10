@@ -42,7 +42,7 @@ class FuzzySolver(object):
         self._tmpfile.close()
 
     def get_input(self, off):
-        if off > len(self.inputs) or off < 0:
+        if off >= len(self.inputs) or off < 0:
             raise ValueError("off is not a valid input")
         return self.inputs[off]
 
