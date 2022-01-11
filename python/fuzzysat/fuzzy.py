@@ -101,6 +101,16 @@ class FuzzySolver(object):
             seed_arr
         )
 
+    def eval(self, expr:BitVecRef, data:bytes):
+        assert len(data) == len(self.seed)
+
+        data_arr = (ctypes.c_uint8 * len(data))(*list(data))
+        return libref.z3fuzz_evaluate_expression(
+            self.ctx.handle_ref(),
+            expr.as_ast(),
+            data_arr
+        )
+
     def eval_upto_inner(self, expr:BitVecRef, n:int, mode="greedy"):
         if mode not in {"greedy", "gd_min", "gd_max"}:
             raise ValueError("unrecognised mode")
