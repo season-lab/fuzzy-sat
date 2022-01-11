@@ -40,17 +40,17 @@ class FuzzyCtx(object):
 
 class FuzzySolver(object):
     def __init__(self, seed:bytes, timeout:int=1000):
-        self._tmpfile = tempfile.NamedTemporaryFile()
-        self._tmpfile.write(seed)
-        self._tmpfile.flush()
+        with tempfile.NamedTemporaryFile() as f:
+            f.write(seed)
+            f.flush()
+            self.ctx = FuzzyCtx(f.name, timeout)
 
-        self.ctx = FuzzyCtx(self._tmpfile.name, timeout)
         self.seed = seed
         self.constraints = list()
         self.inputs = [BitVec(i, 8) for i in range(len(seed))]
 
     def __del__(self):
-        self._tmpfile.close()
+        pass
 
     def get_input(self, off:int):
         if off >= len(self.inputs) or off < 0:
