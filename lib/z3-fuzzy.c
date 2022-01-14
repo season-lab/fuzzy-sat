@@ -7947,6 +7947,26 @@ void z3fuzz_find_all_values(fuzzy_ctx_t* ctx, Z3_ast expr, Z3_ast pi,
                         goto END;
                 }
             }
+        } else if (g->n == 1) {
+            // it is a single byte, brute-force it
+            uint64_t i;
+            for (i = 0; i < 256; ++i) {
+                set_tmp_input_group_to_value(g, i);
+                if (ctx->model_eval(ctx->z3_ctx, pi, tmp_input,
+                                    current_testcase->value_sizes,
+                                    current_testcase->values_len, NULL)) {
+                    __vals_long_to_char(tmp_input, tmp_proof,
+                                        current_testcase->testcase_len);
+                    unsigned long expr_val =
+                        ctx->model_eval(ctx->z3_ctx, expr, tmp_input,
+                                        current_testcase->value_sizes,
+                                        current_testcase->values_len, NULL);
+                    fuzzy_findall_res_t res = callback(
+                        tmp_proof, current_testcase->testcase_len, expr_val);
+                    if (res == Z3FUZZ_STOP)
+                        goto END;
+                }
+            }
         } else {
             // greedy +1, -1
             unsigned      max_iter = 5;
