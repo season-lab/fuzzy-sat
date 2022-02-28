@@ -1,0 +1,6 @@
+build/
+fuzzysat.egg-info/
+fuzzysat/z3/
+native/libZ3Fuzzy.a
+native/libfuzzy_python.so
+fuzzysat/libfuzzy_python.so

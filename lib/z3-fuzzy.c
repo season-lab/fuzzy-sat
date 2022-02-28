@@ -883,13 +883,67 @@ static void init_config_params()
                    getenv("Z3FUZZ_CHECK_UNNECESSARY_EVAL"));
 }
 
+static int  g_global_ctx_initialized = 0;
+static void init_global_context(size_t input_size)
+{
+    static size_t current_input_size = 0;
+    if (g_global_ctx_initialized) {
+        if (current_input_size < input_size) {
+            // The handling of tmp_input is awful... I probably should be moved
+            // in the context. Anyway, we are increasing the size of tmp_input
+            // (and the other variants) to make room to a new context
+            tmp_input = (unsigned long*)realloc(
+                tmp_input, sizeof(unsigned long) * input_size);
+            ASSERT_OR_ABORT(tmp_input, "init_global_context(): realloc failed");
+            tmp_opt_input = (unsigned long*)realloc(
+                tmp_opt_input, sizeof(unsigned long) * input_size);
+            ASSERT_OR_ABORT(tmp_opt_input,
+                            "init_global_context(): realloc failed");
+            tmp_proof = (unsigned char*)realloc(
+                tmp_proof, sizeof(unsigned char) * input_size);
+            ASSERT_OR_ABORT(tmp_proof, "init_global_context(): realloc failed");
+            tmp_opt_proof = (unsigned char*)realloc(
+                tmp_opt_proof, sizeof(unsigned char) * input_size);
+            ASSERT_OR_ABORT(tmp_opt_proof,
+                            "init_global_context(): realloc failed");
+        }
+        return;
+    }
+
+    current_input_size = input_size;
+    tmp_input = (unsigned long*)malloc(sizeof(unsigned long) * input_size);
+    ASSERT_OR_ABORT(tmp_input, "init_global_context(): malloc failed");
+    tmp_opt_input = (unsigned long*)malloc(sizeof(unsigned long) * input_size);
+    ASSERT_OR_ABORT(tmp_opt_input, "init_global_context(): malloc failed");
+    tmp_proof = (unsigned char*)malloc(sizeof(unsigned char) * input_size);
+    ASSERT_OR_ABORT(tmp_proof, "init_global_context(): malloc failed");
+    tmp_opt_proof = (unsigned char*)malloc(sizeof(unsigned char) * input_size);
+    ASSERT_OR_ABORT(tmp_opt_proof, "init_global_context(): malloc failed");
+
+    init_config_params();
+    dev_urandom_fd = open("/dev/urandom", O_RDONLY);
+    if (dev_urandom_fd < 0)
+        ASSERT_OR_ABORT(0, "Unable to open /dev/urandom");
+
+    if (log_query_stats) {
+        query_log = fopen(query_log_filename, "w");
+        fprintf(query_log, "ctx id;query size;index size;index group size;is "
+                           "input to state;linear "
+                           "arith ops;non linear arith ops");
+    }
+
+    ast_data_init(&ast_data);
+    gd_init();
+
+    g_global_ctx_initialized = 1;
+}
+
 void z3fuzz_init(fuzzy_ctx_t* fctx, Z3_context ctx, char* seed_filename,
                  char* testcase_path,
                  uint64_t (*model_eval)(Z3_context, Z3_ast, uint64_t*, uint8_t*,
                                         size_t, uint32_t*),
                  unsigned timeout)
 {
-    init_config_params();
     memset((void*)&fctx->stats, 0, sizeof(fuzzy_stats_t));
 
     if (timeout != 0) {
@@ -899,18 +953,6 @@ void z3fuzz_init(fuzzy_ctx_t* fctx, Z3_context ctx, char* seed_filename,
         fctx->timer = NULL;
 
     Z3_set_ast_print_mode(ctx, Z3_PRINT_SMTLIB2_COMPLIANT);
-
-    dev_urandom_fd = open("/dev/urandom", O_RDONLY);
-    if (dev_urandom_fd < 0)
-        ASSERT_OR_ABORT(0, "Unable to open /dev/urandom");
-
-    if (log_query_stats) {
-        query_log = fopen(query_log_filename, "w");
-        fprintf(
-            query_log,
-            "query size;index size;index group size;is input to state;linear "
-            "arith ops;non linear arith ops");
-    }
 
     fctx->model_eval = model_eval != NULL ? model_eval : Z3_custom_eval_depth;
     fctx->z3_ctx     = ctx;
@@ -929,16 +971,7 @@ void z3fuzz_init(fuzzy_ctx_t* fctx, Z3_context ctx, char* seed_filename,
     __symbol_init(fctx, fctx->testcases.data[0].values_len);
 
     testcase_t* current_testcase = &fctx->testcases.data[0];
-    tmp_input     = (unsigned long*)malloc(sizeof(unsigned long) *
-                                       current_testcase->values_len);
-    tmp_opt_input = (unsigned long*)malloc(sizeof(unsigned long) *
-                                           current_testcase->values_len);
-    tmp_proof     = (unsigned char*)malloc(sizeof(unsigned char) *
-                                       current_testcase->testcase_len);
-    tmp_opt_proof = (unsigned char*)malloc(sizeof(unsigned char) *
-                                           current_testcase->testcase_len);
-
-    ast_data_init(&ast_data);
+    init_global_context(current_testcase->values_len);
 
     fctx->univocally_defined_inputs = (void*)malloc(sizeof(set__ulong));
     set__ulong* univocally_defined_inputs =
@@ -973,20 +1006,29 @@ void z3fuzz_init(fuzzy_ctx_t* fctx, Z3_context ctx, char* seed_filename,
     set__ulong* processed_constraints =
         (set__ulong*)fctx->processed_constraints;
     set_init__ulong(processed_constraints, index_hash, index_equals);
-
-    gd_init();
 }
 
-void z3fuzz_free(fuzzy_ctx_t* ctx)
+fuzzy_ctx_t* z3fuzz_create(Z3_context ctx, char* seed_filename,
+                           unsigned timeout)
 {
+    fuzzy_ctx_t* res = (fuzzy_ctx_t*)malloc(sizeof(fuzzy_ctx_t));
+    ASSERT_OR_ABORT(res, "z3fuzz_create(): failed malloc");
+
+    z3fuzz_init(res, ctx, seed_filename, NULL, NULL, timeout);
+    return res;
+}
+
+__attribute__((destructor)) static void release_global_context()
+{
+    if (!g_global_ctx_initialized)
+        return;
+    g_global_ctx_initialized = 0;
+
     close(dev_urandom_fd);
 
-    free(ctx->timer);
+    if (log_query_stats)
+        fclose(query_log);
 
-#ifdef LOG_QUERY_STATS
-    fclose(query_log);
-#endif
-    free_testcase_list(ctx->z3_ctx, &ctx->testcases);
     free(tmp_input);
     tmp_input = NULL;
     free(tmp_opt_input);
@@ -995,6 +1037,15 @@ void z3fuzz_free(fuzzy_ctx_t* ctx)
     tmp_proof = NULL;
     free(tmp_opt_proof);
     tmp_opt_proof = NULL;
+
+    ast_data_free(&ast_data);
+    gd_free();
+}
+
+void z3fuzz_free(fuzzy_ctx_t* ctx)
+{
+    free(ctx->timer);
+    free_testcase_list(ctx->z3_ctx, &ctx->testcases);
 
     unsigned int i;
     for (i = 0; i < ctx->n_symbols; ++i)
@@ -1008,8 +1059,6 @@ void z3fuzz_free(fuzzy_ctx_t* ctx)
     free(ctx->assignments);
     ctx->assignments      = NULL;
     ctx->size_assignments = 0;
-
-    ast_data_free(&ast_data);
 
     dict__ast_info_ptr* ast_info_cache =
         (dict__ast_info_ptr*)ctx->ast_info_cache;
@@ -1039,13 +1088,11 @@ void z3fuzz_free(fuzzy_ctx_t* ctx)
         (dict__da__interval_group_ptr*)ctx->index_to_group_intervals;
     dict_free__da__interval_group_ptr(index_to_group_intervals);
     free(ctx->index_to_group_intervals);
-
-    gd_free();
 }
 
 void z3fuzz_print_expr(fuzzy_ctx_t* ctx, Z3_ast e)
 {
-    Z3FUZZ_LOG("expr:\n%s\n", Z3_ast_to_string(ctx->z3_ctx, e));
+    Z3FUZZ_LOG("expr:\n%s\n[end expr]\n", Z3_ast_to_string(ctx->z3_ctx, e));
 }
 
 static inline void __vals_char_to_long(unsigned char* in_vals,
@@ -6907,7 +6954,7 @@ static int __query_check_light(fuzzy_ctx_t* ctx, Z3_ast query,
     }
 
     if (log_query_stats)
-        fprintf(query_log, "\n%lu;%lu;%lu;%s;%u;%u",
+        fprintf(query_log, "\n%p;%lu;%lu;%lu;%s;%u;%u", ctx,
                 ast_data.inputs->query_size, ast_data.inputs->indexes.size,
                 ast_data.inputs->index_groups.size,
                 ast_data.is_input_to_state ? "true" : "false",
@@ -7616,17 +7663,7 @@ void z3fuzz_add_assignment(fuzzy_ctx_t* ctx, int idx, Z3_ast assignment_value)
     }
 
     if (old_len < ctx->testcases.data[0].values_len) {
-        tmp_input = (unsigned long*)realloc(
-            tmp_input,
-            sizeof(unsigned long) * ctx->testcases.data[0].values_len);
-        ASSERT_OR_ABORT(tmp_input != 0,
-                        "z3fuzz_add_assignment() tmp_input - failed realloc");
-        tmp_opt_input = (unsigned long*)realloc(
-            tmp_opt_input,
-            sizeof(unsigned long) * ctx->testcases.data[0].values_len);
-        ASSERT_OR_ABORT(
-            tmp_opt_input != 0,
-            "z3fuzz_add_assignment() tmp_opt_input - failed realloc");
+        init_global_context(ctx->testcases.data[0].values_len);
     }
 }
 
@@ -7693,6 +7730,8 @@ unsigned long z3fuzz_maximize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_maximize,
                               unsigned char const** out_values,
                               unsigned long*        out_len)
 {
+    Z3_inc_ref(ctx->z3_ctx, pi);
+
     memcpy(tmp_input, ctx->testcases.data[0].values,
            ctx->testcases.data[0].values_len * sizeof(unsigned long));
 
@@ -7766,6 +7805,7 @@ unsigned long z3fuzz_maximize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_maximize,
     *out_values = tmp_proof;
 
 OUT:
+    Z3_dec_ref(ctx->z3_ctx, pi);
     Z3_dec_ref(ctx->z3_ctx, to_maximize);
     Z3_dec_ref(ctx->z3_ctx, original_to_maximize);
     __gd_free_eval(&ew);
@@ -7778,6 +7818,7 @@ unsigned long z3fuzz_minimize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_minimize,
                               unsigned char const** out_values,
                               unsigned long*        out_len)
 {
+    Z3_inc_ref(ctx->z3_ctx, pi);
     memcpy(tmp_input, ctx->testcases.data[0].values,
            ctx->testcases.data[0].values_len * sizeof(unsigned long));
 
@@ -7837,6 +7878,7 @@ unsigned long z3fuzz_minimize(fuzzy_ctx_t* ctx, Z3_ast pi, Z3_ast to_minimize,
     __vals_long_to_char(tmp_input, tmp_proof, *out_len);
     *out_values = tmp_proof;
 OUT:
+    Z3_dec_ref(ctx->z3_ctx, pi);
     Z3_dec_ref(ctx->z3_ctx, to_minimize);
     Z3_dec_ref(ctx->z3_ctx, to_minimize_original);
     __gd_free_eval(&ew);
@@ -7860,6 +7902,16 @@ void z3fuzz_find_all_values(fuzzy_ctx_t* ctx, Z3_ast expr, Z3_ast pi,
     set__ulong output_vals;
     set_init__ulong(&output_vals, index_hash, index_equals);
 
+    // Perform the first evaluation in the seed
+    __vals_long_to_char(tmp_input, tmp_proof, current_testcase->testcase_len);
+    unsigned long value_in_seed = ctx->model_eval(
+        ctx->z3_ctx, expr, tmp_input, current_testcase->value_sizes,
+        current_testcase->values_len, NULL);
+    fuzzy_findall_res_t res_seed_call =
+        callback(tmp_proof, current_testcase->testcase_len, value_in_seed);
+    if (res_seed_call == Z3FUZZ_STOP)
+        goto END;
+
     index_group_t* g;
 
     set_reset_iter__index_group_t(&ast_data.inputs->index_groups, 1);
@@ -7880,6 +7932,26 @@ void z3fuzz_find_all_values(fuzzy_ctx_t* ctx, Z3_ast expr, Z3_ast pi,
             uint64_t                val;
             while (wi_iter_get_next(&it, &val)) {
                 set_tmp_input_group_to_value(g, val);
+                if (ctx->model_eval(ctx->z3_ctx, pi, tmp_input,
+                                    current_testcase->value_sizes,
+                                    current_testcase->values_len, NULL)) {
+                    __vals_long_to_char(tmp_input, tmp_proof,
+                                        current_testcase->testcase_len);
+                    unsigned long expr_val =
+                        ctx->model_eval(ctx->z3_ctx, expr, tmp_input,
+                                        current_testcase->value_sizes,
+                                        current_testcase->values_len, NULL);
+                    fuzzy_findall_res_t res = callback(
+                        tmp_proof, current_testcase->testcase_len, expr_val);
+                    if (res == Z3FUZZ_STOP)
+                        goto END;
+                }
+            }
+        } else if (g->n == 1) {
+            // it is a single byte, brute-force it
+            uint64_t i;
+            for (i = 0; i < 256; ++i) {
+                set_tmp_input_group_to_value(g, i);
                 if (ctx->model_eval(ctx->z3_ctx, pi, tmp_input,
                                     current_testcase->value_sizes,
                                     current_testcase->values_len, NULL)) {
@@ -8062,6 +8134,7 @@ void z3fuzz_find_all_values_gd(
                                     unsigned long        val))
 {
     Z3_inc_ref(ctx->z3_ctx, expr);
+    Z3_inc_ref(ctx->z3_ctx, pi);
 
     testcase_t* current_testcase = &ctx->testcases.data[0];
     Z3_ast      expr_original    = expr;
@@ -8151,6 +8224,7 @@ void z3fuzz_find_all_values_gd(
 OUT_1:
     set_free__digest_t(&digest_set, NULL);
 OUT_2:
+    Z3_dec_ref(ctx->z3_ctx, pi);
     Z3_dec_ref(ctx->z3_ctx, expr);
     Z3_dec_ref(ctx->z3_ctx, expr_original);
     __gd_free_eval(&ew);

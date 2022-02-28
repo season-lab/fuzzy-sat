@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.7)
 
+# Strip the binary in release mode
 set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -s")
 
 set(z3fuzzy_src
@@ -22,3 +23,5 @@ target_link_libraries (Z3Fuzzy_shared LINK_PUBLIC libz3)
 
 set_target_properties(Z3Fuzzy_static PROPERTIES OUTPUT_NAME Z3Fuzzy)
 set_target_properties(Z3Fuzzy_shared PROPERTIES OUTPUT_NAME Z3Fuzzy)
+
+install(FILES z3-fuzzy.h DESTINATION include)

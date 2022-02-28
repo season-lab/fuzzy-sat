@@ -67,3 +67,11 @@ jobs:
           name: Job memory usage
           command: cat /sys/fs/cgroup/memory/memory.max_usage_in_bytes
           when: always
+
+workflows:
+  basic-workflow:
+    jobs:
+      - build:
+          filters:
+            branches:
+              ignore: dev
