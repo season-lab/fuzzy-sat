@@ -1,3 +1,5 @@
+#include <stdio.h>
+
 static inline void print_index_queue(ast_info_ptr data)
 {
     index_group_t* group;
