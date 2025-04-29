@@ -1,4 +1,5 @@
 #include <fts.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include "testcase-list.h"
 
